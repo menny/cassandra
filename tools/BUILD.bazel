@@ -1,11 +1,20 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "tools",
-    srcs = ["registry.go"],
+    srcs = [
+        "local_tools.go",
+        "registry.go",
+    ],
     importpath = "github.com/menny/cassandra/tools",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_tmc_langchaingo//llms",
     ],
+)
+
+go_test(
+    name = "tools_test",
+    srcs = ["local_tools_test.go"],
+    embed = [":tools"],
 )
