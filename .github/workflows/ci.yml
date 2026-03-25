@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  bazel:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Build Codebase
+        run: bazel build //...
+
+      - name: Run Tests
+        run: bazel test //... --test_output=errors
+
+      - name: Enforce Formatting
+        run: |
+          bazel run //:format
+          if [[ $(git status --porcelain) ]]; then echo "**** run 'bazel run //:format' to fix formatting errors:\n$(git status)\n$(git diff)"; exit 1; fi
