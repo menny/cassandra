@@ -1,15 +1,10 @@
-load("@aspect_rules_lint//format:defs.bzl", "format_multirun", "format_test")
+load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@gazelle//:def.bzl", "gazelle")
 load("@rules_go//go:def.bzl", "go_binary", "go_library")
 
 format_multirun(
     name = "format",
     go = "@aspect_rules_lint//format:gofumpt",
-)
-
-format_test(
-    name = "format_test",
-    srcs = ["main.go"],
 )
 
 # gazelle:prefix github.com/menny/cassandra
