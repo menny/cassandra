@@ -55,7 +55,7 @@ func main() {
 	agent := core.NewAgent(client, registry)
 
 	fmt.Printf("Starting AI Review using model: %s\n", modelName)
-	
+
 	// Create request
 	requestText := "Review the provided diff changes for issues." // Simplified
 	result, err := agent.RunReview(ctx, requestText)

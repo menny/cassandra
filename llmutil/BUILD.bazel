@@ -1,4 +1,10 @@
 load("@rules_go//go:def.bzl", "go_library")
+load("@aspect_rules_lint//format:defs.bzl", "format_test")
+
+format_test(
+    name = "format_test",
+    srcs = ["client.go"],
+)
 
 go_library(
     name = "llmutil",

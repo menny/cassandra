@@ -8,6 +8,12 @@
   - *Note:* Do not upgrade to Bazel 9 without verifying `rules_go` compatibility, as recent Bazel releases removed Xcode configuration targets required by the legacy CGo pipeline on macOS.
 - **LLM Abstraction**: We utilize [`langchaingo`](https://github.com/tmc/langchaingo) for LLM interactions.
 
+## Formatting & Linting
+
+This project uses `aspect_rules_lint` (v1.0.8) to integrate standard Go tooling directly into the Bazel graph:
+- **Formatter (`gofumpt`)**: You MUST ensure any code generated is properly formatted. Run `bazel run //:format` from the root of the workspace to auto-format all go files before committing. `format_test` targets are also present in `BUILD.bazel` files.
+- **Linter (`golangci-lint`)**: A `.golangci.yml` is maintained at the root. You MUST rely exclusively on `bazel run` or `bazel test //...` to invoke linting and formatting natively; do not assume the presence of external CLI wrappers like `aspect`.
+
 ## Architecture Reference
 
 Before introducing major changes or restructuring the review loop, please read the **[DESIGN.md](file:///Users/mennyevendanan/dev/menny/cassandra/DESIGN.md)** document. It covers:
