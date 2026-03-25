@@ -1,4 +1,4 @@
-module github.com/mennyevendanan/cassandra
+module github.com/menny/cassandra
 
 go 1.25.0
 

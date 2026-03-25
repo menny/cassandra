@@ -7,9 +7,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/mennyevendanan/cassandra/core"
-	"github.com/mennyevendanan/cassandra/llmutil"
-	"github.com/mennyevendanan/cassandra/tools"
+	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/llmutil"
+	"github.com/menny/cassandra/tools"
 )
 
 func main() {

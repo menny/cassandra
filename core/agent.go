@@ -3,7 +3,7 @@ package core
 import (
 	"context"
 
-	"github.com/mennyevendanan/cassandra/tools"
+	"github.com/menny/cassandra/tools"
 	"github.com/tmc/langchaingo/llms"
 )
 
