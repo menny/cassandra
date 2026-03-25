@@ -11,8 +11,8 @@
 ## Formatting & Linting
 
 This project uses `aspect_rules_lint` (v1.0.8) to integrate standard Go tooling directly into the Bazel graph:
-- **Formatter (`gofumpt`)**: You MUST ensure any code generated is properly formatted. Run `bazel run //:format` from the root of the workspace to auto-format all go files before committing. `format_test` targets are also present in `BUILD.bazel` files.
-- **Linter (`golangci-lint`)**: A `.golangci.yml` is maintained at the root. You MUST rely exclusively on `bazel run` or `bazel test //...` to invoke linting and formatting natively; do not assume the presence of external CLI wrappers like `aspect`.
+- **Formatter (`gofumpt`)**: You MUST ensure any code generated is properly formatted. Run `bazel run //:format` from the root of the workspace to auto-format all go files before committing.
+- **Linter (`golangci-lint`)**: A `.golangci.yml` is maintained at the root. You MUST rely exclusively on the hermetic Bazel Go toolchain to run the linter natively by executing: `bazel run @rules_go//go -- run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run ./...`. Do not assume the presence of external CLI wrappers like `aspect` or `golangci-lint` on the host machine.
 
 ## Architecture Reference
 
