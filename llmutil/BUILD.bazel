@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "llmutil",
+    srcs = ["client.go"],
+    importpath = "github.com/mennyevendanan/cassandra/llmutil",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_tmc_langchaingo//llms",
+        "@com_github_tmc_langchaingo//llms/anthropic",
+        "@com_github_tmc_langchaingo//llms/googleai",
+    ],
+)

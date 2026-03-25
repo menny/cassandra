@@ -1,0 +1,11 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "tools",
+    srcs = ["registry.go"],
+    importpath = "github.com/mennyevendanan/cassandra/tools",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_tmc_langchaingo//llms",
+    ],
+)

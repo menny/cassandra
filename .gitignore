@@ -1,0 +1,25 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+main
+ai-review-agent
+
+# Bazel
+bazel-*
+bazel-bin
+bazel-out
+bazel-testlogs
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+*.swp

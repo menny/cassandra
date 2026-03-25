@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "core",
+    srcs = ["agent.go"],
+    importpath = "github.com/mennyevendanan/cassandra/core",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tools",
+        "@com_github_tmc_langchaingo//llms",
+    ],
+)

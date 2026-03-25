@@ -1,0 +1,23 @@
+load("@gazelle//:def.bzl", "gazelle")
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+# gazelle:prefix github.com/mennyevendanan/cassandra
+gazelle(name = "gazelle")
+
+go_library(
+    name = "cassandra_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/mennyevendanan/cassandra",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//core",
+        "//llmutil",
+        "//tools",
+    ],
+)
+
+go_binary(
+    name = "ai-review-agent",
+    embed = [":cassandra_lib"],
+    visibility = ["//visibility:public"],
+)
