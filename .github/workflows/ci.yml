@@ -26,6 +26,9 @@ jobs:
       - name: Build Codebase
         run: bazel build //...
 
+      - name: Run Linter
+        run: bazel run @rules_go//go -- run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run ./...
+
       - name: Run Tests
         run: bazel test //... --test_output=errors
 
