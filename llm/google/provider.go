@@ -26,12 +26,6 @@ func New(ctx context.Context, apiKey, modelName string) (*Provider, error) {
 	return &Provider{client: c, modelName: modelName}, nil
 }
 
-// newWithClient creates a Provider from a pre-configured *genai.Client.
-// Intended for testing only.
-func newWithClient(client *genai.Client, modelName string) *Provider {
-	return &Provider{client: client, modelName: modelName}
-}
-
 // GenerateContent sends messages to the Gemini API and returns a normalised
 // llm.Response.
 func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
@@ -191,10 +185,12 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 			result.Text += part.Text
 		case part.FunctionCall != nil:
 			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			// Gemini does not provide a stable per-call ID. Append the
+			// zero-based index so that two calls to the same tool in one
+			// turn produce distinct IDs (e.g. "read_file_0", "read_file_1").
+			id := fmt.Sprintf("%s_%d", part.FunctionCall.Name, len(result.ToolCalls))
 			result.ToolCalls = append(result.ToolCalls, llm.ToolCall{
-				// Gemini does not provide a stable call ID in function calls;
-				// use the function name as a fallback identifier.
-				ID:        part.FunctionCall.Name,
+				ID:        id,
 				Name:      part.FunctionCall.Name,
 				Arguments: string(argsJSON),
 			})

@@ -85,6 +85,9 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 					},
 				})
 			}
+			if len(parts) == 0 {
+				continue
+			}
 			params = append(params, anthropicsdk.NewAssistantMessage(parts...))
 
 		case llm.RoleTool:
@@ -104,12 +107,17 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 	out := make([]anthropicsdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
+		schema := anthropicsdk.ToolInputSchemaParam{
+			Properties: t.Parameters["properties"],
+		}
+		// Forward required field so the model knows which parameters are mandatory.
+		if req, ok := t.Parameters["required"].([]string); ok {
+			schema.Required = req
+		}
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,
 			Description: param.NewOpt(t.Description),
-			InputSchema: anthropicsdk.ToolInputSchemaParam{
-				Properties: t.Parameters["properties"],
-			},
+			InputSchema: schema,
 		}
 		out = append(out, anthropicsdk.ToolUnionParam{OfTool: &tp})
 	}

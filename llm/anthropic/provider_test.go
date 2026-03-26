@@ -52,6 +52,36 @@ func TestToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
 	assert.NotNil(t, params[0].Content[0].OfToolUse, "expected OfToolUse to be set")
 }
 
+func TestToAnthropicMessages_AssistantWithTextAndToolCalls(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role: llm.RoleAssistant,
+			Text: "I'll read that file for you.",
+			ToolCalls: []llm.ToolCall{
+				{ID: "tc1", Name: "read_file", Arguments: `{"file_path":"foo.go"}`},
+			},
+		},
+	}
+	_, params := toAnthropicMessages(msgs)
+	require.Len(t, params, 1)
+	assert.Equal(t, anthropicsdk.MessageParamRoleAssistant, params[0].Role)
+	// Expect two parts: text block first, then tool use block.
+	require.Len(t, params[0].Content, 2)
+	assert.NotNil(t, params[0].Content[0].OfText, "first part should be text")
+	assert.NotNil(t, params[0].Content[1].OfToolUse, "second part should be tool use")
+}
+
+func TestToAnthropicMessages_AssistantEmpty(t *testing.T) {
+	// An assistant message with neither Text nor ToolCalls should be silently skipped.
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Text: "hello"},
+		{Role: llm.RoleAssistant}, // empty
+		{Role: llm.RoleUser, Text: "world"},
+	}
+	_, params := toAnthropicMessages(msgs)
+	assert.Len(t, params, 2, "empty assistant message should be dropped")
+}
+
 func TestToAnthropicMessages_ToolResults(t *testing.T) {
 	msgs := []llm.Message{
 		{

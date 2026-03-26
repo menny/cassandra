@@ -50,7 +50,8 @@ type ToolDef struct {
 }
 
 // Response is what the model returns from a single GenerateContent call.
-// Exactly one of Text or ToolCalls will be non-empty.
+// At least one of Text or ToolCalls will be non-empty; providers that support
+// mixed streaming turns may populate both simultaneously.
 type Response struct {
 	Text      string     // set when the model produced a final answer
 	ToolCalls []ToolCall // set when the model wants to invoke tools

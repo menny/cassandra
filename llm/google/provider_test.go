@@ -156,6 +156,7 @@ func TestParseGenaiResponse_ToolCall(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Text)
 	require.Len(t, result.ToolCalls, 1)
+	assert.Equal(t, "read_file_0", result.ToolCalls[0].ID)
 	assert.Equal(t, "read_file", result.ToolCalls[0].Name)
 	assert.Contains(t, result.ToolCalls[0].Arguments, "main.go")
 }
