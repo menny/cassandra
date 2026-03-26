@@ -42,7 +42,3 @@ func RegisterLocalTools(r *Registry) {
 	registerLocalReadFile(r)
 	registerLocalGlobFiles(r)
 }
-
-func RegisterPRTools(r *Registry, prNumber int) {
-	// TODO: Register tools for remote PRs (e.g. fetching directly from GH API)
-}

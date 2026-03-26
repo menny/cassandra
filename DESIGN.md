@@ -7,7 +7,7 @@ This document details the architecture, technical decisions, and layout of the C
 The system is designed as a CLI-driven, autonomous AI worker. It acts essentially as a ReAct (Reasoning and Acting) loop, leveraging the Function Calling (Tool Use) capabilities of modern LLMs to explore codebases locally or remotely before finalizing its code review.
 
 ### 1. CLI Entrypoint (`main.go`)
-- Parses user intent. Supports either reviewing local git changes (`--diff`) or remote GitHub Pull Requests (`--pr`).
+- Parses user intent. Supports reviewing local git changes (`--diff`).
 - Dynamically accepts `--provider` (`google` or `anthropic`), `--model`, and `--provider-api-key` to abstract away the underlying LLM dependency.
 
 ### 2. LLM Abstraction (`llmutil/client.go`)
@@ -16,7 +16,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 
 ### 3. Tool Registry (`tools/registry.go` & `tools/local_tools.go`)
 - Acts as the available toolkit for the LLM. 
-- Depending on the execution mode (local diff vs GitHub PR), the registry exposes different underlying tool implementations:
+- Depending on the execution mode, the registry exposes underlying tool implementations:
   - `read_file`: Safely reads the contents of a requested file up to a character limit.
   - `glob_files`: Lists repository files matching a pattern to help the LLM discover where definitions might live.
 
@@ -41,3 +41,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 
 4. **Structured Feedback Extraction**
    - Code reviews in this system follow a `Do / Try / Consider` framework. Rather than forcing the primary reasoning process to output JSON directly (which can degrade reasoning quality), the system allows the first "Agent" pass to output free-form markdown, followed by a secondary extraction LLM call dedicated entirely to formatting that markdown into structured JSON boundaries.
+
+## Future work
+
+- **Pull Request Support**: Re-introduce `--pr` support for reviewing remote GitHub Pull Requests. This will require a set of tools mirroring the local tools but drawing input from the PR's (remote) branch
