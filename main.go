@@ -90,8 +90,6 @@ func main() {
 
 	agent := core.NewAgent(client, registry)
 
-	fmt.Printf("Starting AI Review using model: %s\n", modelName)
-
 	var requestText string
 	if diffBranch != "" || flag.Lookup("diff").Changed {
 		diffOutput, err := tools.FetchGitDiff(diffBranch)
@@ -103,7 +101,6 @@ func main() {
 		requestText = "Review the provided changes for issues."
 	}
 
-	fmt.Printf("PROMPT: %s\n", requestText)
 	result, err := agent.RunReview(ctx, requestText)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
