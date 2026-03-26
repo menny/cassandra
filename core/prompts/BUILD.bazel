@@ -1,0 +1,19 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "prompts",
+    srcs = ["prompts.go"],
+    embedsrcs = [
+        "code_review_main_guidelines.md",
+        "reviewer_prompt.md",
+    ],
+    importpath = "github.com/menny/cassandra/core/prompts",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "prompts_test",
+    srcs = ["prompts_test.go"],
+    embed = [":prompts"],
+    deps = ["@com_github_stretchr_testify//require"],
+)
