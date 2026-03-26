@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	flag "github.com/spf13/pflag"
+	"google.golang.org/api/googleapi"
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/prompts"
@@ -26,9 +28,11 @@ func main() {
 	var providerAPIKey string
 	var workingDir string
 	var mainGuidelines string
+	var maxTokens int
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.IntVar(&maxTokens, "max-tokens", 4096, "Max tokens for the LLM response")
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
 
@@ -126,11 +130,21 @@ func main() {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}
 
-	result, err := agent.RunReview(ctx, systemPrompt, requestText, maxIterations)
+	result, err := agent.RunReview(ctx, systemPrompt, requestText, maxIterations, maxTokens)
 	if err != nil {
-		log.Fatalf("Review failed: %v", err)
+		log.Fatalf("Review failed: %s", detailedError(err))
 	}
 
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
+}
+
+// detailedError extracts the full response body from a *googleapi.Error so that
+// the API's detailed error message is visible rather than the truncated summary.
+func detailedError(err error) string {
+	var apiErr *googleapi.Error
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("%v\n  API body: %s", err, apiErr.Body)
+	}
+	return err.Error()
 }

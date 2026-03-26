@@ -98,7 +98,7 @@ func TestRunReview_DirectResponse(t *testing.T) {
 	lm := &mockLLM{responses: []*llms.ContentResponse{
 		textResponse("looks good"),
 	}}
-	got, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "sys", "request", 5)
+	got, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return wantResult, nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return "content", nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestRunReview_CapReached(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return "x", nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 2)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 2, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestRunReview_ToolError(t *testing.T) {
 	// bad_tool is not registered → HandleCall will return an error.
 	d := newMockDispatcher()
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

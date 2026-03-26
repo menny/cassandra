@@ -52,10 +52,15 @@ func NewAgent(llm llms.Model, registry ToolDispatcher, opts ...AgentOption) *Age
 // RunReview executes the ReAct loop.
 // maxIterations controls how many tool-call rounds are permitted before the
 // loop is forcibly terminated. Pass 0 to use the default cap.
-func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string, maxIterations int) (string, error) {
+// maxTokens limits the length of the LLM response.
+func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string, maxIterations, maxTokens int) (string, error) {
 	if maxIterations <= 0 {
 		maxIterations = absoluteMaxIter
 	}
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+
 
 	messages := []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
@@ -65,7 +70,8 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	langchainTools := a.registry.ToLangChainTools()
 
 	for iter := range maxIterations {
-		resp, err := a.llm.GenerateContent(ctx, messages, llms.WithTools(langchainTools))
+		fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
+		resp, err := a.llm.GenerateContent(ctx, messages, llms.WithTools(langchainTools), llms.WithMaxTokens(maxTokens))
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
 		}
@@ -78,7 +84,6 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 		// No tool calls → LLM has produced its final review.
 		if len(choice.ToolCalls) == 0 {
-			fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
 			return choice.Content, nil
 		}
 
@@ -146,10 +151,10 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, capMsg))
 	fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
 
-	resp, err := a.llm.GenerateContent(ctx, messages, llms.WithTools(langchainTools))
-	if err != nil {
-		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
-	}
+	resp, err := a.llm.GenerateContent(ctx, messages, llms.WithTools(langchainTools), llms.WithMaxTokens(maxTokens))
+		if err != nil {
+			return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
+		}
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("llm returned no choices on forced-final review")
 	}
