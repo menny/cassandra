@@ -70,15 +70,24 @@ func main() {
 	if prNumber != 0 {
 		tools.RegisterPRTools(registry, prNumber)
 	} else {
-		tools.RegisterLocalTools(registry, diffBranch)
+		tools.RegisterLocalTools(registry)
 	}
 
 	agent := core.NewAgent(client, registry)
 
 	fmt.Printf("Starting AI Review using model: %s\n", modelName)
 
-	// Create request
-	requestText := "Review the provided diff changes for issues." // Simplified
+	var requestText string
+	if diffBranch != "" || flag.Lookup("diff").Changed {
+		diffOutput, err := tools.FetchGitDiff(diffBranch)
+		if err != nil {
+			log.Fatalf("Failed to extract git diff: %v", err)
+		}
+		requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
+	} else {
+		requestText = "Review the provided changes for issues."
+	}
+
 	result, err := agent.RunReview(ctx, requestText)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
