@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "google",
+    srcs = ["provider.go"],
+    importpath = "github.com/menny/cassandra/llm/google",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//llm",
+        "@org_golang_google_genai//:genai",
+    ],
+)
+
+go_test(
+    name = "google_test",
+    srcs = ["provider_test.go"],
+    embed = [":google"],
+    deps = [
+        "//llm",
+        "@org_golang_google_genai//:genai",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

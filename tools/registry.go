@@ -3,13 +3,13 @@ package tools
 import (
 	"fmt"
 
-	"github.com/tmc/langchaingo/llms"
+	"github.com/menny/cassandra/llm"
 )
 
 type ToolHandler func(args map[string]any) (string, error)
 
 type Registry struct {
-	tools    []llms.Tool
+	tools    []llm.ToolDef
 	handlers map[string]ToolHandler
 }
 
@@ -19,15 +19,13 @@ func NewRegistry() *Registry {
 	}
 }
 
-func (r *Registry) ToLangChainTools() []llms.Tool {
+func (r *Registry) ToTools() []llm.ToolDef {
 	return r.tools
 }
 
-func (r *Registry) RegisterTool(def llms.Tool, handler ToolHandler) {
+func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
 	r.tools = append(r.tools, def)
-	if def.Function != nil {
-		r.handlers[def.Function.Name] = handler
-	}
+	r.handlers[def.Name] = handler
 }
 
 func (r *Registry) HandleCall(name string, args map[string]any) (string, error) {

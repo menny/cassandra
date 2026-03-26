@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "anthropic",
+    srcs = ["provider.go"],
+    importpath = "github.com/menny/cassandra/llm/anthropic",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//llm",
+        "@com_github_anthropics_anthropic_sdk_go//:anthropic-sdk-go",
+        "@com_github_anthropics_anthropic_sdk_go//option",
+        "@com_github_anthropics_anthropic_sdk_go//packages/param",
+    ],
+)
+
+go_test(
+    name = "anthropic_test",
+    srcs = ["provider_test.go"],
+    embed = [":anthropic"],
+    deps = [
+        "//llm",
+        "@com_github_anthropics_anthropic_sdk_go//:anthropic-sdk-go",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

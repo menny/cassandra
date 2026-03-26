@@ -11,7 +11,7 @@ import (
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/prompts"
-	"github.com/menny/cassandra/llmutil"
+	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
 )
 
@@ -91,7 +91,7 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize LLM Client
-	client, err := llmutil.NewClient(ctx, provider, modelName, providerAPIKey)
+	client, err := factory.New(ctx, provider, modelName, providerAPIKey)
 	if err != nil {
 		log.Fatalf("Failed to initialize LLM: %v", err)
 	}

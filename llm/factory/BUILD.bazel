@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "factory",
+    srcs = ["factory.go"],
+    importpath = "github.com/menny/cassandra/llm/factory",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//llm",
+        "//llm/anthropic",
+        "//llm/google",
+    ],
+)

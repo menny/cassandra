@@ -10,9 +10,11 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - Parses user intent. Supports reviewing local git changes (`--diff`).
 - Dynamically accepts `--provider` (`google` or `anthropic`), `--model`, and `--provider-api-key` to abstract away the underlying LLM dependency.
 
-### 2. LLM Abstraction (`llmutil/client.go`)
-- Wraps the [`langchaingo`](https://github.com/tmc/langchaingo) framework.
-- The system depends heavily on `langchaingo`'s `llms.Model` and `llms.Tool` interfaces. This abstraction guarantees we do not need to rewrite the ReAct loop logic or tool serialization if we switch from Gemini to Claude (or add OpenAI in the future).
+### 2. LLM Abstraction (`llm/`)
+- Defines a provider-agnostic `llm.Model` interface and shared types (`Message`, `ToolDef`, `ToolCall`, `ToolResult`, `Response`) in `llm/llm.go`.
+- Provider implementations live in sub-packages (`llm/anthropic`, `llm/google`), each backed by its respective first-party SDK (`github.com/anthropics/anthropic-sdk-go`, `google.golang.org/genai`).
+- `llm/factory` is the single entry point for constructing a `Model`; no package outside `llm/factory` imports a provider sub-package directly.
+- This design guarantees the ReAct loop (`core/agent.go`) and tool registry (`tools/`) are completely decoupled from provider-specific types.
 
 ### 3. Tool Registry (`tools/registry.go` & `tools/local_tools.go`)
 - Acts as the available toolkit for the LLM. 
@@ -37,7 +39,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 
 3. **Bazel 8 with BzlMod**
    - The repository uses Bazel `8.6.0` alongside standard `go.mod` resolution (using Gazelle's `go_deps` extension).
-   - *Note on Bazel 9:* We intentionally stick to Bazel 8 at this time to avoid known incompatibilities between stable releases of `rules_go` and the removal of macOS `current_xcode_config` targets in Bazel 9. We also explicitly pin the internal Go SDK to `1.24.4` to satisfy `langchaingo`.
+   - *Note on Bazel 9:* We intentionally stick to Bazel 8 at this time to avoid known incompatibilities between stable releases of `rules_go` and the removal of macOS `current_xcode_config` targets in Bazel 9. The internal Go SDK is pinned to `1.24.4`.
 
 4. **Structured Feedback Extraction**
    - Code reviews in this system follow a `Do / Try / Consider` framework. Rather than forcing the primary reasoning process to output JSON directly (which can degrade reasoning quality), the system allows the first "Agent" pass to output free-form markdown, followed by a secondary extraction LLM call dedicated entirely to formatting that markdown into structured JSON boundaries.
@@ -51,3 +53,8 @@ All diagnostic and progress output (configuration summary, ReAct iteration progr
 - **Pull Request Support**: Re-introduce `--pr` support for reviewing remote GitHub Pull Requests. This will require a set of tools mirroring the local tools but drawing input from the PR's (remote) branch.
 
 - **Concurrent Tool Execution**: When the LLM responds with multiple tool calls in a single turn, those calls are currently executed sequentially. A future improvement is to fan them out concurrently using goroutines — each tool handler is already stateless and side-effect-free, so a `sync.WaitGroup`-based approach is straightforward. This will noticeably reduce wall-clock latency on large diffs where the LLM explores several files simultaneously.
+
+- **Structured Output Extraction**: The current system returns the final review as free-form markdown. A future enhancement is to add a second LLM pass that converts the markdown review into a structured JSON representation (e.g. a list of findings, each tagged by severity and category). The recommended approach is provider-specific:
+  - **Anthropic**: Define a single `submit_review` tool whose JSON Schema matches the desired output shape. Instruct the model to call it unconditionally in the final turn. The tool's `arguments` field carries the structured payload.
+  - **Google Gemini**: Set `GenerateContentConfig.ResponseMIMEType = "application/json"` and `ResponseSchema` to the target schema. The model returns JSON directly in the text content.
+  - The structured output call should be a separate, optional step invoked after `RunReview` returns, keeping the primary reasoning pass free-form (forcing JSON output early degrades reasoning quality). One proposed approach: a thin helper in a new `core/extract.go` that reuses the same `Model` without requiring any interface changes.

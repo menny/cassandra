@@ -2,11 +2,11 @@
 
 ## Repository Technical Details
 
-- **Language**: Go (specifically targeting `1.24.4+` to satisfy `langchaingo` requirements).
-- **Build System**: **Bazel 8.6.0** with **BzlMod**. 
-  - Standard `go.mod` and `go.sum` files are maintained, and Bazel resolves Go dependencies via Gazelle's `go_deps` extension in `MODULE.bazel`. 
+- **Language**: Go (targeting `1.24.4+`).
+- **Build System**: **Bazel 8.6.0** with **BzlMod**.
+  - Standard `go.mod` and `go.sum` files are maintained, and Bazel resolves Go dependencies via Gazelle's `go_deps` extension in `MODULE.bazel`.
   - *Note:* Do not upgrade to Bazel 9 without verifying `rules_go` compatibility, as recent Bazel releases removed Xcode configuration targets required by the legacy CGo pipeline on macOS.
-- **LLM Abstraction**: We utilize [`langchaingo`](https://github.com/tmc/langchaingo) for LLM interactions.
+- **LLM Abstraction**: Provider-agnostic `llm.Model` interface defined in `llm/llm.go`. Implementations in `llm/anthropic` (using `github.com/anthropics/anthropic-sdk-go`) and `llm/google` (using `google.golang.org/genai`). Construct via `llm/factory.New()`.
 
 ## Formatting & Linting
 
