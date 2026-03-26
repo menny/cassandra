@@ -25,18 +25,27 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		guidelines = string(content)
 	}
 
-	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + guidelines + "\n</code_review_guidelines>\n"
+	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + guidelines
 
-	personalPath := filepath.Join(workspaceRoot, "scratch", "personal.ai_code_review_guidelines.md")
+	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
+	if len(reviewersMDs) > 0 {
+		prompt += "\n\n# Reviewers Guidelines\n"
+		for path, content := range reviewersMDs {
+			prompt += fmt.Sprintf("\nDirectory: %s\n%s\n", path, content)
+		}
+	}
+	prompt += "\n</code_review_guidelines>\n"
+
+	personalPath := filepath.Join(workspaceRoot, "personal.ai_code_review_guidelines.md")
 	if personalBytes, err := os.ReadFile(personalPath); err == nil {
 		prompt += fmt.Sprintf("\n<personal_review_guidelines>\n%s\n</personal_review_guidelines>\n", string(personalBytes))
 	}
 
-	agentsMDs := findAgentsMDFiles(workspaceRoot, changedFiles)
+	agentsMDs := findRepoFiles(workspaceRoot, changedFiles, "AGENTS.md")
 	if len(agentsMDs) > 0 {
 		prompt += "\n<agents_guidelines>\n"
 		for path, content := range agentsMDs {
-			prompt += fmt.Sprintf("Path: %s\n%s\n\n", path, content)
+			prompt += fmt.Sprintf("Directory: %s\n%s\n\n", path, content)
 		}
 		prompt += "</agents_guidelines>\n"
 	}
@@ -44,10 +53,10 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	return prompt, nil
 }
 
-// findAgentsMDFiles walks up the directory tree for each changed file from the file's dir
-// up to the workspace root, looking for AGENTS.md files.
-// Returns a map of repo-relative path to file contents.
-func findAgentsMDFiles(workspaceRoot string, changedFiles []string) map[string]string {
+// findRepoFiles walks up the directory tree for each changed file from the file's dir
+// up to the workspace root, looking for the specified filename.
+// Returns a map of repo-relative folder path to file contents.
+func findRepoFiles(workspaceRoot string, changedFiles []string, filename string) map[string]string {
 	found := make(map[string]string)
 
 	for _, file := range changedFiles {
@@ -55,15 +64,18 @@ func findAgentsMDFiles(workspaceRoot string, changedFiles []string) map[string]s
 		dir := filepath.Dir(absPath)
 
 		for {
-			agentsPath := filepath.Join(dir, "AGENTS.md")
-			relKey, err := filepath.Rel(workspaceRoot, agentsPath)
+			targetPath := filepath.Join(dir, filename)
+			relDir, err := filepath.Rel(workspaceRoot, dir)
 			if err != nil {
-				relKey = agentsPath
+				relDir = dir
+			}
+			if relDir == "." {
+				relDir = "/"
 			}
 
-			if _, exists := found[relKey]; !exists {
-				if content, err := os.ReadFile(agentsPath); err == nil {
-					found[relKey] = string(content)
+			if _, exists := found[relDir]; !exists {
+				if content, err := os.ReadFile(targetPath); err == nil {
+					found[relDir] = string(content)
 				}
 			}
 
