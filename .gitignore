@@ -7,7 +7,10 @@
 *.test
 *.out
 go.work
+# Built binaries
 main
+cassandra
+cassandra.exe
 ai-review-agent
 
 # Bazel

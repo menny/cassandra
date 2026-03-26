@@ -28,5 +28,6 @@ go_binary(
     embed = [":cassandra_lib"],
     pure = "on",
     static = "on",
+    basename = "cassandra",
     visibility = ["//visibility:public"],
 )
