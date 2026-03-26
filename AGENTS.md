@@ -48,3 +48,7 @@ feat: add local diff parsing tool
 Introduce a new context tool via the registry to parse uncommitted git diffs.
 This allows the ReAct loop to analyze isolated lines of code changes before formulating the final review.
 ```
+
+NOTE:
+- Never push to a remote git repository without explicit request from the user.
+- Prefer working on a new branch for every new session - the branch name should be meaningful in the context of the approved plan
