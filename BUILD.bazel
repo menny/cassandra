@@ -19,13 +19,14 @@ go_library(
         "//core",
         "//llmutil",
         "//tools",
+        "@com_github_spf13_pflag//:pflag",
     ],
 )
 
 go_binary(
     name = "ai-review-agent",
     embed = [":cassandra_lib"],
-    visibility = ["//visibility:public"],
     pure = "on",
     static = "on",
+    visibility = ["//visibility:public"],
 )

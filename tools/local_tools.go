@@ -100,7 +100,6 @@ func registerLocalGlobFiles(r *Registry) {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return "", fmt.Errorf("glob_files failed: %w", err)
 		}

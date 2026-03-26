@@ -23,12 +23,12 @@ func main() {
 
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
-	
+
 	flag.IntVar(&prNumber, "pr", 0, "Review a GitHub PR by specifying its number")
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
-	
+
 	// pflag natively errors and exits on unknown flags unless configured otherwise
 	flag.Parse()
 

@@ -15,7 +15,7 @@ func TestLocalReadFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
 	content := "hello AI"
-	err := os.WriteFile(testFile, []byte(content), 0644)
+	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,8 +34,14 @@ func TestLocalGlobFiles(t *testing.T) {
 	registerLocalGlobFiles(r)
 
 	tmpDir := t.TempDir()
-	os.WriteFile(filepath.Join(tmpDir, "file1.go"), []byte(""), 0644)
-	os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte(""), 0644)
+	err := os.WriteFile(filepath.Join(tmpDir, "file1.go"), []byte(""), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = os.WriteFile(filepath.Join(tmpDir, "file2.txt"), []byte(""), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := r.HandleCall("glob_files", map[string]any{
 		"directory": tmpDir,
