@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	flag "github.com/spf13/pflag"
-	"google.golang.org/api/googleapi"
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/prompts"
@@ -127,19 +125,11 @@ func main() {
 
 	result, err := agent.RunReview(ctx, systemPrompt, requestText, maxIterations, maxTokens)
 	if err != nil {
-		log.Fatalf("Review failed: %s", detailedError(err))
+		log.Fatalf("Review failed: %v", err)
 	}
 
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 }
 
-// detailedError extracts the full response body from a *googleapi.Error so that
-// the API's detailed error message is visible rather than the truncated summary.
-func detailedError(err error) string {
-	var apiErr *googleapi.Error
-	if errors.As(err, &apiErr) {
-		return fmt.Sprintf("%v\n  API body: %s", err, apiErr.Body)
-	}
-	return err.Error()
-}
+
