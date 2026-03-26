@@ -73,7 +73,13 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		}
 		messages = append(messages, assistantMsg)
 
-		// Execute each tool and append its result.
+		// Execute all tool calls and collect results into ONE message.
+		// All ToolCallResponse parts must be in a single user-turn so the
+		// provider sees a strict model→user alternation (no consecutive user turns).
+		toolResultMsg := llms.MessageContent{
+			Role:  llms.ChatMessageTypeTool,
+			Parts: make([]llms.ContentPart, 0, len(choice.ToolCalls)),
+		}
 		for _, tc := range choice.ToolCalls {
 			name := tc.FunctionCall.Name
 			argsRaw := tc.FunctionCall.Arguments
@@ -96,17 +102,13 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 				result = fmt.Sprintf("error: %v", toolErr)
 			}
 
-			messages = append(messages, llms.MessageContent{
-				Role: llms.ChatMessageTypeTool,
-				Parts: []llms.ContentPart{
-					llms.ToolCallResponse{
-						ToolCallID: tc.ID,
-						Name:       name,
-						Content:    result,
-					},
-				},
+			toolResultMsg.Parts = append(toolResultMsg.Parts, llms.ToolCallResponse{
+				ToolCallID: tc.ID,
+				Name:       name,
+				Content:    result,
 			})
 		}
+		messages = append(messages, toolResultMsg)
 	}
 
 	// ── Cap reached ─────────────────────────────────────────────────────────
