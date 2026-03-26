@@ -131,5 +131,3 @@ func main() {
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 }
-
-
