@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"os"
+	"strings"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/llmutil"
@@ -19,20 +21,39 @@ func main() {
 	var provider string
 	var providerAPIKey string
 
-	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch")
+	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
+	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
+	
 	flag.IntVar(&prNumber, "pr", 0, "Review a GitHub PR by specifying its number")
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
+	
+	// pflag natively errors and exits on unknown flags unless configured otherwise
 	flag.Parse()
 
-	if diffBranch == "" && prNumber == 0 {
-		fmt.Println("Usage: ai-review-agent --diff [branch] OR --pr [number]")
+	// Error if there are dangling positional arguments
+	if len(flag.Args()) > 0 {
+		fmt.Printf("Error: unknown or positional arguments provided: %v\n", flag.Args())
 		os.Exit(1)
 	}
 
-	if provider == "" || providerAPIKey == "" || modelName == "" {
-		fmt.Println("Error: --provider, --model, and --provider-api-key are required.")
+	var missing []string
+	if diffBranch == "" && prNumber == 0 {
+		missing = append(missing, "either --diff or --pr")
+	}
+	if provider == "" {
+		missing = append(missing, "--provider")
+	}
+	if modelName == "" {
+		missing = append(missing, "--model")
+	}
+	if providerAPIKey == "" {
+		missing = append(missing, "--provider-api-key")
+	}
+
+	if len(missing) > 0 {
+		fmt.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
 		os.Exit(1)
 	}
 

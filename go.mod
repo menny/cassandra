@@ -2,7 +2,10 @@ module github.com/menny/cassandra
 
 go 1.24.4
 
-require github.com/tmc/langchaingo v0.1.14
+require (
+	github.com/spf13/pflag v1.0.6
+	github.com/tmc/langchaingo v0.1.14
+)
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
