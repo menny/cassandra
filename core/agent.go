@@ -155,6 +155,9 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	if err != nil {
 		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
 	}
+	if resp.Text == "" {
+		return "", fmt.Errorf("llm returned empty content on forced-final review")
+	}
 	return resp.Text, nil
 }
 

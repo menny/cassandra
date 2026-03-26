@@ -15,6 +15,8 @@ import (
 func New(ctx context.Context, provider, modelName, apiKey string) (llm.Model, error) {
 	switch llm.Provider(provider) {
 	case llm.ProviderAnthropic:
+		// Anthropic client is constructed synchronously; ctx is unused at
+		// construction time (the SDK dials lazily per request).
 		return anthropic.New(apiKey, modelName), nil
 	case llm.ProviderGoogle:
 		return google.New(ctx, apiKey, modelName)

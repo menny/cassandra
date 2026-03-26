@@ -22,7 +22,9 @@ type Provider struct {
 // New creates a Provider for the given model. Extra SDK options (e.g.
 // option.WithBaseURL) can be passed for testing or proxying.
 func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
-	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
+	allOpts := make([]option.RequestOption, 0, 1+len(opts))
+	allOpts = append(allOpts, option.WithAPIKey(apiKey))
+	allOpts = append(allOpts, opts...)
 	return &Provider{client: anthropicsdk.NewClient(allOpts...), modelName: modelName}
 }
 
@@ -95,6 +97,9 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 			params = append(params, anthropicsdk.NewAssistantMessage(parts...))
 
 		case llm.RoleTool:
+			if len(m.ToolResults) == 0 {
+				continue
+			}
 			// All tool results go into a single user message, each as a
 			// ToolResultBlockParam, to maintain strict role alternation.
 			var parts []anthropicsdk.ContentBlockParamUnion

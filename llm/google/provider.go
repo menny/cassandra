@@ -96,6 +96,9 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 			contents = append(contents, &genai.Content{Role: "model", Parts: parts})
 
 		case llm.RoleTool:
+			if len(m.ToolResults) == 0 {
+				continue
+			}
 			// Each tool result becomes a separate FunctionResponse part inside
 			// a single "user" content block.
 			// The Gemini SDK requires the response to be a map; we wrap the
@@ -191,10 +194,12 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 
 	result := &llm.Response{}
 	for _, part := range candidate.Content.Parts {
-		switch {
-		case part.Text != "":
+		// Both fields are checked independently: the Gemini API can return a
+		// part that carries both text and a function call in a mixed turn.
+		if part.Text != "" {
 			result.Text += part.Text
-		case part.FunctionCall != nil:
+		}
+		if part.FunctionCall != nil {
 			argsJSON, err := json.Marshal(part.FunctionCall.Args)
 			if err != nil {
 				return nil, fmt.Errorf("google: marshaling tool call %q args: %w", part.FunctionCall.Name, err)

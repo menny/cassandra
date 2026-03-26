@@ -87,6 +87,17 @@ func TestToAnthropicMessages_AssistantEmpty(t *testing.T) {
 	assert.Len(t, params, 2, "empty assistant message should be dropped")
 }
 
+func TestToAnthropicMessages_EmptyToolResults(t *testing.T) {
+	// A RoleTool message with no results should be silently dropped.
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Text: "hello"},
+		{Role: llm.RoleTool}, // empty ToolResults
+	}
+	_, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
+	assert.Len(t, params, 1, "empty tool-results message should be dropped")
+}
+
 func TestToAnthropicMessages_MalformedArguments(t *testing.T) {
 	msgs := []llm.Message{
 		{

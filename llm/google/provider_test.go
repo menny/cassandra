@@ -67,6 +67,17 @@ func TestToContents_AssistantEmpty(t *testing.T) {
 	assert.Len(t, contents, 1, "empty assistant message should be dropped")
 }
 
+func TestToContents_EmptyToolResults(t *testing.T) {
+	// A RoleTool message with no results should be silently dropped.
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Text: "hello"},
+		{Role: llm.RoleTool}, // empty ToolResults
+	}
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
+	assert.Len(t, contents, 1, "empty tool-results message should be dropped")
+}
+
 func TestToContents_MalformedArguments(t *testing.T) {
 	msgs := []llm.Message{
 		{
@@ -187,6 +198,34 @@ func TestParseGenaiResponse_ToolCall(t *testing.T) {
 	assert.Equal(t, "read_file_0", result.ToolCalls[0].ID)
 	assert.Equal(t, "read_file", result.ToolCalls[0].Name)
 	assert.Contains(t, result.ToolCalls[0].Arguments, "main.go")
+}
+
+func TestParseGenaiResponse_MixedTextAndToolCall(t *testing.T) {
+	// A single part may carry both text and a function call; both must be
+	// captured independently.
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				Content: &genai.Content{
+					Role: "model",
+					Parts: []*genai.Part{
+						{Text: "I'll read that file."},
+						{
+							FunctionCall: &genai.FunctionCall{
+								Name: "read_file",
+								Args: map[string]any{"file_path": "main.go"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	result, err := parseGenaiResponse(resp)
+	require.NoError(t, err)
+	assert.Equal(t, "I'll read that file.", result.Text)
+	require.Len(t, result.ToolCalls, 1)
+	assert.Equal(t, "read_file", result.ToolCalls[0].Name)
 }
 
 func TestParseGenaiResponse_NoCandidates(t *testing.T) {
