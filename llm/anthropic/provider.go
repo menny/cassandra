@@ -15,7 +15,7 @@ import (
 
 // Provider implements llm.Model backed by the Anthropic Messages API.
 type Provider struct {
-	client    *anthropicsdk.Client
+	client    anthropicsdk.Client
 	modelName string
 }
 
@@ -23,14 +23,16 @@ type Provider struct {
 // option.WithBaseURL) can be passed for testing or proxying.
 func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
 	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
-	c := anthropicsdk.NewClient(allOpts...)
-	return &Provider{client: &c, modelName: modelName}
+	return &Provider{client: anthropicsdk.NewClient(allOpts...), modelName: modelName}
 }
 
 // GenerateContent sends messages to the Anthropic Messages API and returns a
 // normalised llm.Response.
 func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
-	systemBlocks, msgParams := toAnthropicMessages(messages)
+	systemBlocks, msgParams, err := toAnthropicMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: building messages: %w", err)
+	}
 
 	sdkParams := anthropicsdk.MessageNewParams{
 		Model:     anthropicsdk.Model(p.modelName),
@@ -53,7 +55,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 
 // toAnthropicMessages splits a []llm.Message into a system-prompt block slice
 // and a user/assistant message slice, as required by the Anthropic API.
-func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam, []anthropicsdk.MessageParam) {
+func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam, []anthropicsdk.MessageParam, error) {
 	var system []anthropicsdk.TextBlockParam
 	var params []anthropicsdk.MessageParam
 
@@ -75,7 +77,9 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 			for _, tc := range m.ToolCalls {
 				var input any
 				if tc.Arguments != "" {
-					_ = json.Unmarshal([]byte(tc.Arguments), &input)
+					if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
+						return nil, nil, fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
+					}
 				}
 				parts = append(parts, anthropicsdk.ContentBlockParamUnion{
 					OfToolUse: &anthropicsdk.ToolUseBlockParam{
@@ -100,7 +104,7 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 			params = append(params, anthropicsdk.NewUserMessage(parts...))
 		}
 	}
-	return system, params
+	return system, params, nil
 }
 
 // toAnthropicTools converts []llm.ToolDef to the Anthropic SDK's ToolUnionParam slice.

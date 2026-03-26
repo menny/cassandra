@@ -149,7 +149,9 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: capMsg})
 	fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
 
-	resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
+	// Pass nil tools so the provider cannot issue further tool calls even if
+	// it ignores the cap instruction in the prompt.
+	resp, err := a.llm.GenerateContent(ctx, messages, nil, maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
 	}

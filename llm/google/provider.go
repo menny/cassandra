@@ -29,7 +29,10 @@ func New(ctx context.Context, apiKey, modelName string) (*Provider, error) {
 // GenerateContent sends messages to the Gemini API and returns a normalised
 // llm.Response.
 func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
-	contents, systemInstruction := toContents(messages)
+	contents, systemInstruction, err := toContents(messages)
+	if err != nil {
+		return nil, fmt.Errorf("google: building contents: %w", err)
+	}
 
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(maxTokens), //nolint:gosec // bounded by caller
@@ -50,7 +53,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 
 // toContents converts []llm.Message to the []*genai.Content slice expected by
 // the SDK, extracting any system-role message as a separate instruction.
-func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content) {
+func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error) {
 	var contents []*genai.Content
 	var system *genai.Content
 
@@ -75,7 +78,9 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content) {
 			for _, tc := range m.ToolCalls {
 				var args map[string]any
 				if tc.Arguments != "" {
-					_ = json.Unmarshal([]byte(tc.Arguments), &args)
+					if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+						return nil, nil, fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
+					}
 				}
 				parts = append(parts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{
@@ -84,11 +89,16 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content) {
 					},
 				})
 			}
+			if len(parts) == 0 {
+				continue
+			}
 			contents = append(contents, &genai.Content{Role: "model", Parts: parts})
 
 		case llm.RoleTool:
 			// Each tool result becomes a separate FunctionResponse part inside
 			// a single "user" content block.
+			// The Gemini SDK requires the response to be a map; we wrap the
+			// plain-text content under a "result" key by convention.
 			var parts []*genai.Part
 			for _, tr := range m.ToolResults {
 				parts = append(parts, &genai.Part{
@@ -101,7 +111,7 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content) {
 			contents = append(contents, &genai.Content{Role: "user", Parts: parts})
 		}
 	}
-	return contents, system
+	return contents, system, nil
 }
 
 // toGenaiTools converts []llm.ToolDef to the Gemini SDK []*genai.Tool slice.

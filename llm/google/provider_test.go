@@ -16,7 +16,8 @@ func TestToContents_System(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Text: "you are a reviewer"},
 	}
-	contents, system := toContents(msgs)
+	contents, system, err := toContents(msgs)
+	require.NoError(t, err)
 	assert.Empty(t, contents)
 	require.NotNil(t, system)
 	require.Len(t, system.Parts, 1)
@@ -27,7 +28,8 @@ func TestToContents_UserMessage(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleUser, Text: "review this diff"},
 	}
-	contents, system := toContents(msgs)
+	contents, system, err := toContents(msgs)
+	require.NoError(t, err)
 	assert.Nil(t, system)
 	require.Len(t, contents, 1)
 	assert.Equal(t, "user", contents[0].Role)
@@ -40,11 +42,12 @@ func TestToContents_AssistantWithToolCalls(t *testing.T) {
 		{
 			Role: llm.RoleAssistant,
 			ToolCalls: []llm.ToolCall{
-				{ID: "read_file", Name: "read_file", Arguments: `{"file_path":"foo.go"}`},
+				{ID: "read_file_0", Name: "read_file", Arguments: `{"file_path":"foo.go"}`},
 			},
 		},
 	}
-	contents, _ := toContents(msgs)
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
 	require.Len(t, contents, 1)
 	assert.Equal(t, "model", contents[0].Role)
 	require.Len(t, contents[0].Parts, 1)
@@ -53,17 +56,42 @@ func TestToContents_AssistantWithToolCalls(t *testing.T) {
 	assert.Equal(t, "foo.go", contents[0].Parts[0].FunctionCall.Args["file_path"])
 }
 
+func TestToContents_AssistantEmpty(t *testing.T) {
+	// An assistant message with neither Text nor ToolCalls should be silently skipped.
+	msgs := []llm.Message{
+		{Role: llm.RoleUser, Text: "hello"},
+		{Role: llm.RoleAssistant}, // empty
+	}
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
+	assert.Len(t, contents, 1, "empty assistant message should be dropped")
+}
+
+func TestToContents_MalformedArguments(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role: llm.RoleAssistant,
+			ToolCalls: []llm.ToolCall{
+				{ID: "read_file_0", Name: "read_file", Arguments: `not-json`},
+			},
+		},
+	}
+	_, _, err := toContents(msgs)
+	assert.Error(t, err, "malformed JSON arguments should surface as an error")
+}
+
 func TestToContents_ToolResults(t *testing.T) {
 	msgs := []llm.Message{
 		{
 			Role: llm.RoleTool,
 			ToolResults: []llm.ToolResult{
-				{ToolCallID: "read_file", Name: "read_file", Content: "package main"},
-				{ToolCallID: "glob_files", Name: "glob_files", Content: "a.go\nb.go"},
+				{ToolCallID: "read_file_0", Name: "read_file", Content: "package main"},
+				{ToolCallID: "glob_files_0", Name: "glob_files", Content: "a.go\nb.go"},
 			},
 		},
 	}
-	contents, _ := toContents(msgs)
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
 	require.Len(t, contents, 1, "all tool results go into a single content block")
 	assert.Equal(t, "user", contents[0].Role)
 	require.Len(t, contents[0].Parts, 2)

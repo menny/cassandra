@@ -17,7 +17,8 @@ func TestToAnthropicMessages_System(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Text: "you are a reviewer"},
 	}
-	system, params := toAnthropicMessages(msgs)
+	system, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, system, 1)
 	assert.Empty(t, params)
 }
@@ -28,7 +29,8 @@ func TestToAnthropicMessages_UserAndAssistant(t *testing.T) {
 		{Role: llm.RoleUser, Text: "hello"},
 		{Role: llm.RoleAssistant, Text: "hi there"},
 	}
-	system, params := toAnthropicMessages(msgs)
+	system, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	assert.Len(t, system, 1)
 	require.Len(t, params, 2)
 	assert.Equal(t, anthropicsdk.MessageParamRoleUser, params[0].Role)
@@ -44,7 +46,8 @@ func TestToAnthropicMessages_AssistantWithToolCalls(t *testing.T) {
 			},
 		},
 	}
-	_, params := toAnthropicMessages(msgs)
+	_, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, params, 1)
 	assert.Equal(t, anthropicsdk.MessageParamRoleAssistant, params[0].Role)
 	require.Len(t, params[0].Content, 1)
@@ -62,7 +65,8 @@ func TestToAnthropicMessages_AssistantWithTextAndToolCalls(t *testing.T) {
 			},
 		},
 	}
-	_, params := toAnthropicMessages(msgs)
+	_, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, params, 1)
 	assert.Equal(t, anthropicsdk.MessageParamRoleAssistant, params[0].Role)
 	// Expect two parts: text block first, then tool use block.
@@ -78,8 +82,22 @@ func TestToAnthropicMessages_AssistantEmpty(t *testing.T) {
 		{Role: llm.RoleAssistant}, // empty
 		{Role: llm.RoleUser, Text: "world"},
 	}
-	_, params := toAnthropicMessages(msgs)
+	_, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	assert.Len(t, params, 2, "empty assistant message should be dropped")
+}
+
+func TestToAnthropicMessages_MalformedArguments(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role: llm.RoleAssistant,
+			ToolCalls: []llm.ToolCall{
+				{ID: "tc1", Name: "read_file", Arguments: `not-json`},
+			},
+		},
+	}
+	_, _, err := toAnthropicMessages(msgs)
+	assert.Error(t, err, "malformed JSON arguments should surface as an error")
 }
 
 func TestToAnthropicMessages_ToolResults(t *testing.T) {
@@ -92,7 +110,8 @@ func TestToAnthropicMessages_ToolResults(t *testing.T) {
 			},
 		},
 	}
-	_, params := toAnthropicMessages(msgs)
+	_, params, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
 	require.Len(t, params, 1, "all tool results must be in a single user message")
 	assert.Equal(t, anthropicsdk.MessageParamRoleUser, params[0].Role)
 	assert.Len(t, params[0].Content, 2)
