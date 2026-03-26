@@ -72,6 +72,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	fmt.Println("=== AI Review Configuration ===")
+	fmt.Printf("  Working Directory: %s\n", targetDir)
+	if prNumber != 0 {
+		fmt.Printf("  Target PR: %d\n", prNumber)
+	} else {
+		fmt.Printf("  Target Branch: %s\n", diffBranch)
+	}
+	fmt.Printf("  LLM Provider: %s\n", provider)
+	fmt.Printf("  LLM Model: %s\n", modelName)
+	if mainGuidelines != "" {
+		fmt.Printf("  Main Guidelines: %s\n", mainGuidelines)
+	}
+	fmt.Println("  API Key: [PROVIDED]")
+	fmt.Println("===============================")
+
 	ctx := context.Background()
 
 	// Initialize LLM Client
