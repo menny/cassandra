@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/menny/cassandra/tools"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -16,22 +15,43 @@ const (
 	absoluteMaxIter      = 25
 )
 
+// ToolDispatcher is the minimal interface the Agent needs from a tool registry.
+// *tools.Registry satisfies this interface; tests can supply a lightweight stub.
+type ToolDispatcher interface {
+	ToLangChainTools() []llms.Tool
+	HandleCall(name string, args map[string]any) (string, error)
+}
+
+// AgentOption configures an Agent.
+type AgentOption func(*Agent)
+
+// WithStderr redirects diagnostic/progress output to w instead of os.Stderr.
+// Useful in tests to suppress noise (pass io.Discard).
+func WithStderr(w io.Writer) AgentOption {
+	return func(a *Agent) { a.stderr = w }
+}
+
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
 	llm      llms.Model
-	registry *tools.Registry
+	registry ToolDispatcher
 	stderr   io.Writer
 }
 
-// NewAgent creates an Agent. Progress and diagnostics are written to stderr;
-// the final review is returned as a string (caller routes it to stdout).
-func NewAgent(llm llms.Model, registry *tools.Registry) *Agent {
-	return &Agent{llm: llm, registry: registry, stderr: os.Stderr}
+// NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
+// default; override with WithStderr. The final review is returned as a string
+// (caller routes it to stdout).
+func NewAgent(llm llms.Model, registry ToolDispatcher, opts ...AgentOption) *Agent {
+	a := &Agent{llm: llm, registry: registry, stderr: os.Stderr}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // RunReview executes the ReAct loop.
-// maxIterations controls how many tool-call rounds are permitted before the loop
-// is forcibly terminated. Pass 0 to use the default cap.
+// maxIterations controls how many tool-call rounds are permitted before the
+// loop is forcibly terminated. Pass 0 to use the default cap.
 func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string, maxIterations int) (string, error) {
 	if maxIterations <= 0 {
 		maxIterations = absoluteMaxIter
