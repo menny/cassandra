@@ -120,7 +120,6 @@ func main() {
 	if maxIterations > absoluteMax || maxIterations == 0 {
 		maxIterations = absoluteMax
 	}
-	stderr.Printf("  Max ReAct iterations: %d\n", maxIterations)
 
 	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
 	if err != nil {
