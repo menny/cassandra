@@ -20,7 +20,9 @@ func main() {
 	var modelName string
 	var provider string
 	var providerAPIKey string
+	var workingDir string
 
+	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
 
@@ -36,6 +38,17 @@ func main() {
 	if len(flag.Args()) > 0 {
 		fmt.Printf("Error: unknown or positional arguments provided: %v\n", flag.Args())
 		os.Exit(1)
+	}
+
+	// Move to the intended working directory if executing via bazel or explicitly requested
+	targetDir := workingDir
+	if targetDir == "" {
+		targetDir = os.Getenv("BUILD_WORKSPACE_DIRECTORY")
+	}
+	if targetDir != "" {
+		if err := os.Chdir(targetDir); err != nil {
+			log.Fatalf("Failed to change directory to %s: %v", targetDir, err)
+		}
 	}
 
 	var missing []string
@@ -88,6 +101,7 @@ func main() {
 		requestText = "Review the provided changes for issues."
 	}
 
+	fmt.Printf("PROMPT: %s\n", requestText)
 	result, err := agent.RunReview(ctx, requestText)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)

@@ -2,7 +2,6 @@ package tools
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 )
 
@@ -27,13 +26,6 @@ func FetchGitDiff(diffBranch string) (string, error) {
 	}
 
 	cmd := exec.Command("git", cmdArgs...)
-
-	// When running via 'bazel run', the binary executes in a sandboxed runfiles tree.
-	// We must instruct git to run in the physical host workspace so it can see uncommitted changes.
-	if workspaceDir := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); workspaceDir != "" {
-		cmd.Dir = workspaceDir
-	}
-
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git diff failed: %v\nOutput: %s", err, string(out))
