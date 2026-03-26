@@ -10,6 +10,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llmutil"
 	"github.com/menny/cassandra/tools"
 )
@@ -108,17 +109,24 @@ func main() {
 	fmt.Printf("Starting AI Review using model: %s\n", modelName)
 
 	var requestText string
+	var changedFiles []string
 	if diffBranch != "" || flag.Lookup("diff").Changed {
-		diffOutput, err := tools.FetchGitDiff(diffBranch)
+		diffOutput, files, err := tools.FetchGitDiff(diffBranch)
 		if err != nil {
 			log.Fatalf("Failed to extract git diff: %v", err)
 		}
 		requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
+		changedFiles = files
 	} else {
 		requestText = "Review the provided changes for issues."
 	}
 
-	result, err := agent.RunReview(ctx, requestText)
+	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
+	if err != nil {
+		log.Fatalf("Failed to build system prompt: %v", err)
+	}
+
+	result, err := agent.RunReview(ctx, systemPrompt, requestText)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
 	}

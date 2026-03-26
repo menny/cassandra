@@ -17,8 +17,9 @@ func NewAgent(llm llms.Model, registry *tools.Registry) *Agent {
 }
 
 // RunReview executes the React loop
-func (a *Agent) RunReview(ctx context.Context, requestText string) (string, error) {
+func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string) (string, error) {
 	messages := []llms.MessageContent{
+		llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
 		llms.TextParts(llms.ChatMessageTypeHuman, requestText),
 	}
 

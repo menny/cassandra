@@ -17,6 +17,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//core",
+        "//core/prompts",
         "//llmutil",
         "//tools",
         "@com_github_spf13_pflag//:pflag",
