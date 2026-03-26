@@ -267,3 +267,26 @@ func TestRunReview_ToolError(t *testing.T) {
 		t.Error("expected error text in tool result content, got empty string")
 	}
 }
+
+func TestCalculateMaxIterations(t *testing.T) {
+	tests := []struct {
+		name         string
+		changedFiles int
+		want         int
+	}{
+		{"zero files", 0, AbsoluteMaxIter},
+		{"negative files", -1, AbsoluteMaxIter},
+		{"1 file", 1, 5},
+		{"2 files", 2, 10},
+		{"5 files", 5, 25},
+		{"6 files (capped)", 6, 25},
+		{"huge files (capped)", 100, 25},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CalculateMaxIterations(tt.changedFiles); got != tt.want {
+				t.Errorf("CalculateMaxIterations(%d) = %d, want %d", tt.changedFiles, got, tt.want)
+			}
+		})
+	}
+}

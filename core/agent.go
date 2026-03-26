@@ -11,9 +11,24 @@ import (
 )
 
 const (
-	maxIterationsPerFile = 5
-	absoluteMaxIter      = 25
+	// MaxIterationsPerFile is the recommended number of iterations per changed file.
+	MaxIterationsPerFile = 5
+	// AbsoluteMaxIter is the upper bound for the ReAct loop to prevent infinite recursion.
+	AbsoluteMaxIter = 25
 )
+
+// CalculateMaxIterations returns a sensible iteration cap based on the number
+// of changed files, bounded by AbsoluteMaxIter.
+func CalculateMaxIterations(changedFiles int) int {
+	if changedFiles <= 0 {
+		return AbsoluteMaxIter
+	}
+	max := MaxIterationsPerFile * changedFiles
+	if max > AbsoluteMaxIter {
+		return AbsoluteMaxIter
+	}
+	return max
+}
 
 // ToolDispatcher is the minimal interface the Agent needs from a tool registry.
 // *tools.Registry satisfies this interface; tests can supply a lightweight stub.
@@ -55,10 +70,10 @@ func NewAgent(llm llms.Model, registry ToolDispatcher, opts ...AgentOption) *Age
 // maxTokens limits the length of the LLM response.
 func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string, maxIterations, maxTokens int) (string, error) {
 	if maxIterations <= 0 {
-		maxIterations = absoluteMaxIter
+		maxIterations = AbsoluteMaxIter
 	}
 	if maxTokens <= 0 {
-		maxTokens = 4096
+		maxTokens = 8192
 	}
 
 	messages := []llms.MessageContent{

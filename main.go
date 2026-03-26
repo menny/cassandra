@@ -32,7 +32,7 @@ func main() {
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
-	flag.IntVar(&maxTokens, "max-tokens", 8196, "Max tokens for the LLM response")
+	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
 
@@ -117,13 +117,8 @@ func main() {
 		requestText = "Review the provided changes for issues."
 	}
 
-	// Compute max ReAct iterations: 5 per changed file, capped at 25.
-	const iterPerFile = 5
-	const absoluteMax = 25
-	maxIterations := len(changedFiles) * iterPerFile
-	if maxIterations > absoluteMax || maxIterations == 0 {
-		maxIterations = absoluteMax
-	}
+	// Compute max ReAct iterations based on changed files.
+	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
 	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
 	if err != nil {
