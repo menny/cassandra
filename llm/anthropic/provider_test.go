@@ -140,6 +140,28 @@ func TestToAnthropicTools(t *testing.T) {
 	assert.Equal(t, "Read a file", result[0].OfTool.Description.Value)
 }
 
+func TestToAnthropicTools_RequiredFromJSONDecode(t *testing.T) {
+	// encoding/json unmarshals arrays as []interface{}, not []string.
+	// Verify required is forwarded correctly in that case.
+	tools := []llm.ToolDef{
+		{
+			Name:        "read_file",
+			Description: "Read a file",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"file_path": map[string]any{"type": "string"},
+				},
+				"required": []interface{}{"file_path"},
+			},
+		},
+	}
+	result := toAnthropicTools(tools)
+	require.Len(t, result, 1)
+	require.NotNil(t, result[0].OfTool)
+	assert.Equal(t, []string{"file_path"}, result[0].OfTool.InputSchema.Required)
+}
+
 // ── parseAnthropicResponse ────────────────────────────────────────────────────
 
 func TestParseAnthropicResponse_TextOnly(t *testing.T) {
@@ -155,7 +177,8 @@ func TestParseAnthropicResponse_TextOnly(t *testing.T) {
 	var msg anthropicsdk.Message
 	require.NoError(t, json.Unmarshal([]byte(raw), &msg))
 
-	resp := parseAnthropicResponse(&msg)
+	resp, err := parseAnthropicResponse(&msg)
+	require.NoError(t, err)
 	assert.Equal(t, "looks good", resp.Text)
 	assert.Empty(t, resp.ToolCalls)
 }
@@ -178,7 +201,8 @@ func TestParseAnthropicResponse_ToolCalls(t *testing.T) {
 	var msg anthropicsdk.Message
 	require.NoError(t, json.Unmarshal([]byte(raw), &msg))
 
-	resp := parseAnthropicResponse(&msg)
+	resp, err := parseAnthropicResponse(&msg)
+	require.NoError(t, err)
 	assert.Empty(t, resp.Text)
 	require.Len(t, resp.ToolCalls, 1)
 	assert.Equal(t, "toolu_1", resp.ToolCalls[0].ID)
@@ -202,7 +226,8 @@ func TestParseAnthropicResponse_MultipleToolCalls(t *testing.T) {
 	var msg anthropicsdk.Message
 	require.NoError(t, json.Unmarshal([]byte(raw), &msg))
 
-	resp := parseAnthropicResponse(&msg)
+	resp, err := parseAnthropicResponse(&msg)
+	require.NoError(t, err)
 	require.Len(t, resp.ToolCalls, 2)
 	assert.Equal(t, "tc1", resp.ToolCalls[0].ID)
 	assert.Equal(t, "tc2", resp.ToolCalls[1].ID)

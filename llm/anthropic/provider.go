@@ -50,7 +50,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: %w", err)
 	}
-	return parseAnthropicResponse(resp), nil
+	return parseAnthropicResponse(resp)
 }
 
 // toAnthropicMessages splits a []llm.Message into a system-prompt block slice
@@ -115,8 +115,16 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 			Properties: t.Parameters["properties"],
 		}
 		// Forward required field so the model knows which parameters are mandatory.
-		if req, ok := t.Parameters["required"].([]string); ok {
+		// encoding/json unmarshals arrays as []interface{}, so handle both forms.
+		switch req := t.Parameters["required"].(type) {
+		case []string:
 			schema.Required = req
+		case []interface{}:
+			for _, r := range req {
+				if s, ok := r.(string); ok {
+					schema.Required = append(schema.Required, s)
+				}
+			}
 		}
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,
@@ -130,14 +138,17 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
-func parseAnthropicResponse(msg *anthropicsdk.Message) *llm.Response {
+func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 	resp := &llm.Response{}
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
 			resp.Text += block.Text
 		case "tool_use":
-			argsJSON, _ := json.Marshal(block.Input)
+			argsJSON, err := json.Marshal(block.Input)
+			if err != nil {
+				return nil, fmt.Errorf("anthropic: marshaling tool call %q input: %w", block.Name, err)
+			}
 			resp.ToolCalls = append(resp.ToolCalls, llm.ToolCall{
 				ID:        block.ID,
 				Name:      block.Name,
@@ -145,5 +156,5 @@ func parseAnthropicResponse(msg *anthropicsdk.Message) *llm.Response {
 			})
 		}
 	}
-	return resp
+	return resp, nil
 }

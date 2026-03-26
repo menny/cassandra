@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"google.golang.org/genai"
 
@@ -35,7 +36,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	}
 
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(maxTokens), //nolint:gosec // bounded by caller
+		MaxOutputTokens: int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
 	}
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
@@ -194,7 +195,10 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 		case part.Text != "":
 			result.Text += part.Text
 		case part.FunctionCall != nil:
-			argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+			argsJSON, err := json.Marshal(part.FunctionCall.Args)
+			if err != nil {
+				return nil, fmt.Errorf("google: marshaling tool call %q args: %w", part.FunctionCall.Name, err)
+			}
 			// Gemini does not provide a stable per-call ID. Append the
 			// zero-based index so that two calls to the same tool in one
 			// turn produce distinct IDs (e.g. "read_file_0", "read_file_1").
