@@ -23,11 +23,7 @@ func CalculateMaxIterations(changedFiles int) int {
 	if changedFiles <= 0 {
 		return AbsoluteMaxIter
 	}
-	max := MaxIterationsPerFile * changedFiles
-	if max > AbsoluteMaxIter {
-		return AbsoluteMaxIter
-	}
-	return max
+	return min(MaxIterationsPerFile*changedFiles, AbsoluteMaxIter)
 }
 
 // ToolDispatcher is the minimal interface the Agent needs from a tool registry.
