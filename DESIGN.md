@@ -42,6 +42,12 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 4. **Structured Feedback Extraction**
    - Code reviews in this system follow a `Do / Try / Consider` framework. Rather than forcing the primary reasoning process to output JSON directly (which can degrade reasoning quality), the system allows the first "Agent" pass to output free-form markdown, followed by a secondary extraction LLM call dedicated entirely to formatting that markdown into structured JSON boundaries.
 
+## Output Contract
+
+All diagnostic and progress output (configuration summary, ReAct iteration progress, tool invocations) is written to **stderr**. Only the final review text is written to **stdout**. This separation allows callers to cleanly capture the review output via shell redirection (e.g., `cassandra --diff main > review.md`) without interleaving progress noise.
+
 ## Future work
 
-- **Pull Request Support**: Re-introduce `--pr` support for reviewing remote GitHub Pull Requests. This will require a set of tools mirroring the local tools but drawing input from the PR's (remote) branch
+- **Pull Request Support**: Re-introduce `--pr` support for reviewing remote GitHub Pull Requests. This will require a set of tools mirroring the local tools but drawing input from the PR's (remote) branch.
+
+- **Concurrent Tool Execution**: When the LLM responds with multiple tool calls in a single turn, those calls are currently executed sequentially. A future improvement is to fan them out concurrently using goroutines — each tool handler is already stateless and side-effect-free, so a `sync.WaitGroup`-based approach is straightforward. This will noticeably reduce wall-clock latency on large diffs where the LLM explores several files simultaneously.

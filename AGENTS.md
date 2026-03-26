@@ -21,6 +21,15 @@ Before introducing major changes or restructuring the review loop, please read t
 - The rationale behind the custom Tool Registry.
 - The `Do / Try / Consider` feedback format.
 
+## Output Contract
+
+All **diagnostic and progress output** (configuration summary, ReAct iteration progress, tool invocations, warnings) MUST be written to **stderr**. Only the **final review text** goes to **stdout**. This allows callers to capture the review cleanly via redirection (e.g., `cassandra --diff main > review.md`) without interleaving noise.
+
+- `os.Stderr` / `log.New(os.Stderr, "", 0)` — for progress, config, warnings
+- `fmt.Println` / `fmt.Fprintf(os.Stdout, ...)` — for the final review result only
+
+When adding new logging or output anywhere in the codebase, apply this rule strictly.
+
 ## Git Commit Guidelines
 
 When committing changes on behalf of the user, strictly follow these commit message rules based on Conventional Commits:

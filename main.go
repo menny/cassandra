@@ -15,6 +15,10 @@ import (
 	"github.com/menny/cassandra/tools"
 )
 
+// stderr is used for all diagnostic / progress output so that the final review
+// (written to stdout) can be cleanly captured or piped by the caller.
+var stderr = log.New(os.Stderr, "", 0)
+
 func main() {
 	var diffBranch string
 	var modelName string
@@ -22,9 +26,11 @@ func main() {
 	var providerAPIKey string
 	var workingDir string
 	var mainGuidelines string
+	var maxTokens int
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
 
@@ -71,16 +77,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("=== AI Review Configuration ===")
-	fmt.Printf("  Working Directory: %s\n", targetDir)
-	fmt.Printf("  Target Branch: %s\n", diffBranch)
-	fmt.Printf("  LLM Provider: %s\n", provider)
-	fmt.Printf("  LLM Model: %s\n", modelName)
+	stderr.Println("=== Cassandra Configuration ===")
+	stderr.Printf("  Working Directory: %s\n", targetDir)
+	stderr.Printf("  Target Branch: %s\n", diffBranch)
+	stderr.Printf("  LLM Provider: %s\n", provider)
+	stderr.Printf("  LLM Model: %s\n", modelName)
 	if mainGuidelines != "" {
-		fmt.Printf("  Main Guidelines: %s\n", mainGuidelines)
+		stderr.Printf("  Main Guidelines: %s\n", mainGuidelines)
 	}
-	fmt.Println("  API Key: [PROVIDED]")
-	fmt.Println("===============================")
+	stderr.Println("  API Key: [PROVIDED]")
+	stderr.Println("===============================")
 
 	ctx := context.Background()
 
@@ -109,16 +115,19 @@ func main() {
 		requestText = "Review the provided changes for issues."
 	}
 
+	// Compute max ReAct iterations based on changed files.
+	maxIterations := core.CalculateMaxIterations(len(changedFiles))
+
 	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
 	if err != nil {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}
 
-	result, err := agent.RunReview(ctx, systemPrompt, requestText)
+	result, err := agent.RunReview(ctx, systemPrompt, requestText, maxIterations, maxTokens)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
 	}
 
-	fmt.Println("=== AI Review ===")
+	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 }

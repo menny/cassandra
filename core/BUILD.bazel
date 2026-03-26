@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "core",
@@ -6,7 +6,15 @@ go_library(
     importpath = "github.com/menny/cassandra/core",
     visibility = ["//visibility:public"],
     deps = [
-        "//tools",
+        "@com_github_tmc_langchaingo//llms",
+    ],
+)
+
+go_test(
+    name = "core_test",
+    srcs = ["agent_test.go"],
+    embed = [":core"],
+    deps = [
         "@com_github_tmc_langchaingo//llms",
     ],
 )
