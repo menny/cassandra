@@ -41,6 +41,7 @@ func (r *Registry) HandleCall(name string, args map[string]any) (string, error) 
 func RegisterLocalTools(r *Registry, diffBranch string) {
 	registerLocalReadFile(r)
 	registerLocalGlobFiles(r)
+	registerLocalGitDiff(r, diffBranch)
 }
 
 func RegisterPRTools(r *Registry, prNumber int) {
