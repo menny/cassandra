@@ -7,25 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tmc/langchaingo/llms"
+	"github.com/menny/cassandra/llm"
 )
 
 func registerLocalReadFile(r *Registry) {
-	def := llms.Tool{
-		Type: "function",
-		Function: &llms.FunctionDefinition{
-			Name:        "read_file",
-			Description: "Read the contents of a local file from the repository.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"file_path": map[string]any{
-						"type":        "string",
-						"description": "Absolute or relative path to the file to read.",
-					},
+	def := llm.ToolDef{
+		Name:        "read_file",
+		Description: "Read the contents of a local file from the repository.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"file_path": map[string]any{
+					"type":        "string",
+					"description": "Absolute or relative path to the file to read.",
 				},
-				"required": []string{"file_path"},
 			},
+			"required": []string{"file_path"},
 		},
 	}
 
@@ -48,25 +45,22 @@ func registerLocalReadFile(r *Registry) {
 }
 
 func registerLocalGlobFiles(r *Registry) {
-	def := llms.Tool{
-		Type: "function",
-		Function: &llms.FunctionDefinition{
-			Name:        "glob_files",
-			Description: "Search for files within a directory matching an exact substring or simple glob suffix.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"directory": map[string]any{
-						"type":        "string",
-						"description": "The root directory to search in, defaults to '.' if empty.",
-					},
-					"query": map[string]any{
-						"type":        "string",
-						"description": "The substring or extension to match against filenames (e.g. '.go' or 'agent').",
-					},
+	def := llm.ToolDef{
+		Name:        "glob_files",
+		Description: "Search for files within a directory matching an exact substring or simple glob suffix.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"directory": map[string]any{
+					"type":        "string",
+					"description": "The root directory to search in, defaults to '.' if empty.",
 				},
-				"required": []string{"query"},
+				"query": map[string]any{
+					"type":        "string",
+					"description": "The substring or extension to match against filenames (e.g. '.go' or 'agent').",
+				},
 			},
+			"required": []string{"query"},
 		},
 	}
 

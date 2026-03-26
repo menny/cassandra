@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/tmc/langchaingo/llms"
+	"github.com/menny/cassandra/llm"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -16,17 +16,13 @@ import (
 
 // mockLLM records every GenerateContent call and returns scripted responses in order.
 type mockLLM struct {
-	responses []*llms.ContentResponse
-	calls     [][]llms.MessageContent // captured message history per call, in order
+	responses []*llm.Response
+	calls     [][]llm.Message // captured message history per call, in order
 	callIdx   int
 }
 
-func (m *mockLLM) Call(_ context.Context, _ string, _ ...llms.CallOption) (string, error) {
-	return "", nil
-}
-
-func (m *mockLLM) GenerateContent(_ context.Context, msgs []llms.MessageContent, _ ...llms.CallOption) (*llms.ContentResponse, error) {
-	snapshot := make([]llms.MessageContent, len(msgs))
+func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
+	snapshot := make([]llm.Message, len(msgs))
 	copy(snapshot, msgs)
 	m.calls = append(m.calls, snapshot)
 
@@ -38,31 +34,20 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llms.MessageContent,
 	return resp, nil
 }
 
-// textResponse builds a ContentResponse with plain text and no tool calls.
-func textResponse(content string) *llms.ContentResponse {
-	return &llms.ContentResponse{
-		Choices: []*llms.ContentChoice{{Content: content}},
-	}
+// textResponse builds a Response with plain text and no tool calls.
+func textResponse(content string) *llm.Response {
+	return &llm.Response{Text: content}
 }
 
-// toolCallsResponse builds a ContentResponse whose single choice requests the given tool calls.
-func toolCallsResponse(tcs ...llms.ToolCall) *llms.ContentResponse {
-	return &llms.ContentResponse{
-		Choices: []*llms.ContentChoice{{ToolCalls: tcs}},
-	}
+// toolCallsResponse builds a Response whose single choice requests the given tool calls.
+func toolCallsResponse(tcs ...llm.ToolCall) *llm.Response {
+	return &llm.Response{ToolCalls: tcs}
 }
 
 // makeToolCall builds a ToolCall with JSON-encoded arguments.
-func makeToolCall(id, name string, args map[string]any) llms.ToolCall {
+func makeToolCall(id, name string, args map[string]any) llm.ToolCall {
 	b, _ := json.Marshal(args)
-	return llms.ToolCall{
-		ID:   id,
-		Type: "function",
-		FunctionCall: &llms.FunctionCall{
-			Name:      name,
-			Arguments: string(b),
-		},
-	}
+	return llm.ToolCall{ID: id, Name: name, Arguments: string(b)}
 }
 
 // mockDispatcher is a minimal ToolDispatcher stub.
@@ -74,7 +59,7 @@ func newMockDispatcher() *mockDispatcher {
 	return &mockDispatcher{handlers: make(map[string]func(map[string]any) (string, error))}
 }
 
-func (d *mockDispatcher) ToLangChainTools() []llms.Tool { return nil }
+func (d *mockDispatcher) ToTools() []llm.ToolDef { return nil }
 
 func (d *mockDispatcher) HandleCall(name string, args map[string]any) (string, error) {
 	if fn, ok := d.handlers[name]; ok {
@@ -84,8 +69,8 @@ func (d *mockDispatcher) HandleCall(name string, args map[string]any) (string, e
 }
 
 // newTestAgent returns an Agent with stderr suppressed, suitable for unit tests.
-func newTestAgent(llm llms.Model, d ToolDispatcher) *Agent {
-	return NewAgent(llm, d, WithStderr(io.Discard))
+func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
+	return NewAgent(model, d, WithStderr(io.Discard))
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -95,7 +80,7 @@ func newTestAgent(llm llms.Model, d ToolDispatcher) *Agent {
 // TestRunReview_DirectResponse verifies that when the LLM responds with plain
 // text on the first call (no tool calls), RunReview returns that text immediately.
 func TestRunReview_DirectResponse(t *testing.T) {
-	lm := &mockLLM{responses: []*llms.ContentResponse{
+	lm := &mockLLM{responses: []*llm.Response{
 		textResponse("looks good"),
 	}}
 	got, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "sys", "request", 5, 1024)
@@ -114,7 +99,7 @@ func TestRunReview_DirectResponse(t *testing.T) {
 // iteration 1 → tool requested → iteration 2 → final text.
 func TestRunReview_SingleToolCall(t *testing.T) {
 	const wantResult = "file contents"
-	lm := &mockLLM{responses: []*llms.ContentResponse{
+	lm := &mockLLM{responses: []*llm.Response{
 		toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
 		textResponse("review done"),
 	}}
@@ -140,30 +125,35 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 		t.Fatalf("second call: expected 4 messages, got %d", len(msgs))
 	}
 
-	// msg[3] must be a single ChatMessageTypeTool entry.
+	// msgs[2] must be the assistant turn with ToolCalls.
+	assistantMsg := msgs[2]
+	if assistantMsg.Role != llm.RoleAssistant {
+		t.Errorf("msgs[2] role: got %v, want RoleAssistant", assistantMsg.Role)
+	}
+	if len(assistantMsg.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call in assistant msg, got %d", len(assistantMsg.ToolCalls))
+	}
+
+	// msgs[3] must be a RoleTool entry with a single result.
 	toolMsg := msgs[3]
-	if toolMsg.Role != llms.ChatMessageTypeTool {
-		t.Errorf("msg[3] role: got %v, want ChatMessageTypeTool", toolMsg.Role)
+	if toolMsg.Role != llm.RoleTool {
+		t.Errorf("msgs[3] role: got %v, want RoleTool", toolMsg.Role)
 	}
-	if len(toolMsg.Parts) != 1 {
-		t.Fatalf("tool-result message: expected 1 part, got %d", len(toolMsg.Parts))
+	if len(toolMsg.ToolResults) != 1 {
+		t.Fatalf("tool-result message: expected 1 result, got %d", len(toolMsg.ToolResults))
 	}
-	resp, ok := toolMsg.Parts[0].(llms.ToolCallResponse)
-	if !ok {
-		t.Fatalf("part type %T, want ToolCallResponse", toolMsg.Parts[0])
-	}
-	if resp.Content != wantResult {
-		t.Errorf("tool result content: got %q, want %q", resp.Content, wantResult)
+	if toolMsg.ToolResults[0].Content != wantResult {
+		t.Errorf("tool result content: got %q, want %q", toolMsg.ToolResults[0].Content, wantResult)
 	}
 }
 
 // TestRunReview_MultipleToolCallsInOneTurn asserts that when the LLM requests
 // two tools in a single turn, both responses are packed into ONE
-// ChatMessageTypeTool message (not two separate messages).
+// RoleTool message (not two separate messages).
 // This is the regression test for the Error 400 bug: separate messages caused
 // consecutive user-role turns that Gemini rejects.
 func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
-	lm := &mockLLM{responses: []*llms.ContentResponse{
+	lm := &mockLLM{responses: []*llm.Response{
 		toolCallsResponse(
 			makeToolCall("tc1", "read_file", map[string]any{"file_path": "a.go"}),
 			makeToolCall("tc2", "read_file", map[string]any{"file_path": "b.go"}),
@@ -190,12 +180,12 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 		t.Errorf("second call: expected 4 messages, got %d", len(msgs))
 	}
 	toolMsg := msgs[3]
-	if toolMsg.Role != llms.ChatMessageTypeTool {
-		t.Errorf("msg[3] role: got %v, want ChatMessageTypeTool", toolMsg.Role)
+	if toolMsg.Role != llm.RoleTool {
+		t.Errorf("msgs[3] role: got %v, want RoleTool", toolMsg.Role)
 	}
-	// Both results must be parts of this single message — not two separate messages.
-	if len(toolMsg.Parts) != 2 {
-		t.Errorf("expected 2 ToolCallResponse parts in one message, got %d", len(toolMsg.Parts))
+	// Both results must be in this single message — not two separate messages.
+	if len(toolMsg.ToolResults) != 2 {
+		t.Errorf("expected 2 ToolResults in one message, got %d", len(toolMsg.ToolResults))
 	}
 }
 
@@ -204,7 +194,7 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 // makes one final GenerateContent call.
 func TestRunReview_CapReached(t *testing.T) {
 	alwaysTool := toolCallsResponse(makeToolCall("tc", "read_file", map[string]any{"file_path": "f.go"}))
-	lm := &mockLLM{responses: []*llms.ContentResponse{
+	lm := &mockLLM{responses: []*llm.Response{
 		alwaysTool,                    // iteration 1
 		alwaysTool,                    // iteration 2 (cap = 2)
 		textResponse("forced review"), // forced-final call
@@ -225,15 +215,14 @@ func TestRunReview_CapReached(t *testing.T) {
 		t.Errorf("expected 3 LLM calls, got %d", len(lm.calls))
 	}
 
-	// The last call's final message must be the [SYSTEM] cap human turn.
+	// The last call's final message must be the [SYSTEM] cap user turn.
 	lastMsgs := lm.calls[2]
 	last := lastMsgs[len(lastMsgs)-1]
-	if last.Role != llms.ChatMessageTypeHuman {
-		t.Errorf("cap message role: got %v, want human", last.Role)
+	if last.Role != llm.RoleUser {
+		t.Errorf("cap message role: got %v, want RoleUser", last.Role)
 	}
-	txt, ok := last.Parts[0].(llms.TextContent)
-	if !ok || txt.Text == "" {
-		t.Error("expected non-empty [SYSTEM] cap text in final human turn")
+	if last.Text == "" {
+		t.Error("expected non-empty [SYSTEM] cap text in final user turn")
 	}
 }
 
@@ -241,7 +230,7 @@ func TestRunReview_CapReached(t *testing.T) {
 // surfaces the error as the tool result text (so the LLM can reason about it)
 // and continues the loop rather than aborting.
 func TestRunReview_ToolError(t *testing.T) {
-	lm := &mockLLM{responses: []*llms.ContentResponse{
+	lm := &mockLLM{responses: []*llm.Response{
 		toolCallsResponse(makeToolCall("tc", "bad_tool", nil)),
 		textResponse("reviewed despite error"),
 	}}
@@ -259,11 +248,7 @@ func TestRunReview_ToolError(t *testing.T) {
 	// The error must have been forwarded as the tool result content, not a Go error.
 	msgs := lm.calls[1]
 	toolMsg := msgs[3]
-	resp, ok := toolMsg.Parts[0].(llms.ToolCallResponse)
-	if !ok {
-		t.Fatalf("part type %T, want ToolCallResponse", toolMsg.Parts[0])
-	}
-	if resp.Content == "" {
+	if toolMsg.ToolResults[0].Content == "" {
 		t.Error("expected error text in tool result content, got empty string")
 	}
 }

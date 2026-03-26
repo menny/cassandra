@@ -10,7 +10,7 @@ go_library(
     importpath = "github.com/menny/cassandra/tools",
     visibility = ["//visibility:public"],
     deps = [
-        "@com_github_tmc_langchaingo//llms",
+        "//llm",
     ],
 )
 
