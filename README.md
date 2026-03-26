@@ -53,11 +53,13 @@ To review an open GitHub pull request by its number:
 
 | Flag | Description | Default | Required |
 |---|---|---|---|
-| `--diff` | Review a git diff against the specified branch | | Yes (if `--pr` is not provided) |
+| `--cwd` | Working directory | | No |
+| `--diff` | Review a git diff against the specified branch | `main` | Yes (if `--pr` is not provided) |
 | `--pr` | Review a GitHub PR by specifying its number | | Yes (if `--diff` is not provided) |
 | `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
+| `--main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
 
 ## Architecture
 
