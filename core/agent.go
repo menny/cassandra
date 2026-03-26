@@ -61,7 +61,6 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		maxTokens = 4096
 	}
 
-
 	messages := []llms.MessageContent{
 		llms.TextParts(llms.ChatMessageTypeSystem, systemPrompt),
 		llms.TextParts(llms.ChatMessageTypeHuman, requestText),
@@ -152,9 +151,9 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
 
 	resp, err := a.llm.GenerateContent(ctx, messages, llms.WithTools(langchainTools), llms.WithMaxTokens(maxTokens))
-		if err != nil {
-			return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
-		}
+	if err != nil {
+		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
+	}
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("llm returned no choices on forced-final review")
 	}

@@ -32,7 +32,7 @@ func main() {
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
-	flag.IntVar(&maxTokens, "max-tokens", 4096, "Max tokens for the LLM response")
+	flag.IntVar(&maxTokens, "max-tokens", 8196, "Max tokens for the LLM response")
 	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
 	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
 
