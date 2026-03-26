@@ -118,7 +118,6 @@ func main() {
 		requestText = "Review the provided changes for issues."
 	}
 
-	fmt.Printf("PROMPT: %s\n", requestText)
 	result, err := agent.RunReview(ctx, requestText)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
