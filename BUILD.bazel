@@ -25,9 +25,9 @@ go_library(
 
 go_binary(
     name = "ai-review-agent",
+    basename = "cassandra",
     embed = [":cassandra_lib"],
     pure = "on",
     static = "on",
-    basename = "cassandra",
     visibility = ["//visibility:public"],
 )
