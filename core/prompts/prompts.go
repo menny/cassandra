@@ -59,6 +59,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 func findRepoFiles(workspaceRoot string, changedFiles []string, filename string) map[string]string {
 	found := make(map[string]string)
 
+	workspaceRoot = filepath.Clean(workspaceRoot)
 	for _, file := range changedFiles {
 		absPath := filepath.Join(workspaceRoot, file)
 		dir := filepath.Dir(absPath)
