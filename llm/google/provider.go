@@ -78,10 +78,8 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 			}
 			for _, tc := range m.ToolCalls {
 				var args map[string]any
-				if tc.Arguments != "" {
-					if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-						return nil, nil, fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
-					}
+				if err := tc.UnmarshalArguments(&args); err != nil {
+					return nil, nil, err
 				}
 				parts = append(parts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{
@@ -167,17 +165,9 @@ func convertSchema(m map[string]any) *genai.Schema {
 			}
 		}
 	}
-	// JSON unmarshalling may produce []interface{} for "required".
-	switch req := m["required"].(type) {
-	case []string:
-		s.Required = req
-	case []interface{}:
-		for _, r := range req {
-			if rs, ok := r.(string); ok {
-				s.Required = append(s.Required, rs)
-			}
-		}
-	}
+
+	s.Required = llm.ParseRequired(m["required"])
+
 	return s
 }
 

@@ -78,10 +78,8 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 			}
 			for _, tc := range m.ToolCalls {
 				var input any
-				if tc.Arguments != "" {
-					if err := json.Unmarshal([]byte(tc.Arguments), &input); err != nil {
-						return nil, nil, fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
-					}
+				if err := tc.UnmarshalArguments(&input); err != nil {
+					return nil, nil, err
 				}
 				parts = append(parts, anthropicsdk.ContentBlockParamUnion{
 					OfToolUse: &anthropicsdk.ToolUseBlockParam{
@@ -120,17 +118,8 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 			Properties: t.Parameters["properties"],
 		}
 		// Forward required field so the model knows which parameters are mandatory.
-		// encoding/json unmarshals arrays as []interface{}, so handle both forms.
-		switch req := t.Parameters["required"].(type) {
-		case []string:
-			schema.Required = req
-		case []interface{}:
-			for _, r := range req {
-				if s, ok := r.(string); ok {
-					schema.Required = append(schema.Required, s)
-				}
-			}
-		}
+		schema.Required = llm.ParseRequired(t.Parameters["required"])
+
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,
 			Description: param.NewOpt(t.Description),
