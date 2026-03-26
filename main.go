@@ -105,8 +105,6 @@ func main() {
 
 	agent := core.NewAgent(client, registry)
 
-	fmt.Printf("Starting AI Review using model: %s\n", modelName)
-
 	var requestText string
 	if diffBranch != "" || flag.Lookup("diff").Changed {
 		diffOutput, err := tools.FetchGitDiff(diffBranch)
