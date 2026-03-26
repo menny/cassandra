@@ -43,10 +43,26 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	prompt, err := BuildSystemPrompt(tmpDir, nil)
+	prompt, err := BuildSystemPrompt(tmpDir, nil, "")
 	require.NoError(t, err)
 
-	require.True(t, strings.Contains(prompt, "You are a code review bot for the provided codebase."))
+	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
 	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
 	require.True(t, strings.Contains(prompt, "Is this code maintainable, easy to work with, and safe?"))
+}
+
+func TestBuildSystemPrompt_Override(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	overridePath := filepath.Join(tmpDir, "override.md")
+	require.NoError(t, os.WriteFile(overridePath, []byte("CUSTOM GUIDELINES HERE"), 0o644))
+
+	prompt, err := BuildSystemPrompt(tmpDir, nil, overridePath)
+	require.NoError(t, err)
+
+	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
+	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
+	require.True(t, strings.Contains(prompt, "CUSTOM GUIDELINES HERE"))
+	require.False(t, strings.Contains(prompt, "Is this code maintainable, easy to work with, and safe?"))
 }

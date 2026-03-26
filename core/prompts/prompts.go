@@ -15,8 +15,17 @@ var mainGuidelines string
 
 // BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
 // optional personal guidelines, and any relevant AGENTS.md files for the changed paths.
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string) (string, error) {
-	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelines + "\n</code_review_guidelines>\n"
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesOverride string) (string, error) {
+	guidelines := mainGuidelines
+	if mainGuidelinesOverride != "" {
+		content, err := os.ReadFile(mainGuidelinesOverride)
+		if err != nil {
+			return "", fmt.Errorf("failed to read main guidelines override: %w", err)
+		}
+		guidelines = string(content)
+	}
+
+	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + guidelines + "\n</code_review_guidelines>\n"
 
 	personalPath := filepath.Join(workspaceRoot, "scratch", "personal.ai_code_review_guidelines.md")
 	if personalBytes, err := os.ReadFile(personalPath); err == nil {
