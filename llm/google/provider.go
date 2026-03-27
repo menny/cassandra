@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/llm/internal/util"
 )
 
 // Provider implements llm.Model backed by the Google Generative AI API.
@@ -163,10 +164,11 @@ func convertSchema(m map[string]any) *genai.Schema {
 			if vm, ok := v.(map[string]any); ok {
 				s.Properties[k] = convertSchema(vm)
 			}
+			// TODO: warn on unexpected property shape (expected map[string]any) if !ok
 		}
 	}
 
-	s.Required = llm.ParseRequired(m["required"])
+	s.Required = util.ParseRequired(m["required"])
 
 	return s
 }

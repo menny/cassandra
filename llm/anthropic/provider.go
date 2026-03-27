@@ -11,6 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/llm/internal/util"
 )
 
 // Provider implements llm.Model backed by the Anthropic Messages API.
@@ -118,7 +119,7 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 			Properties: t.Parameters["properties"],
 		}
 		// Forward required field so the model knows which parameters are mandatory.
-		schema.Required = llm.ParseRequired(t.Parameters["required"])
+		schema.Required = util.ParseRequired(t.Parameters["required"])
 
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,

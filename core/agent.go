@@ -79,6 +79,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 	tools := a.registry.ToTools()
 
+	// Note: range over integer requires Go 1.22+
 	for iter := range maxIterations {
 		fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)

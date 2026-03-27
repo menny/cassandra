@@ -50,24 +50,6 @@ func (tc *ToolCall) UnmarshalArguments(dest any) error {
 	return nil
 }
 
-// ParseRequired converts a "required" JSON schema field (often unmarshaled as
-// []interface{}) into a []string.
-func ParseRequired(req any) []string {
-	switch reqs := req.(type) {
-	case []string:
-		return reqs
-	case []interface{}:
-		var out []string
-		for _, r := range reqs {
-			if s, ok := r.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
 // ToolResult is the response to a ToolCall, bundled into a RoleTool message.
 type ToolResult struct {
 	ToolCallID string
