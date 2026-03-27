@@ -10,6 +10,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/llm/internal/util"
 )
 
 // Provider implements llm.Model backed by the Google Generative AI API.
@@ -78,10 +79,8 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 			}
 			for _, tc := range m.ToolCalls {
 				var args map[string]any
-				if tc.Arguments != "" {
-					if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-						return nil, nil, fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
-					}
+				if err := tc.UnmarshalArguments(&args); err != nil {
+					return nil, nil, err
 				}
 				parts = append(parts, &genai.Part{
 					FunctionCall: &genai.FunctionCall{
@@ -165,19 +164,12 @@ func convertSchema(m map[string]any) *genai.Schema {
 			if vm, ok := v.(map[string]any); ok {
 				s.Properties[k] = convertSchema(vm)
 			}
+			// TODO: warn on unexpected property shape (expected map[string]any) if !ok
 		}
 	}
-	// JSON unmarshalling may produce []interface{} for "required".
-	switch req := m["required"].(type) {
-	case []string:
-		s.Required = req
-	case []interface{}:
-		for _, r := range req {
-			if rs, ok := r.(string); ok {
-				s.Required = append(s.Required, rs)
-			}
-		}
-	}
+
+	s.Required = util.ParseRequired(m["required"])
+
 	return s
 }
 
