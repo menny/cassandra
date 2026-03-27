@@ -1,8 +1,18 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "llm",
     srcs = ["llm.go"],
     importpath = "github.com/menny/cassandra/llm",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "llm_test",
+    srcs = ["llm_test.go"],
+    embed = [":llm"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
 )
