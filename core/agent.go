@@ -128,6 +128,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 			if resp.Text == "" {
 				return "", fmt.Errorf("llm returned empty content on iteration %d", iter+1)
 			}
+			a.reporter.ReportFinalReview()
 			return resp.Text, nil
 		}
 

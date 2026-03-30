@@ -122,6 +122,9 @@ func TestAgent_Reporter(t *testing.T) {
 		if len(spy.toolCalls) != 1 || spy.toolCalls[0].Name != "read_file" {
 			t.Errorf("expected 1 tool call reported, got %v", spy.toolCalls)
 		}
+		if spy.finalReviews != 1 {
+			t.Errorf("expected 1 final review report, got %d", spy.finalReviews)
+		}
 	})
 
 	t.Run("no-tools edge-case", func(t *testing.T) {
@@ -140,6 +143,9 @@ func TestAgent_Reporter(t *testing.T) {
 		}
 		if len(spy.toolCalls) != 0 {
 			t.Errorf("expected no tool calls reported, got %v", spy.toolCalls)
+		}
+		if spy.finalReviews != 1 {
+			t.Errorf("expected 1 final review report, got %d", spy.finalReviews)
 		}
 	})
 }

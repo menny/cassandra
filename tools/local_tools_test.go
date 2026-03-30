@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,9 +23,10 @@ func TestLocalReadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	args, _ := json.Marshal(map[string]any{"file_path": testFile})
 	result, err := r.HandleCall(llm.ToolCall{
 		Name:      "read_file",
-		Arguments: `{"file_path":"` + testFile + `"}`,
+		Arguments: string(args),
 	})
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
@@ -48,14 +50,18 @@ func TestLocalGlobFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	args, _ := json.Marshal(map[string]any{"directory": tmpDir, "query": ".go"})
 	result, err := r.HandleCall(llm.ToolCall{
 		Name:      "glob_files",
-		Arguments: `{"directory":"` + tmpDir + `", "query":".go"}`,
+		Arguments: string(args),
 	})
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
 
+	if !strings.Contains(result, "file1.go") {
+		t.Errorf("expected result to contain file1.go, got: %s", result)
+	}
 	if strings.Contains(result, "file2.txt") {
 		t.Errorf("expected result not to contain file2.txt, got: %s", result)
 	}
