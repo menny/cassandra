@@ -46,7 +46,7 @@ type defaultReporter struct {
 }
 
 func (r *defaultReporter) ReportIteration(iter int) {
-	fmt.Fprintln(r.w, "Cassandra is reviewing the code...")
+	fmt.Fprintf(r.w, "Iteration %d: Cassandra is reviewing the code...\n", iter)
 }
 
 func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
