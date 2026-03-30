@@ -76,10 +76,16 @@ func findRepoFiles(workspaceRoot string, changedFiles []string, filename string)
 
 			// Unique key for (directory, filename) to avoid redundant I/O.
 			cacheKey := filepath.Join(relDir, filename)
-			if !searchedDirs[cacheKey] {
-				searchedDirs[cacheKey] = true
-				targetPath := filepath.Join(dir, filename)
-				if content, err := os.ReadFile(targetPath); err == nil {
+			if searchedDirs[cacheKey] {
+				// If we've searched this directory before, we've also already
+				// walked up to the root from here. We can stop.
+				break
+			}
+
+			searchedDirs[cacheKey] = true
+			targetPath := filepath.Join(dir, filename)
+			if content, err := os.ReadFile(targetPath); err == nil {
+				if _, exists := found[relDir]; !exists {
 					found[relDir] = string(content)
 				}
 			}
