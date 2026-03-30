@@ -41,8 +41,11 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
    - The repository uses Bazel `8.6.0` alongside standard `go.mod` resolution (using Gazelle's `go_deps` extension).
    - *Note on Bazel 9:* We intentionally stick to Bazel 8 at this time to avoid known incompatibilities between stable releases of `rules_go` and the removal of macOS `current_xcode_config` targets in Bazel 9. The internal Go SDK is pinned to `1.24.4`.
 
-4. **Structured Feedback Extraction**
-   - Code reviews in this system follow a `Do / Try / Consider` framework. Rather than forcing the primary reasoning process to output JSON directly (which can degrade reasoning quality), the system allows the first "Agent" pass to output free-form markdown, followed by a secondary extraction LLM call dedicated entirely to formatting that markdown into structured JSON boundaries.
+4. **Structured Feedback Extraction (Target Architecture)**
+   - Code reviews in this system are designed to follow a `Do / Try / Consider` framework. To ensure high reasoning quality, the system's target architecture separates reasoning from formatting:
+     1. A primary "Agent" pass outputs free-form markdown (optimizing for LLM reasoning).
+     2. A secondary extraction LLM call (using the `llm/` abstraction) formats that markdown into structured JSON findings.
+   - *Note:* While the foundation for this is present in the `llm/` package, the secondary extraction pass is currently being integrated into the main execution flow.
 
 ## Output Contract
 
