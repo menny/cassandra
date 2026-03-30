@@ -58,6 +58,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 // Returns a map of repo-relative folder path to file contents.
 func findRepoFiles(workspaceRoot string, changedFiles []string, filename string) map[string]string {
 	found := make(map[string]string)
+	searchedDirs := make(map[string]bool)
 
 	workspaceRoot = filepath.Clean(workspaceRoot)
 	for _, file := range changedFiles {
@@ -65,7 +66,6 @@ func findRepoFiles(workspaceRoot string, changedFiles []string, filename string)
 		dir := filepath.Dir(absPath)
 
 		for {
-			targetPath := filepath.Join(dir, filename)
 			relDir, err := filepath.Rel(workspaceRoot, dir)
 			if err != nil {
 				relDir = dir
@@ -74,7 +74,11 @@ func findRepoFiles(workspaceRoot string, changedFiles []string, filename string)
 				relDir = "/"
 			}
 
-			if _, exists := found[relDir]; !exists {
+			// Unique key for (directory, filename) to avoid redundant I/O.
+			cacheKey := filepath.Join(relDir, filename)
+			if !searchedDirs[cacheKey] {
+				searchedDirs[cacheKey] = true
+				targetPath := filepath.Join(dir, filename)
 				if content, err := os.ReadFile(targetPath); err == nil {
 					found[relDir] = string(content)
 				}
