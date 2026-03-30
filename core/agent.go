@@ -54,7 +54,7 @@ func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
 }
 
 func (r *defaultReporter) ReportFinalReview() {
-	fmt.Fprintln(r.w, "Cassandra is reviewing the code...")
+	fmt.Fprintln(r.w, "Cassandra is formulating the final review...")
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
@@ -136,6 +136,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		// Append the assistant's tool-call turn to history.
 		messages = append(messages, llm.Message{
 			Role:      llm.RoleAssistant,
+			Text:      resp.Text,
 			ToolCalls: resp.ToolCalls,
 		})
 

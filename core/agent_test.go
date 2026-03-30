@@ -23,7 +23,17 @@ type mockLLM struct {
 
 func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
 	snapshot := make([]llm.Message, len(msgs))
-	copy(snapshot, msgs)
+	for i, msg := range msgs {
+		snapshot[i] = msg
+		if msg.ToolCalls != nil {
+			snapshot[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
+			copy(snapshot[i].ToolCalls, msg.ToolCalls)
+		}
+		if msg.ToolResults != nil {
+			snapshot[i].ToolResults = make([]llm.ToolResult, len(msg.ToolResults))
+			copy(snapshot[i].ToolResults, msg.ToolResults)
+		}
+	}
 	m.calls = append(m.calls, snapshot)
 
 	if m.callIdx >= len(m.responses) {
@@ -352,6 +362,41 @@ func TestRunReview_ToolError(t *testing.T) {
 	toolMsg := msgs[3]
 	if toolMsg.ToolResults[0].Content == "" {
 		t.Error("expected error text in tool result content, got empty string")
+	}
+}
+
+// TestRunReview_PreserveAssistantText verifies that if the LLM returns both text
+// and tool calls, the text is preserved in the history.
+func TestRunReview_PreserveAssistantText(t *testing.T) {
+	const reasoning = "I need to read the file to be sure."
+	lm := &mockLLM{responses: []*llm.Response{
+		{
+			Text: reasoning,
+			ToolCalls: []llm.ToolCall{
+				makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"}),
+			},
+		},
+		textResponse("review done"),
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
+
+	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "req", 5, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call: history should contain the assistant message WITH the reasoning text.
+	msgs := lm.calls[1]
+	assistantMsg := msgs[2]
+	if assistantMsg.Role != llm.RoleAssistant {
+		t.Errorf("expected RoleAssistant, got %v", assistantMsg.Role)
+	}
+	if assistantMsg.Text != reasoning {
+		t.Errorf("assistant text: got %q, want %q", assistantMsg.Text, reasoning)
+	}
+	if len(assistantMsg.ToolCalls) != 1 {
+		t.Errorf("expected 1 tool call, got %d", len(assistantMsg.ToolCalls))
 	}
 }
 
