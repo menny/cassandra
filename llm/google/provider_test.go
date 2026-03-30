@@ -132,6 +132,20 @@ func TestConvertSchema_SimpleObject(t *testing.T) {
 	assert.Equal(t, []string{"file_path"}, s.Required)
 }
 
+func TestConvertSchema_Array(t *testing.T) {
+	input := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type": "string",
+		},
+	}
+	s := convertSchema(input)
+	require.NotNil(t, s)
+	assert.Equal(t, genai.TypeArray, s.Type)
+	require.NotNil(t, s.Items)
+	assert.Equal(t, genai.TypeString, s.Items.Type)
+}
+
 func TestConvertSchema_TypeMapping(t *testing.T) {
 	cases := []struct {
 		jsonType string

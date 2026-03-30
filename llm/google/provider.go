@@ -158,6 +158,9 @@ func convertSchema(m map[string]any) *genai.Schema {
 	if desc, ok := m["description"].(string); ok {
 		s.Description = desc
 	}
+	if items, ok := m["items"].(map[string]any); ok {
+		s.Items = convertSchema(items)
+	}
 	if props, ok := m["properties"].(map[string]any); ok {
 		s.Properties = make(map[string]*genai.Schema, len(props))
 		for k, v := range props {

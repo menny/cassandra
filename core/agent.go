@@ -88,6 +88,9 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
+			if resp.Text == "" {
+				return "", fmt.Errorf("llm returned empty content on iteration %d", iter+1)
+			}
 			return resp.Text, nil
 		}
 

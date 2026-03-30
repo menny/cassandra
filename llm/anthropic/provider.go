@@ -115,7 +115,11 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 	out := make([]anthropicsdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
+		// The Anthropic API requires the top-level tool schema to be an
+		// "object". If a tool defines a different top-level type (e.g.
+		// "array"), this conversion will produce a malformed schema.
 		schema := anthropicsdk.ToolInputSchemaParam{
+			Type:       "object",
 			Properties: t.Parameters["properties"],
 		}
 		// Forward required field so the model knows which parameters are mandatory.

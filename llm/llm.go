@@ -78,11 +78,3 @@ type Response struct {
 type Model interface {
 	GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
 }
-
-// Provider identifies a supported LLM provider.
-type Provider string
-
-const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderGoogle    Provider = "google"
-)

@@ -9,7 +9,7 @@ import (
 
 func TestToolCall_UnmarshalArguments(t *testing.T) {
 	t.Run("empty arguments", func(t *testing.T) {
-		tc := ToolCall{Arguments: ""}
+		tc := &ToolCall{Arguments: ""}
 		var dest map[string]any
 		err := tc.UnmarshalArguments(&dest)
 		require.NoError(t, err)
@@ -17,7 +17,7 @@ func TestToolCall_UnmarshalArguments(t *testing.T) {
 	})
 
 	t.Run("valid JSON", func(t *testing.T) {
-		tc := ToolCall{
+		tc := &ToolCall{
 			Name:      "test_tool",
 			Arguments: `{"key": "value", "num": 123}`,
 		}
@@ -30,7 +30,7 @@ func TestToolCall_UnmarshalArguments(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
-		tc := ToolCall{
+		tc := &ToolCall{
 			Name:      "test_tool",
 			Arguments: `not-json`,
 		}
@@ -41,10 +41,11 @@ func TestToolCall_UnmarshalArguments(t *testing.T) {
 	})
 
 	t.Run("into struct", func(t *testing.T) {
-		tc := ToolCall{
+		tc := &ToolCall{
 			Name:      "struct_tool",
 			Arguments: `{"field": "hello"}`,
 		}
+
 		var dest struct {
 			Field string `json:"field"`
 		}
