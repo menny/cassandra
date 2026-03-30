@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/menny/cassandra/llm"
 )
 
 func TestLocalReadFile(t *testing.T) {
@@ -20,7 +22,10 @@ func TestLocalReadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := r.HandleCall("read_file", map[string]any{"file_path": testFile})
+	result, err := r.HandleCall(llm.ToolCall{
+		Name:      "read_file",
+		Arguments: `{"file_path":"` + testFile + `"}`,
+	})
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
@@ -43,9 +48,9 @@ func TestLocalGlobFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := r.HandleCall("glob_files", map[string]any{
-		"directory": tmpDir,
-		"query":     ".go",
+	result, err := r.HandleCall(llm.ToolCall{
+		Name:      "glob_files",
+		Arguments: `{"directory":"` + tmpDir + `", "query":".go"}`,
 	})
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)

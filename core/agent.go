@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +29,7 @@ func CalculateMaxIterations(changedFiles int) int {
 // *tools.Registry satisfies this interface; tests can supply a lightweight stub.
 type ToolDispatcher interface {
 	ToTools() []llm.ToolDef
-	HandleCall(name string, args map[string]any) (string, error)
+	HandleCall(tc llm.ToolCall) (string, error)
 }
 
 // AgentOption configures an Agent.
@@ -110,20 +109,12 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 			ToolResults: make([]llm.ToolResult, 0, len(resp.ToolCalls)),
 		}
 		for _, tc := range resp.ToolCalls {
-			// Decode JSON arguments.
-			var args map[string]any
-			if tc.Arguments != "" {
-				if decodeErr := json.Unmarshal([]byte(tc.Arguments), &args); decodeErr != nil {
-					args = map[string]any{"raw": tc.Arguments}
-				}
-			}
-
 			// Progress line: print tool name + a compact summary of args.
-			fmt.Fprintf(a.stderr, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactArgs(args))
+			fmt.Fprintf(a.stderr, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
 
 			// Dispatch; on error, surface the message as the tool result so the
 			// LLM can reason about it rather than crashing the whole loop.
-			result, toolErr := a.registry.HandleCall(tc.Name, args)
+			result, toolErr := a.registry.HandleCall(tc)
 			if toolErr != nil {
 				result = fmt.Sprintf("error: %v", toolErr)
 			}
@@ -164,16 +155,12 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	return resp.Text, nil
 }
 
-// compactArgs returns a short human-readable summary of tool arguments.
-func compactArgs(args map[string]any) string {
-	if len(args) == 0 {
+// compactToolCallArgs returns a short human-readable summary of tool arguments.
+func compactToolCallArgs(tc llm.ToolCall) string {
+	if tc.Arguments == "" {
 		return "no args"
 	}
-	b, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Sprintf("%v", args)
-	}
-	s := string(b)
+	s := tc.Arguments
 	const maxLen = 120
 	if len(s) > maxLen {
 		s = s[:maxLen] + "…"

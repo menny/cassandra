@@ -52,20 +52,20 @@ func makeToolCall(id, name string, args map[string]any) llm.ToolCall {
 
 // mockDispatcher is a minimal ToolDispatcher stub.
 type mockDispatcher struct {
-	handlers map[string]func(map[string]any) (string, error)
+	handlers map[string]func(llm.ToolCall) (string, error)
 }
 
 func newMockDispatcher() *mockDispatcher {
-	return &mockDispatcher{handlers: make(map[string]func(map[string]any) (string, error))}
+	return &mockDispatcher{handlers: make(map[string]func(llm.ToolCall) (string, error))}
 }
 
 func (d *mockDispatcher) ToTools() []llm.ToolDef { return nil }
 
-func (d *mockDispatcher) HandleCall(name string, args map[string]any) (string, error) {
-	if fn, ok := d.handlers[name]; ok {
-		return fn(args)
+func (d *mockDispatcher) HandleCall(tc llm.ToolCall) (string, error) {
+	if fn, ok := d.handlers[tc.Name]; ok {
+		return fn(tc)
 	}
-	return "", fmt.Errorf("mockDispatcher: unknown tool %q", name)
+	return "", fmt.Errorf("mockDispatcher: unknown tool %q", tc.Name)
 }
 
 // newTestAgent returns an Agent with stderr suppressed, suitable for unit tests.
@@ -104,7 +104,7 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 		textResponse("review done"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return wantResult, nil }
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return wantResult, nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 		textResponse("multi-tool review"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return "content", nil }
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestRunReview_CapReached(t *testing.T) {
 		textResponse("forced review"), // forced-final call
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ map[string]any) (string, error) { return "x", nil }
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 2, 1024)
 	if err != nil {

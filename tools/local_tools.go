@@ -26,17 +26,15 @@ func registerLocalReadFile(r *Registry) {
 		},
 	}
 
-	r.RegisterTool(def, func(args map[string]any) (string, error) {
-		pathRaw, ok := args["file_path"]
-		if !ok {
-			return "", fmt.Errorf("missing argument: file_path")
+	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
+		var args struct {
+			FilePath string `json:"file_path"`
 		}
-		pathStr, ok := pathRaw.(string)
-		if !ok {
-			return "", fmt.Errorf("file_path must be a string")
+		if err := tc.UnmarshalArguments(&args); err != nil {
+			return "", err
 		}
 
-		b, err := os.ReadFile(pathStr)
+		b, err := os.ReadFile(args.FilePath)
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
@@ -64,21 +62,18 @@ func registerLocalGlobFiles(r *Registry) {
 		},
 	}
 
-	r.RegisterTool(def, func(args map[string]any) (string, error) {
-		queryRaw, ok := args["query"]
-		if !ok {
-			return "", fmt.Errorf("missing argument: query")
+	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
+		var args struct {
+			Directory string `json:"directory"`
+			Query     string `json:"query"`
 		}
-		query, ok := queryRaw.(string)
-		if !ok {
-			return "", fmt.Errorf("query must be a string")
+		if err := tc.UnmarshalArguments(&args); err != nil {
+			return "", err
 		}
 
-		dir := "."
-		if dirRaw, ok := args["directory"]; ok {
-			if d, ok := dirRaw.(string); ok && d != "" {
-				dir = d
-			}
+		dir := args.Directory
+		if dir == "" {
+			dir = "."
 		}
 
 		var matches []string
@@ -88,7 +83,7 @@ func registerLocalGlobFiles(r *Registry) {
 			}
 			if !d.IsDir() {
 				// Simple substring match allows catching things like ".go" or "BUILD"
-				if strings.Contains(filepath.Base(path), query) || strings.Contains(path, query) {
+				if strings.Contains(filepath.Base(path), args.Query) || strings.Contains(path, args.Query) {
 					matches = append(matches, path)
 				}
 			}
