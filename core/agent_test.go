@@ -73,9 +73,111 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 	return NewAgent(model, d, WithStderr(io.Discard))
 }
 
+// spyReporter records method calls for verification.
+type spyReporter struct {
+	iterations   []int
+	toolCalls    []llm.ToolCall
+	finalReviews int
+	capsReached  []int
+}
+
+func (s *spyReporter) ReportIteration(iter int)       { s.iterations = append(s.iterations, iter) }
+func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
+func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
+func (s *spyReporter) ReportCapReached(max int)       { s.capsReached = append(s.capsReached, max) }
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
 // ──────────────────────────────────────────────────────────────────────────────
+
+func TestAgent_Reporter(t *testing.T) {
+	t.Run("happy-path reporting", func(t *testing.T) {
+		spy := &spyReporter{}
+		lm := &mockLLM{responses: []*llm.Response{
+			toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
+			textResponse("done"),
+		}}
+		d := newMockDispatcher()
+		d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "ok", nil }
+
+		agent := NewAgent(lm, d, WithReporter(spy))
+		_, err := agent.RunReview(context.Background(), "sys", "req", 5, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(spy.iterations) != 2 {
+			t.Errorf("expected 2 iterations reported, got %v", spy.iterations)
+		}
+		if len(spy.toolCalls) != 1 || spy.toolCalls[0].Name != "read_file" {
+			t.Errorf("expected 1 tool call reported, got %v", spy.toolCalls)
+		}
+	})
+
+	t.Run("no-tools edge-case", func(t *testing.T) {
+		spy := &spyReporter{}
+		lm := &mockLLM{responses: []*llm.Response{
+			textResponse("direct answer"),
+		}}
+		agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+		_, err := agent.RunReview(context.Background(), "sys", "req", 5, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(spy.iterations) != 1 {
+			t.Errorf("expected 1 iteration reported, got %v", spy.iterations)
+		}
+		if len(spy.toolCalls) != 0 {
+			t.Errorf("expected no tool calls reported, got %v", spy.toolCalls)
+		}
+	})
+}
+
+func TestAgent_ExecuteToolCalls(t *testing.T) {
+	t.Run("happy-path", func(t *testing.T) {
+		d := newMockDispatcher()
+		d.handlers["tool1"] = func(_ llm.ToolCall) (string, error) { return "res1", nil }
+		d.handlers["tool2"] = func(_ llm.ToolCall) (string, error) { return "res2", nil }
+
+		agent := NewAgent(nil, d, WithStderr(io.Discard))
+		tc1 := llm.ToolCall{ID: "id1", Name: "tool1"}
+		tc2 := llm.ToolCall{ID: "id2", Name: "tool2"}
+
+		msg, err := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if msg.Role != llm.RoleTool {
+			t.Errorf("expected RoleTool, got %v", msg.Role)
+		}
+		if len(msg.ToolResults) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
+		}
+		if msg.ToolResults[0].Content != "res1" || msg.ToolResults[1].Content != "res2" {
+			t.Errorf("unexpected results: %+v", msg.ToolResults)
+		}
+	})
+
+	t.Run("error-handling (individual tool failure)", func(t *testing.T) {
+		d := newMockDispatcher()
+		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", fmt.Errorf("boom") }
+
+		agent := NewAgent(nil, d, WithStderr(io.Discard))
+		msg, err := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
+		if err != nil {
+			t.Errorf("executeToolCalls should not return error on tool failure, got: %v", err)
+		}
+
+		if len(msg.ToolResults) != 1 {
+			t.Fatal("expected 1 result")
+		}
+		if msg.ToolResults[0].Content != "error: boom" {
+			t.Errorf("expected error string in content, got: %q", msg.ToolResults[0].Content)
+		}
+	})
+}
 
 // TestRunReview_DirectResponse verifies that when the LLM responds with plain
 // text on the first call (no tool calls), RunReview returns that text immediately.
