@@ -139,33 +139,46 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 			ToolCalls: resp.ToolCalls,
 		})
 
-		// Execute all tool calls and collect results into ONE RoleTool message.
-		// All ToolResults must be in a single message so providers see strict
-		// role alternation (no consecutive same-role turns).
-		toolMsg := llm.Message{
-			Role:        llm.RoleTool,
-			ToolResults: make([]llm.ToolResult, 0, len(resp.ToolCalls)),
-		}
-		for _, tc := range resp.ToolCalls {
-			// Progress line: print tool name + a compact summary of args.
-			a.reporter.ReportToolCall(tc)
-
-			// Dispatch; on error, surface the message as the tool result so the
-			// LLM can reason about it rather than crashing the whole loop.
-			result, toolErr := a.registry.HandleCall(tc)
-			if toolErr != nil {
-				result = fmt.Sprintf("error: %v", toolErr)
-			}
-
-			toolMsg.ToolResults = append(toolMsg.ToolResults, llm.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    result,
-			})
+		toolMsg, err := a.executeToolCalls(resp.ToolCalls)
+		if err != nil {
+			return "", err
 		}
 		messages = append(messages, toolMsg)
 	}
 
+	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
+}
+
+func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {
+	// Execute all tool calls and collect results into ONE RoleTool message.
+	// All ToolResults must be in a single message so providers see strict
+	// role alternation (no consecutive same-role turns).
+	toolMsg := llm.Message{
+		Role:        llm.RoleTool,
+		ToolResults: make([]llm.ToolResult, 0, len(toolCalls)),
+	}
+
+	for _, tc := range toolCalls {
+		// Progress line: print tool name + a compact summary of args.
+		a.reporter.ReportToolCall(tc)
+
+		// Dispatch; on error, surface the message as the tool result so the
+		// LLM can reason about it rather than crashing the whole loop.
+		result, toolErr := a.registry.HandleCall(tc)
+		if toolErr != nil {
+			result = fmt.Sprintf("error: %v", toolErr)
+		}
+
+		toolMsg.ToolResults = append(toolMsg.ToolResults, llm.ToolResult{
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+			Content:    result,
+		})
+	}
+	return toolMsg, nil
+}
+
+func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, maxIterations, maxTokens int) (string, error) {
 	// ── Cap reached ─────────────────────────────────────────────────────────
 	capMsg := fmt.Sprintf(
 		"[SYSTEM] The maximum number of tool-call iterations (%d) has been reached. "+
