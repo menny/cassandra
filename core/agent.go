@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +29,36 @@ func CalculateMaxIterations(changedFiles int) int {
 // *tools.Registry satisfies this interface; tests can supply a lightweight stub.
 type ToolDispatcher interface {
 	ToTools() []llm.ToolDef
-	HandleCall(name string, args map[string]any) (string, error)
+	HandleCall(tc llm.ToolCall) (string, error)
+}
+
+// Reporter defines how the Agent reports progress and diagnostics.
+type Reporter interface {
+	ReportIteration(iter int)
+	ReportToolCall(tc llm.ToolCall)
+	ReportFinalReview()
+	ReportCapReached(maxIterations int)
+}
+
+// defaultReporter writes progress to an io.Writer.
+type defaultReporter struct {
+	w io.Writer
+}
+
+func (r *defaultReporter) ReportIteration(iter int) {
+	fmt.Fprintf(r.w, "Iteration %d: Cassandra is reviewing the code...\n", iter)
+}
+
+func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
+	fmt.Fprintf(r.w, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
+}
+
+func (r *defaultReporter) ReportFinalReview() {
+	fmt.Fprintln(r.w, "Cassandra is formulating the final review...")
+}
+
+func (r *defaultReporter) ReportCapReached(maxIterations int) {
+	fmt.Fprintf(r.w, "Warning: reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
 }
 
 // AgentOption configures an Agent.
@@ -39,21 +67,30 @@ type AgentOption func(*Agent)
 // WithStderr redirects diagnostic/progress output to w instead of os.Stderr.
 // Useful in tests to suppress noise (pass io.Discard).
 func WithStderr(w io.Writer) AgentOption {
-	return func(a *Agent) { a.stderr = w }
+	return func(a *Agent) { a.reporter = &defaultReporter{w: w} }
+}
+
+// WithReporter sets a custom reporter for the Agent.
+func WithReporter(r Reporter) AgentOption {
+	return func(a *Agent) { a.reporter = r }
 }
 
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
 	llm      llm.Model
 	registry ToolDispatcher
-	stderr   io.Writer
+	reporter Reporter
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
-// default; override with WithStderr. The final review is returned as a string
-// (caller routes it to stdout).
+// default; override with WithStderr or WithReporter. The final review is
+// returned as a string (caller routes it to stdout).
 func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Agent {
-	a := &Agent{llm: model, registry: registry, stderr: os.Stderr}
+	a := &Agent{
+		llm:      model,
+		registry: registry,
+		reporter: &defaultReporter{w: os.Stderr},
+	}
 	for _, o := range opts {
 		o(a)
 	}
@@ -80,7 +117,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	tools := a.registry.ToTools()
 
 	for iter := range maxIterations {
-		fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
+		a.reporter.ReportIteration(iter + 1)
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
@@ -88,6 +125,10 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
+			if resp.Text == "" {
+				return "", fmt.Errorf("llm returned empty content on iteration %d", iter+1)
+			}
+			a.reporter.ReportFinalReview()
 			return resp.Text, nil
 		}
 
@@ -96,44 +137,50 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		// Append the assistant's tool-call turn to history.
 		messages = append(messages, llm.Message{
 			Role:      llm.RoleAssistant,
+			Text:      resp.Text,
 			ToolCalls: resp.ToolCalls,
 		})
 
-		// Execute all tool calls and collect results into ONE RoleTool message.
-		// All ToolResults must be in a single message so providers see strict
-		// role alternation (no consecutive same-role turns).
-		toolMsg := llm.Message{
-			Role:        llm.RoleTool,
-			ToolResults: make([]llm.ToolResult, 0, len(resp.ToolCalls)),
-		}
-		for _, tc := range resp.ToolCalls {
-			// Decode JSON arguments.
-			var args map[string]any
-			if tc.Arguments != "" {
-				if decodeErr := json.Unmarshal([]byte(tc.Arguments), &args); decodeErr != nil {
-					args = map[string]any{"raw": tc.Arguments}
-				}
-			}
-
-			// Progress line: print tool name + a compact summary of args.
-			fmt.Fprintf(a.stderr, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactArgs(args))
-
-			// Dispatch; on error, surface the message as the tool result so the
-			// LLM can reason about it rather than crashing the whole loop.
-			result, toolErr := a.registry.HandleCall(tc.Name, args)
-			if toolErr != nil {
-				result = fmt.Sprintf("error: %v", toolErr)
-			}
-
-			toolMsg.ToolResults = append(toolMsg.ToolResults, llm.ToolResult{
-				ToolCallID: tc.ID,
-				Name:       tc.Name,
-				Content:    result,
-			})
+		toolMsg, err := a.executeToolCalls(resp.ToolCalls)
+		if err != nil {
+			return "", err
 		}
 		messages = append(messages, toolMsg)
 	}
 
+	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
+}
+
+func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {
+	// Execute all tool calls and collect results into ONE RoleTool message.
+	// All ToolResults must be in a single message so providers see strict
+	// role alternation (no consecutive same-role turns).
+	toolMsg := llm.Message{
+		Role:        llm.RoleTool,
+		ToolResults: make([]llm.ToolResult, 0, len(toolCalls)),
+	}
+
+	for _, tc := range toolCalls {
+		// Progress line: print tool name + a compact summary of args.
+		a.reporter.ReportToolCall(tc)
+
+		// Dispatch; on error, surface the message as the tool result so the
+		// LLM can reason about it rather than crashing the whole loop.
+		result, toolErr := a.registry.HandleCall(tc)
+		if toolErr != nil {
+			result = fmt.Sprintf("error: %v", toolErr)
+		}
+
+		toolMsg.ToolResults = append(toolMsg.ToolResults, llm.ToolResult{
+			ToolCallID: tc.ID,
+			Name:       tc.Name,
+			Content:    result,
+		})
+	}
+	return toolMsg, nil
+}
+
+func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, maxIterations, maxTokens int) (string, error) {
 	// ── Cap reached ─────────────────────────────────────────────────────────
 	capMsg := fmt.Sprintf(
 		"[SYSTEM] The maximum number of tool-call iterations (%d) has been reached. "+
@@ -141,13 +188,10 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 			"you have gathered so far. Do not request any additional tools.",
 		maxIterations,
 	)
-	fmt.Fprintf(a.stderr,
-		"Warning: reached maximum ReAct iterations (%d). Forcing final review.\n",
-		maxIterations,
-	)
+	a.reporter.ReportCapReached(maxIterations)
 
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: capMsg})
-	fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
+	a.reporter.ReportFinalReview()
 
 	// Pass nil tools so the provider cannot issue further tool calls even if
 	// it ignores the cap instruction in the prompt.
@@ -161,16 +205,12 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	return resp.Text, nil
 }
 
-// compactArgs returns a short human-readable summary of tool arguments.
-func compactArgs(args map[string]any) string {
-	if len(args) == 0 {
+// compactToolCallArgs returns a short human-readable summary of tool arguments.
+func compactToolCallArgs(tc llm.ToolCall) string {
+	if tc.Arguments == "" {
 		return "no args"
 	}
-	b, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Sprintf("%v", args)
-	}
-	s := string(b)
+	s := tc.Arguments
 	const maxLen = 120
 	if len(s) > maxLen {
 		s = s[:maxLen] + "…"

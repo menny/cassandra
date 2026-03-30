@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//llm",
+        "//llm/internal/util",
         "@com_github_anthropics_anthropic_sdk_go//:anthropic-sdk-go",
         "@com_github_anthropics_anthropic_sdk_go//option",
         "@com_github_anthropics_anthropic_sdk_go//packages/param",

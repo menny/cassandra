@@ -18,4 +18,5 @@ go_test(
     name = "tools_test",
     srcs = ["local_tools_test.go"],
     embed = [":tools"],
+    deps = ["//llm"],
 )

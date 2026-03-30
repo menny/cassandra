@@ -3,7 +3,11 @@
 // directly; they interact exclusively through the Model interface defined here.
 package llm
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
 
 // Role identifies the author of a message in a conversation.
 type Role string
@@ -34,6 +38,18 @@ type ToolCall struct {
 	Arguments string // raw JSON
 }
 
+// UnmarshalArguments unmarshals the raw JSON Arguments into the given destination.
+// It returns a formatted error if the unmarshaling fails.
+func (tc *ToolCall) UnmarshalArguments(dest any) error {
+	if tc.Arguments == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(tc.Arguments), dest); err != nil {
+		return fmt.Errorf("tool call %q has malformed arguments: %w", tc.Name, err)
+	}
+	return nil
+}
+
 // ToolResult is the response to a ToolCall, bundled into a RoleTool message.
 type ToolResult struct {
 	ToolCallID string
@@ -62,11 +78,3 @@ type Response struct {
 type Model interface {
 	GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
 }
-
-// Provider identifies a supported LLM provider.
-type Provider string
-
-const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderGoogle    Provider = "google"
-)

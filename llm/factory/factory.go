@@ -11,17 +11,25 @@ import (
 	"github.com/menny/cassandra/llm/google"
 )
 
+// Provider identifies a supported LLM provider.
+type Provider string
+
+const (
+	ProviderAnthropic Provider = "anthropic"
+	ProviderGoogle    Provider = "google"
+)
+
 // New constructs a Model for the given provider, model name, and API key.
 func New(ctx context.Context, provider, modelName, apiKey string) (llm.Model, error) {
-	switch llm.Provider(provider) {
-	case llm.ProviderAnthropic:
+	switch Provider(provider) {
+	case ProviderAnthropic:
 		// Anthropic client is constructed synchronously; ctx is unused at
 		// construction time (the SDK dials lazily per request).
 		return anthropic.New(apiKey, modelName), nil
-	case llm.ProviderGoogle:
+	case ProviderGoogle:
 		return google.New(ctx, apiKey, modelName)
 	default:
 		return nil, fmt.Errorf("unsupported provider %q: supported providers are %q and %q",
-			provider, llm.ProviderAnthropic, llm.ProviderGoogle)
+			provider, ProviderAnthropic, ProviderGoogle)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/menny/cassandra/llm"
 )
 
-type ToolHandler func(args map[string]any) (string, error)
+type ToolHandler func(tc llm.ToolCall) (string, error)
 
 type Registry struct {
 	tools    []llm.ToolDef
@@ -28,12 +28,12 @@ func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
 	r.handlers[def.Name] = handler
 }
 
-func (r *Registry) HandleCall(name string, args map[string]any) (string, error) {
-	handler, ok := r.handlers[name]
+func (r *Registry) HandleCall(tc llm.ToolCall) (string, error) {
+	handler, ok := r.handlers[tc.Name]
 	if !ok {
-		return "", fmt.Errorf("tool not found: %s", name)
+		return "", fmt.Errorf("tool not found: %s", tc.Name)
 	}
-	return handler(args)
+	return handler(tc)
 }
 
 func RegisterLocalTools(r *Registry) {

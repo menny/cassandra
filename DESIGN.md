@@ -41,8 +41,11 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
    - The repository uses Bazel `8.6.0` alongside standard `go.mod` resolution (using Gazelle's `go_deps` extension).
    - *Note on Bazel 9:* We intentionally stick to Bazel 8 at this time to avoid known incompatibilities between stable releases of `rules_go` and the removal of macOS `current_xcode_config` targets in Bazel 9. The internal Go SDK is pinned to `1.24.4`.
 
-4. **Structured Feedback Extraction**
-   - Code reviews in this system follow a `Do / Try / Consider` framework. Rather than forcing the primary reasoning process to output JSON directly (which can degrade reasoning quality), the system allows the first "Agent" pass to output free-form markdown, followed by a secondary extraction LLM call dedicated entirely to formatting that markdown into structured JSON boundaries.
+4. **Structured Feedback Extraction (Target Architecture)**
+   - Code reviews in this system are designed to follow a `Do / Try / Consider` framework. To ensure high reasoning quality, the system's target architecture separates reasoning from formatting:
+     1. A primary "Agent" pass outputs free-form markdown (optimizing for LLM reasoning).
+     2. A secondary extraction LLM call (using the `llm/` abstraction) formats that markdown into structured JSON findings.
+   - *Note:* While the foundation for this is present in the `llm/` package, the secondary extraction pass is currently being integrated into the main execution flow.
 
 ## Output Contract
 
@@ -57,4 +60,4 @@ All diagnostic and progress output (configuration summary, ReAct iteration progr
 - **Structured Output Extraction**: The current system returns the final review as free-form markdown. A future enhancement is to add a second LLM pass that converts the markdown review into a structured JSON representation (e.g. a list of findings, each tagged by severity and category). The recommended approach is provider-specific:
   - **Anthropic**: Define a single `submit_review` tool whose JSON Schema matches the desired output shape. Instruct the model to call it unconditionally in the final turn. The tool's `arguments` field carries the structured payload.
   - **Google Gemini**: Set `GenerateContentConfig.ResponseMIMEType = "application/json"` and `ResponseSchema` to the target schema. The model returns JSON directly in the text content.
-  - The structured output call should be a separate, optional step invoked after `RunReview` returns, keeping the primary reasoning pass free-form (forcing JSON output early degrades reasoning quality). One proposed approach: a thin helper in a new `core/extract.go` that reuses the same `Model` without requiring any interface changes.
+  - The structured output call should be a separate, optional step invoked after `RunReview` returns, keeping the primary reasoning pass free-form (forcing JSON output early degrades reasoning quality). The `llm/` abstraction provides the foundation for this by ensuring that both providers can be driven to produce structured results through the same unified `llm.Model` interface.

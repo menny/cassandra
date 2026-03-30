@@ -30,6 +30,27 @@ All **diagnostic and progress output** (configuration summary, ReAct iteration p
 
 When adding new logging or output anywhere in the codebase, apply this rule strictly.
 
+## Engineering Guidelines
+
+### 1. Tool Implementation Pattern
+To maintain consistency and type safety, all new tools MUST follow the standardized argument handling pattern:
+- **Struct-based Arguments**: Define a local anonymous struct (or a named struct if reused) to represent tool parameters.
+- **Explicit Unmarshaling**: Use `tc.UnmarshalArguments(&args)` within the tool handler. Do not perform manual type assertions or "missing key" checks on a map.
+- **Error Propagation**: Return errors from the handler; the `Agent` is responsible for formatting these as "error: ..." strings for the LLM to process.
+
+### 2. Diagnostic Reporting
+Progress reporting is abstracted via the `core.Reporter` interface.
+- **Interface Usage**: Do not write directly to `os.Stderr` within the ReAct loop logic. Use `a.reporter.ReportIteration(...)`, etc.
+- **Default Phrasing**: Use distinct phrasing for different stages (e.g., "Iteration X..." vs "Formulating final review...") to provide high-signal feedback to the user.
+
+### 3. Testing Standards
+- **Mock Isolation**: When using `mockLLM` or similar history-tracking doubles, you MUST perform a deep copy of the message slice and its internal slices (`ToolCalls`, `ToolResults`). Shallow copies will lead to state contamination across iterations.
+- **Safer JSON Construction**: Avoid manual string concatenation for JSON arguments in tests. Use `json.Marshal` or existing helpers to ensure paths (especially in `t.TempDir()`) containing special characters do not break the test payload.
+- **Negative Testing**: Every new tool or core logic change SHOULD include error-handling test cases (e.g., malformed JSON, missing files, individual tool failures).
+
+### 4. Performance Mindfulness
+- **Redundant I/O**: When walking the directory tree for configuration or guidelines (like `REVIEWERS.md`), use directory-based caching to avoid redundant disk lookups. If a directory subtree has already been searched for a specific filename, terminate the walk-up early.
+
 ## Git Commit Guidelines
 
 When committing changes on behalf of the user, strictly follow these commit message rules based on Conventional Commits:
