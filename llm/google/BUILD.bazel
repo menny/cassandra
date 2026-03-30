@@ -18,8 +18,8 @@ go_test(
     embed = [":google"],
     deps = [
         "//llm",
-        "@org_golang_google_genai//:genai",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@org_golang_google_genai//:genai",
     ],
 )
