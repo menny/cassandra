@@ -32,27 +32,65 @@ type ToolDispatcher interface {
 	HandleCall(tc llm.ToolCall) (string, error)
 }
 
+// Reporter defines how the Agent reports progress and diagnostics.
+type Reporter interface {
+	ReportIteration(iter int)
+	ReportToolCall(tc llm.ToolCall)
+	ReportFinalReview()
+	ReportCapReached(maxIterations int)
+}
+
+// defaultReporter writes progress to an io.Writer.
+type defaultReporter struct {
+	w io.Writer
+}
+
+func (r *defaultReporter) ReportIteration(iter int) {
+	fmt.Fprintln(r.w, "Cassandra is reviewing the code...")
+}
+
+func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
+	fmt.Fprintf(r.w, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
+}
+
+func (r *defaultReporter) ReportFinalReview() {
+	fmt.Fprintln(r.w, "Cassandra is reviewing the code...")
+}
+
+func (r *defaultReporter) ReportCapReached(maxIterations int) {
+	fmt.Fprintf(r.w, "Warning: reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
+}
+
 // AgentOption configures an Agent.
 type AgentOption func(*Agent)
 
 // WithStderr redirects diagnostic/progress output to w instead of os.Stderr.
 // Useful in tests to suppress noise (pass io.Discard).
 func WithStderr(w io.Writer) AgentOption {
-	return func(a *Agent) { a.stderr = w }
+	return func(a *Agent) { a.reporter = &defaultReporter{w: w} }
+}
+
+// WithReporter sets a custom reporter for the Agent.
+func WithReporter(r Reporter) AgentOption {
+	return func(a *Agent) { a.reporter = r }
 }
 
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
 	llm      llm.Model
 	registry ToolDispatcher
-	stderr   io.Writer
+	reporter Reporter
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
-// default; override with WithStderr. The final review is returned as a string
-// (caller routes it to stdout).
+// default; override with WithStderr or WithReporter. The final review is
+// returned as a string (caller routes it to stdout).
 func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Agent {
-	a := &Agent{llm: model, registry: registry, stderr: os.Stderr}
+	a := &Agent{
+		llm:      model,
+		registry: registry,
+		reporter: &defaultReporter{w: os.Stderr},
+	}
 	for _, o := range opts {
 		o(a)
 	}
@@ -79,7 +117,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	tools := a.registry.ToTools()
 
 	for iter := range maxIterations {
-		fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
+		a.reporter.ReportIteration(iter + 1)
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
@@ -110,7 +148,7 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		}
 		for _, tc := range resp.ToolCalls {
 			// Progress line: print tool name + a compact summary of args.
-			fmt.Fprintf(a.stderr, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
+			a.reporter.ReportToolCall(tc)
 
 			// Dispatch; on error, surface the message as the tool result so the
 			// LLM can reason about it rather than crashing the whole loop.
@@ -135,13 +173,10 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 			"you have gathered so far. Do not request any additional tools.",
 		maxIterations,
 	)
-	fmt.Fprintf(a.stderr,
-		"Warning: reached maximum ReAct iterations (%d). Forcing final review.\n",
-		maxIterations,
-	)
+	a.reporter.ReportCapReached(maxIterations)
 
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: capMsg})
-	fmt.Fprintln(a.stderr, "Cassandra is reviewing the code...")
+	a.reporter.ReportFinalReview()
 
 	// Pass nil tools so the provider cannot issue further tool calls even if
 	// it ignores the cap instruction in the prompt.
