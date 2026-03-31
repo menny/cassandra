@@ -53,24 +53,10 @@ func TestFetchGitDiff(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupGitRepo(t, tmpDir)
 
-	// Change working directory to tmpDir so git commands work
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := os.Chdir(origDir); err != nil {
-			t.Logf("Failed to restore working directory: %v", err)
-		}
-	}()
-
 	t.Run("Triple-dot diff", func(t *testing.T) {
 		// diff main...feature should ONLY show feature.txt
 		// NOT main_new.txt
-		diff, files, err := FetchGitDiff("main", "feature")
+		diff, files, err := FetchGitDiff(tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -111,7 +97,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "go.sum")
 		runGitCmd(t, tmpDir, "commit", "-m", "add go.sum")
 
-		_, files, err := FetchGitDiff("main", "feature")
+		_, files, err := FetchGitDiff(tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}

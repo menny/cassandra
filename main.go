@@ -103,7 +103,7 @@ func main() {
 
 	var requestText string
 	var changedFiles []string
-	diffOutput, files, err := tools.FetchGitDiff(base, head)
+	diffOutput, files, err := tools.FetchGitDiff(targetDir, base, head)
 	if err != nil {
 		log.Fatalf("Failed to extract git diff: %v", err)
 	}

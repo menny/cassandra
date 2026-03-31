@@ -7,7 +7,7 @@ This document details the architecture, technical decisions, and layout of the C
 The system is designed as a CLI-driven, autonomous AI worker. It acts essentially as a ReAct (Reasoning and Acting) loop, leveraging the Function Calling (Tool Use) capabilities of modern LLMs to explore codebases locally or remotely before finalizing its code review.
 
 ### 1. CLI Entrypoint (`main.go`)
-- Parses user intent. Supports reviewing local git changes (`--diff`).
+- Parses user intent. Supports reviewing changes between commits/branches (`--base` and `--head`).
 - Dynamically accepts `--provider` (`google` or `anthropic`), `--model`, and `--provider-api-key` to abstract away the underlying LLM dependency.
 
 ### 2. LLM Abstraction (`llm/`)
@@ -49,7 +49,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 
 ## Output Contract
 
-All diagnostic and progress output (configuration summary, ReAct iteration progress, tool invocations) is written to **stderr**. Only the final review text is written to **stdout**. This separation allows callers to cleanly capture the review output via shell redirection (e.g., `cassandra --diff main > review.md`) without interleaving progress noise.
+All diagnostic and progress output (configuration summary, ReAct iteration progress, tool invocations) is written to **stderr**. Only the final review text is written to **stdout**. This separation allows callers to cleanly capture the review output via shell redirection (e.g., `cassandra --base main --head my-branch > review.md`) without interleaving progress noise.
 
 ## Future work
 

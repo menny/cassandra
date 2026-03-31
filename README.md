@@ -26,12 +26,13 @@ go build -o ai-review-agent main.go
 
 ## Usage
 
-### Review Local Changes
-To review local uncommitted changes against a specific branch:
+### Review Changes
+To review changes between a base and a head commit/branch:
 
 ```bash
 ./ai-review-agent \
-  --diff origin/main \
+  --base main \
+  --head feature-branch \
   --provider google \
   --model gemini-1.5-pro \
   --provider-api-key "YOUR_API_KEY"
@@ -42,7 +43,8 @@ To review local uncommitted changes against a specific branch:
 | Flag | Description | Default | Required |
 |---|---|---|---|
 | `--cwd` | Working directory | | No |
-| `--diff` | Review a git diff against the specified branch | `main` | **Yes** |
+| `--base` | Base commit/branch for diff | `main` | No |
+| `--head` | Head commit/branch for diff | `HEAD` | No |
 | `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |

@@ -21,7 +21,7 @@ jobs:
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
-          disk-cache: ${{ github.workflow }}
+          disk-cache: cassandra-review
           repository-cache: true
 
       - name: Run Cassandra Review

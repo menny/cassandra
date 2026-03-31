@@ -16,7 +16,7 @@ var lockFiles = []string{
 	"Gemfile.lock",
 }
 
-func FetchGitDiff(base, head string) (string, []string, error) {
+func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	diffRange := fmt.Sprintf("%s...%s", base, head)
 	cmdArgs := []string{"diff", diffRange}
 
@@ -26,9 +26,10 @@ func FetchGitDiff(base, head string) (string, []string, error) {
 	}
 
 	cmd := exec.Command("git", cmdArgs...)
+	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", nil, fmt.Errorf("git diff %s failed: %v\nOutput: %s", diffRange, err, string(out))
+		return "", nil, fmt.Errorf("git diff %s failed in %s: %v\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
 
 	diffText := string(out)
@@ -41,7 +42,9 @@ func FetchGitDiff(base, head string) (string, []string, error) {
 	for _, lf := range lockFiles {
 		nameOnlyArgs = append(nameOnlyArgs, fmt.Sprintf(":(exclude)*%s", lf))
 	}
-	nameOnlyOut, err := exec.Command("git", nameOnlyArgs...).CombinedOutput()
+	nameOnlyCmd := exec.Command("git", nameOnlyArgs...)
+	nameOnlyCmd.Dir = workingDir
+	nameOnlyOut, err := nameOnlyCmd.CombinedOutput()
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
 	}
