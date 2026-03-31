@@ -1,0 +1,36 @@
+name: Cassandra Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    name: AI Code Review
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+
+      - name: Run Cassandra Review
+        run: |
+          bazel run //:ai-review-agent -- \
+            --diff \
+            --provider google \
+            --model gemini-3-flash-preview \
+            --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
+            --cwd="$PWD"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
