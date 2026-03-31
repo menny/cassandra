@@ -28,12 +28,14 @@ func main() {
 	var workingDir string
 	var mainGuidelines string
 	var maxTokens int
+	var reviewOutputFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
+	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -125,4 +127,11 @@ func main() {
 
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
+
+	if reviewOutputFile != "" {
+		if err := os.WriteFile(reviewOutputFile, []byte(result), 0o644); err != nil {
+			log.Fatalf("Failed to write review to %s: %v", reviewOutputFile, err)
+		}
+		stderr.Printf("Review written to %s\n", reviewOutputFile)
+	}
 }

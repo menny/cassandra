@@ -32,5 +32,26 @@ jobs:
             --provider google \
             --model gemini-3-flash-preview \
             --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
-            --cwd="${{ github.workspace }}"
+            --cwd="${{ github.workspace }}" \
+            --review-output-file "review.md"
+
+      - name: Post AI Review Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="<!-- cassandra-ai-review -->"
+          
+          # Append the tag for persistence
+          echo -e "\n\n$TAG" >> review.md
+
+          # Find if a comment with this tag already exists
+          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
+
+          if [ -n "$COMMENT_ID" ]; then
+            echo "Updating existing comment $COMMENT_ID..."
+            gh pr comment ${{ github.event.pull_request.number }} --edit "$COMMENT_ID" --body-file review.md
+          else
+            echo "Creating new comment..."
+            gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
+          fi
 
