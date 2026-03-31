@@ -20,7 +20,8 @@ import (
 var stderr = log.New(os.Stderr, "", 0)
 
 func main() {
-	var diffBranch string
+	var base string
+	var head string
 	var modelName string
 	var provider string
 	var providerAPIKey string
@@ -31,8 +32,8 @@ func main() {
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
-	flag.StringVar(&diffBranch, "diff", "", "Review git diff against the specified branch (default 'main')")
-	flag.Lookup("diff").NoOptDefVal = "main" // Allows omitting the value and defaulting to 'main'
+	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
+	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -59,9 +60,6 @@ func main() {
 	}
 
 	var missing []string
-	if diffBranch == "" {
-		missing = append(missing, "--diff")
-	}
 	if provider == "" {
 		missing = append(missing, "--provider")
 	}
@@ -79,7 +77,8 @@ func main() {
 
 	stderr.Println("=== Cassandra Configuration ===")
 	stderr.Printf("  Working Directory: %s\n", targetDir)
-	stderr.Printf("  Target Branch: %s\n", diffBranch)
+	stderr.Printf("  Base: %s\n", base)
+	stderr.Printf("  Head: %s\n", head)
 	stderr.Printf("  LLM Provider: %s\n", provider)
 	stderr.Printf("  LLM Model: %s\n", modelName)
 	if mainGuidelines != "" {
@@ -104,16 +103,12 @@ func main() {
 
 	var requestText string
 	var changedFiles []string
-	if diffBranch != "" || flag.Lookup("diff").Changed {
-		diffOutput, files, err := tools.FetchGitDiff(diffBranch)
-		if err != nil {
-			log.Fatalf("Failed to extract git diff: %v", err)
-		}
-		requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
-		changedFiles = files
-	} else {
-		requestText = "Review the provided changes for issues."
+	diffOutput, files, err := tools.FetchGitDiff(base, head)
+	if err != nil {
+		log.Fatalf("Failed to extract git diff: %v", err)
 	}
+	requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
+	changedFiles = files
 
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))

@@ -16,7 +16,10 @@ go_library(
 
 go_test(
     name = "tools_test",
-    srcs = ["local_tools_test.go"],
+    srcs = [
+        "diff_test.go",
+        "local_tools_test.go",
+    ],
     embed = [":tools"],
     deps = ["//llm"],
 )

@@ -27,10 +27,9 @@ jobs:
       - name: Run Cassandra Review
         run: |
           bazel run //:ai-review-agent -- \
-            --diff "${{ github.base_ref }}" \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.head_ref }}" \
             --provider google \
             --model gemini-3-flash-preview \
             --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
             --cwd="${{ github.workspace }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
