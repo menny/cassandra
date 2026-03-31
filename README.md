@@ -36,7 +36,7 @@ To review changes between a base and a head commit/branch:
   --base main \
   --head feature-branch \
   --provider google \
-  --model gemini-2.0-flash \
+  --model gemini-3.1-pro-preview \
   --provider-api-key "YOUR_API_KEY"
 ```
 
@@ -67,7 +67,7 @@ Example workflow step:
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
             --provider google \
-            --model gemini-2.0-flash \
+            --model gemini-3.1-pro-preview \
             --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
             --cwd="${{ github.workspace }}" \
             --review-output-file "review.md"
