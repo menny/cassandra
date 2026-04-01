@@ -17,6 +17,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Add Eyes Reaction
+        id: add_reaction
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq .id)
+          echo "reaction_id=$REACTION_ID" >> $GITHUB_OUTPUT
+
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
@@ -53,5 +62,16 @@ jobs:
           else
             echo "Creating new comment..."
             gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
+          fi
+
+      - name: Remove Eyes Reaction
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REACTION_ID="${{ steps.add_reaction.outputs.reaction_id }}"
+          if [ -n "$REACTION_ID" ]; then
+            gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$REACTION_ID
           fi
 
