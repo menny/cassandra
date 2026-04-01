@@ -74,9 +74,23 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 
 		case llm.RoleAssistant:
 			var parts []*genai.Part
+			var sig []byte
+			if s, ok := m.ProviderMetadata["google_thought_signature"].([]byte); ok {
+				sig = s
+			}
+
+			if m.Reasoning != "" {
+				parts = append(parts, &genai.Part{
+					Text:             m.Reasoning,
+					Thought:          true,
+					ThoughtSignature: sig,
+				})
+			}
+
 			if m.Text != "" {
 				parts = append(parts, &genai.Part{Text: m.Text})
 			}
+
 			for _, tc := range m.ToolCalls {
 				var args map[string]any
 				if err := tc.UnmarshalArguments(&args); err != nil {
@@ -87,6 +101,7 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 						Name: tc.Name,
 						Args: args,
 					},
+					ThoughtSignature: sig,
 				})
 			}
 			if len(parts) == 0 {
@@ -189,9 +204,22 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 
 	result := &llm.Response{}
 	for _, part := range candidate.Content.Parts {
+		// Thought and ThoughtSignature are captured for models that support
+		// explicit reasoning (e.g. Gemini 2.0 Thinking).
+		if part.Thought {
+			result.Reasoning += part.Text
+		}
+		if part.ThoughtSignature != nil {
+			if result.ProviderMetadata == nil {
+				result.ProviderMetadata = make(map[string]any)
+			}
+			result.ProviderMetadata["google_thought_signature"] = part.ThoughtSignature
+		}
+
 		// Both fields are checked independently: the Gemini API can return a
 		// part that carries both text and a function call in a mixed turn.
-		if part.Text != "" {
+		// However, Thought parts are kept separate from the user-facing Text.
+		if !part.Thought && part.Text != "" {
 			result.Text += part.Text
 		}
 		if part.FunctionCall != nil {

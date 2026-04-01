@@ -25,10 +25,12 @@ const (
 //   - RoleAssistant (tool requests): ToolCalls is set (Text may also be set).
 //   - RoleTool: ToolResults is set.
 type Message struct {
-	Role        Role
-	Text        string
-	ToolCalls   []ToolCall
-	ToolResults []ToolResult
+	Role             Role
+	Text             string
+	ToolCalls        []ToolCall
+	ToolResults      []ToolResult
+	Reasoning        string         // Internal reasoning/thought process from the model
+	ProviderMetadata map[string]any // Opaque provider-specific data (e.g. thought signatures)
 }
 
 // ToolCall is a tool invocation requested by the model in an assistant turn.
@@ -69,8 +71,10 @@ type ToolDef struct {
 // At least one of Text or ToolCalls will be non-empty; providers that support
 // mixed streaming turns may populate both simultaneously.
 type Response struct {
-	Text      string     // set when the model produced a final answer
-	ToolCalls []ToolCall // set when the model wants to invoke tools
+	Text             string         // set when the model produced a final answer
+	ToolCalls        []ToolCall     // set when the model wants to invoke tools
+	Reasoning        string         // set when the model provides internal reasoning
+	ProviderMetadata map[string]any // opaque data to be echoed in subsequent turns
 }
 
 // Model is the only interface core.Agent depends on.

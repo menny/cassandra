@@ -16,9 +16,16 @@ var lockFiles = []string{
 	"Gemfile.lock",
 }
 
-func FetchGitDiff(diffBranch string) (string, []string, error) {
-	cmdArgs := []string{"diff"}
-	cmdArgs = append(cmdArgs, diffBranch)
+func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
+	var diffRange string
+	if head == "HEAD" {
+		// Use single-dot to include uncommitted changes in the working tree/index
+		diffRange = base
+	} else {
+		// Use triple-dot for comparing the tip of head with the common ancestor of base
+		diffRange = fmt.Sprintf("%s...%s", base, head)
+	}
+	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
 	for _, lf := range lockFiles {
@@ -26,9 +33,10 @@ func FetchGitDiff(diffBranch string) (string, []string, error) {
 	}
 
 	cmd := exec.Command("git", cmdArgs...)
+	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", nil, fmt.Errorf("git diff failed: %v\nOutput: %s", err, string(out))
+		return "", nil, fmt.Errorf("git diff %s failed in %s: %v\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
 
 	diffText := string(out)
@@ -37,11 +45,13 @@ func FetchGitDiff(diffBranch string) (string, []string, error) {
 	}
 
 	// Get file list
-	nameOnlyArgs := []string{"diff", "--name-only", diffBranch, "--", "."}
+	nameOnlyArgs := []string{"diff", "--name-only", diffRange, "--", "."}
 	for _, lf := range lockFiles {
 		nameOnlyArgs = append(nameOnlyArgs, fmt.Sprintf(":(exclude)*%s", lf))
 	}
-	nameOnlyOut, err := exec.Command("git", nameOnlyArgs...).CombinedOutput()
+	nameOnlyCmd := exec.Command("git", nameOnlyArgs...)
+	nameOnlyCmd.Dir = workingDir
+	nameOnlyOut, err := nameOnlyCmd.CombinedOutput()
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
 	}
