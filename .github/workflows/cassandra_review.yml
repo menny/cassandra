@@ -72,6 +72,6 @@ jobs:
         run: |
           REACTION_ID="${{ steps.add_reaction.outputs.reaction_id }}"
           if [ -n "$REACTION_ID" ]; then
-            gh api -X DELETE repos/${{ github.repository }}/reactions/$REACTION_ID
+            gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$REACTION_ID
           fi
 
