@@ -58,7 +58,7 @@ jobs:
 
           if [ -n "$COMMENT_ID" ]; then
             echo "Updating existing comment $COMMENT_ID..."
-            gh pr comment ${{ github.event.pull_request.number }} --edit "$COMMENT_ID" --body-file review.md
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@review.md
           else
             echo "Creating new comment..."
             gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
