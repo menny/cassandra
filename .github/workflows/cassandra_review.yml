@@ -21,9 +21,9 @@ jobs:
         id: add_reaction
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq .id)
+          REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
           echo "reaction_id=$REACTION_ID" >> $GITHUB_OUTPUT
 
       - name: Setup Bazel
@@ -46,7 +46,7 @@ jobs:
 
       - name: Post AI Review Comment
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           TAG="<!-- cassandra-ai-review -->"
           
@@ -68,10 +68,10 @@ jobs:
         if: always()
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           REACTION_ID="${{ steps.add_reaction.outputs.reaction_id }}"
           if [ -n "$REACTION_ID" ]; then
-            gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$REACTION_ID
+            gh api -X DELETE repos/${{ github.repository }}/reactions/$REACTION_ID
           fi
 
