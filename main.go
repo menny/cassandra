@@ -109,6 +109,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to extract git diff: %v", err)
 	}
+
+	if len(files) == 0 {
+		stderr.Println("No changes found to review.")
+		os.Exit(0)
+	}
+
 	requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
 	changedFiles = files
 

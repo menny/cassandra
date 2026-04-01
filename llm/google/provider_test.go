@@ -242,6 +242,82 @@ func TestParseGenaiResponse_MixedTextAndToolCall(t *testing.T) {
 	assert.Equal(t, "read_file", result.ToolCalls[0].Name)
 }
 
+func TestToContents_AssistantWithThought(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role:      llm.RoleAssistant,
+			Reasoning: "I should read the file.",
+			ProviderMetadata: map[string]any{
+				"google_thought_signature": []byte("sig123"),
+			},
+			ToolCalls: []llm.ToolCall{
+				{ID: "read_file_0", Name: "read_file", Arguments: `{"file_path":"foo.go"}`},
+			},
+		},
+	}
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
+	require.Len(t, contents, 1)
+	assert.Equal(t, "model", contents[0].Role)
+
+	// Parts: Thought (with sig), FunctionCall (with sig)
+	require.Len(t, contents[0].Parts, 2)
+	assert.True(t, contents[0].Parts[0].Thought)
+	assert.Equal(t, "I should read the file.", contents[0].Parts[0].Text)
+	assert.Equal(t, []byte("sig123"), contents[0].Parts[0].ThoughtSignature)
+
+	assert.NotNil(t, contents[0].Parts[1].FunctionCall)
+	assert.Equal(t, []byte("sig123"), contents[0].Parts[1].ThoughtSignature)
+}
+
+func TestParseGenaiResponse_WithThought(t *testing.T) {
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				Content: &genai.Content{
+					Role: "model",
+					Parts: []*genai.Part{
+						{Text: "thinking...", Thought: true},
+						{ThoughtSignature: []byte("sig456")},
+						{Text: "I'll do it."},
+						{
+							FunctionCall: &genai.FunctionCall{
+								Name: "read_file",
+								Args: map[string]any{"file_path": "main.go"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	result, err := parseGenaiResponse(resp)
+	require.NoError(t, err)
+	assert.Equal(t, "thinking...", result.Reasoning)
+	assert.Equal(t, []byte("sig456"), result.ProviderMetadata["google_thought_signature"])
+	assert.Equal(t, "I'll do it.", result.Text)
+	require.Len(t, result.ToolCalls, 1)
+}
+
+func TestToContents_MixedTextAndReasoning(t *testing.T) {
+	msgs := []llm.Message{
+		{
+			Role:      llm.RoleAssistant,
+			Text:      "Here is the result.",
+			Reasoning: "I calculated the sum.",
+		},
+	}
+	contents, _, err := toContents(msgs)
+	require.NoError(t, err)
+	require.Len(t, contents, 1)
+	// Expect 2 parts: Reasoning/Thought first, then Text
+	require.Len(t, contents[0].Parts, 2)
+	assert.True(t, contents[0].Parts[0].Thought)
+	assert.Equal(t, "I calculated the sum.", contents[0].Parts[0].Text)
+	assert.False(t, contents[0].Parts[1].Thought)
+	assert.Equal(t, "Here is the result.", contents[0].Parts[1].Text)
+}
+
 func TestParseGenaiResponse_NoCandidates(t *testing.T) {
 	resp := &genai.GenerateContentResponse{}
 	_, err := parseGenaiResponse(resp)

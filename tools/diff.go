@@ -17,7 +17,14 @@ var lockFiles = []string{
 }
 
 func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
-	diffRange := fmt.Sprintf("%s...%s", base, head)
+	var diffRange string
+	if head == "HEAD" {
+		// Use single-dot to include uncommitted changes in the working tree/index
+		diffRange = base
+	} else {
+		// Use triple-dot for comparing the tip of head with the common ancestor of base
+		diffRange = fmt.Sprintf("%s...%s", base, head)
+	}
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")

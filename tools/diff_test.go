@@ -108,4 +108,41 @@ func TestFetchGitDiff(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("HEAD vs specific branch", func(t *testing.T) {
+		// Create uncommitted change (tracked)
+		uncommittedPath := filepath.Join(tmpDir, "uncommitted.txt")
+		err := os.WriteFile(uncommittedPath, []byte("uncommitted"), 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, tmpDir, "add", "uncommitted.txt")
+
+		// head="HEAD" should include uncommitted changes
+		_, files, err := FetchGitDiff(tmpDir, "main", "HEAD")
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, f := range files {
+			if f == "uncommitted.txt" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected to find uncommitted.txt when head is HEAD")
+		}
+
+		// head="feature" should NOT include uncommitted changes (uses triple-dot)
+		_, files, err = FetchGitDiff(tmpDir, "main", "feature")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if f == "uncommitted.txt" {
+				t.Error("did NOT expect to find uncommitted.txt when head is NOT HEAD")
+			}
+		}
+	})
 }

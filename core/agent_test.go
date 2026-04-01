@@ -33,6 +33,12 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 			snapshot[i].ToolResults = make([]llm.ToolResult, len(msg.ToolResults))
 			copy(snapshot[i].ToolResults, msg.ToolResults)
 		}
+		if msg.ProviderMetadata != nil {
+			snapshot[i].ProviderMetadata = make(map[string]any)
+			for k, v := range msg.ProviderMetadata {
+				snapshot[i].ProviderMetadata[k] = v
+			}
+		}
 	}
 	m.calls = append(m.calls, snapshot)
 
@@ -406,14 +412,72 @@ func TestRunReview_PreserveAssistantText(t *testing.T) {
 	}
 }
 
+// TestRunReview_PreserveReasoningAndMetadata verifies that Reasoning and ProviderMetadata
+// are correctly preserved in the history for subsequent turns.
+func TestRunReview_PreserveReasoningAndMetadata(t *testing.T) {
+	const reasoning = "I am thinking about this code."
+	metadata := map[string]any{"thought_id": "123"}
+	lm := &mockLLM{responses: []*llm.Response{
+		{
+			Reasoning:        reasoning,
+			ProviderMetadata: metadata,
+			ToolCalls: []llm.ToolCall{
+				makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"}),
+			},
+		},
+		textResponse("review done"),
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
+
+	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "req", 5, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call: history should contain Reasoning and ProviderMetadata.
+	msgs := lm.calls[1]
+	assistantMsg := msgs[2]
+	if assistantMsg.Reasoning != reasoning {
+		t.Errorf("assistant reasoning: got %q, want %q", assistantMsg.Reasoning, reasoning)
+	}
+	if fmt.Sprintf("%v", assistantMsg.ProviderMetadata) != fmt.Sprintf("%v", metadata) {
+		t.Errorf("assistant metadata: got %v, want %v", assistantMsg.ProviderMetadata, metadata)
+	}
+}
+
+// TestRunReview_LowCapEnforcement verifies that maxIterations=1 is respected.
+func TestRunReview_LowCapEnforcement(t *testing.T) {
+	alwaysTool := toolCallsResponse(makeToolCall("tc", "read_file", map[string]any{"file_path": "f.go"}))
+	lm := &mockLLM{responses: []*llm.Response{
+		alwaysTool,                    // iteration 1
+		textResponse("forced review"), // forced-final call
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
+
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 1, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "forced review" {
+		t.Errorf("got %q, want %q", got, "forced review")
+	}
+
+	// 1 loop iteration + 1 forced-final call = 2 total LLM calls.
+	if len(lm.calls) != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", len(lm.calls))
+	}
+}
+
 func TestCalculateMaxIterations(t *testing.T) {
 	tests := []struct {
 		name         string
 		changedFiles int
 		want         int
 	}{
-		{"zero files", 0, AbsoluteMaxIter},
-		{"negative files", -1, AbsoluteMaxIter},
+		{"zero files", 0, 1},
+		{"negative files", -1, 1},
 		{"1 file", 1, 5},
 		{"2 files", 2, 10},
 		{"5 files", 5, 25},

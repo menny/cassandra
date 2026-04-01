@@ -20,7 +20,7 @@ const (
 // of changed files, bounded by AbsoluteMaxIter.
 func CalculateMaxIterations(changedFiles int) int {
 	if changedFiles <= 0 {
-		return AbsoluteMaxIter
+		return 1
 	}
 	return min(MaxIterationsPerFile*changedFiles, AbsoluteMaxIter)
 }
@@ -136,9 +136,11 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 		// Append the assistant's tool-call turn to history.
 		messages = append(messages, llm.Message{
-			Role:      llm.RoleAssistant,
-			Text:      resp.Text,
-			ToolCalls: resp.ToolCalls,
+			Role:             llm.RoleAssistant,
+			Text:             resp.Text,
+			ToolCalls:        resp.ToolCalls,
+			Reasoning:        resp.Reasoning,
+			ProviderMetadata: resp.ProviderMetadata,
 		})
 
 		toolMsg, err := a.executeToolCalls(resp.ToolCalls)
