@@ -126,11 +126,7 @@ func TestLocalGrepFiles(t *testing.T) {
 	runGitCmd(t, tmpDir, "add", "grep_test.txt")
 
 	// We need to change the working directory for git grep to work in the temp repo
-	oldWd, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
+	t.Chdir(tmpDir)
 
 	t.Run("basic grep", func(t *testing.T) {
 		args, _ := json.Marshal(map[string]any{"query": "Cassandra"})
