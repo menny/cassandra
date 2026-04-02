@@ -54,7 +54,7 @@ jobs:
           echo -e "\n\n$TAG" >> review.md
 
           # Find if a comment with this tag already exists
-          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
+          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
 
           if [ -n "$COMMENT_ID" ]; then
             echo "Updating existing comment $COMMENT_ID..."
@@ -63,6 +63,7 @@ jobs:
             echo "Creating new comment..."
             gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
           fi
+
 
       - name: Remove Eyes Reaction
         if: always()
