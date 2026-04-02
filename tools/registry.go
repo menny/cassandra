@@ -39,4 +39,5 @@ func (r *Registry) HandleCall(tc llm.ToolCall) (string, error) {
 func RegisterLocalTools(r *Registry) {
 	registerLocalReadFile(r)
 	registerLocalGlobFiles(r)
+	registerLocalGrepFiles(r)
 }
