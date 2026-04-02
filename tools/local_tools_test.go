@@ -235,6 +235,20 @@ func TestLocalGrepFiles(t *testing.T) {
 		}
 	})
 
+	t.Run("case-insensitive grep", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "cassandra", "case_insensitive": true})
+		result, err := r.HandleCall(llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if !strings.Contains(result, "grep_test.txt:1:7:Hello Cassandra") {
+			t.Errorf("expected result to contain match (case-insensitive), got: %s", result)
+		}
+	})
+
 	t.Run("truncation limit", func(t *testing.T) {
 		truncFile := filepath.Join(tmpDir, "truncation.txt")
 		var sb strings.Builder

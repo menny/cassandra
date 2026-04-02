@@ -116,6 +116,10 @@ func registerLocalGrepFiles(r *Registry) {
 					"type":        "string",
 					"description": "Optional directory to search in (relative to repository root).",
 				},
+				"case_insensitive": map[string]any{
+					"type":        "boolean",
+					"description": "If true, performs a case-insensitive search.",
+				},
 			},
 			"required": []string{"query"},
 		},
@@ -123,8 +127,9 @@ func registerLocalGrepFiles(r *Registry) {
 
 	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
 		var args struct {
-			Query     string `json:"query"`
-			Directory string `json:"directory"`
+			Query           string `json:"query"`
+			Directory       string `json:"directory"`
+			CaseInsensitive bool   `json:"case_insensitive"`
 		}
 		if err := tc.UnmarshalArguments(&args); err != nil {
 			return "", err
@@ -136,7 +141,12 @@ func registerLocalGrepFiles(r *Registry) {
 		// --extended-regexp: use extended regex
 		// --untracked: search untracked files as well
 		// -e: treat the next argument as the pattern, even if it starts with a hyphen
-		cmdArgs := []string{"grep", "--line-number", "--column", "--extended-regexp", "--untracked", "-e", args.Query}
+		cmdArgs := []string{"grep", "--line-number", "--column", "--extended-regexp", "--untracked"}
+		if args.CaseInsensitive {
+			cmdArgs = append(cmdArgs, "-i")
+		}
+		cmdArgs = append(cmdArgs, "-e", args.Query)
+
 		if args.Directory != "" {
 			cmdArgs = append(cmdArgs, "--", args.Directory)
 		} else {
