@@ -14,6 +14,8 @@ Lockfile diffs (e.g. `yarn.lock`, `package-lock.json`, `Cargo.lock`, `go.sum`) a
 
 Use the glob_files tool when you need to discover what files exist in a directory or match a pattern — for example, to find all tests for a module, check whether a related file exists, or explore the structure of an unfamiliar area.
 
+Use the grep_files tool when you need to find where a specific symbol, string, or pattern is used across the repository. This is useful for understanding the impact of a change, finding examples of a pattern, or locating related logic that isn't immediately obvious from the file structure. You can use the `case_insensitive` parameter if you are unsure of the exact casing.
+
 When multiple tool calls are needed, request them all in a single response — they will be executed in parallel.
 
 ## Behavior

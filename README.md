@@ -8,7 +8,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 
 - **Local Git Diff Review**: Review your local uncommitted changes against a base branch before pushing.
 - **Provider Agnostic**: Natively supports Anthropic and Google models through a unified abstraction.
-- **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files and glob matching) to autonomously gather surrounding context about your codebase before finalizing feedback.
+- **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files, glob matching, and pattern searching with `grep`) to autonomously gather surrounding context about your codebase before finalizing feedback.
 - **CI/CD Ready**: Supports outputting reviews directly to files, making it easy to integrate with GitHub Actions or other CI pipelines.
 
 ## Requirements

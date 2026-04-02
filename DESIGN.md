@@ -21,6 +21,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - Depending on the execution mode, the registry exposes underlying tool implementations:
   - `read_file`: Safely reads the contents of a requested file up to a character limit.
   - `glob_files`: Lists repository files matching a pattern to help the LLM discover where definitions might live.
+  - `grep_files`: Searches for patterns across the repository using `git grep`, including unstaged changes. Supports optional case-insensitive search.
 
 ### 4. Core AI Engine (`core/agent.go`)
 - Replaces heavy Python-based graph execution loops (like LangGraph).
