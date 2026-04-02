@@ -138,7 +138,16 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
-	resp := &llm.Response{}
+	resp := &llm.Response{
+		Usage: llm.Usage{
+			PromptTokens: int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens),
+			OutputTokens: int(msg.Usage.OutputTokens),
+			CachedTokens: int(msg.Usage.CacheReadInputTokens),
+			// In Anthropic, OutputTokens includes thinking tokens (for Claude 3.7+ Thinking)
+			// The SDK does not currently expose a separate thinking_tokens field
+			// unless we use a beta header, but let's stick to what's available.
+		},
+	}
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":

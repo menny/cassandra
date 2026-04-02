@@ -202,7 +202,20 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 		return nil, fmt.Errorf("google: candidate has no content")
 	}
 
-	result := &llm.Response{}
+	result := &llm.Response{
+		Usage: llm.Usage{
+			PromptTokens: -1,
+			OutputTokens: -1,
+		},
+	}
+
+	if resp.UsageMetadata != nil {
+		result.Usage.PromptTokens = int(resp.UsageMetadata.PromptTokenCount - resp.UsageMetadata.CachedContentTokenCount)
+		result.Usage.OutputTokens = int(resp.UsageMetadata.CandidatesTokenCount)
+		result.Usage.ThinkingTokens = int(resp.UsageMetadata.ThoughtsTokenCount)
+		result.Usage.CachedTokens = int(resp.UsageMetadata.CachedContentTokenCount)
+	}
+
 	for _, part := range candidate.Content.Parts {
 		// Thought and ThoughtSignature are captured for models that support
 		// explicit reasoning (e.g. Gemini 2.0 Thinking).
