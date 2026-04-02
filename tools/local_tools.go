@@ -168,6 +168,6 @@ func registerLocalGrepFiles(r *Registry) {
 			output = strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (truncated, %d more matches)", len(lines)-maxLines)
 		}
 
-		return output, nil
+		return strings.TrimSpace(output), nil
 	})
 }
