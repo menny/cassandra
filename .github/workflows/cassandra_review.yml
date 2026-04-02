@@ -17,6 +17,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Add Eyes Reaction
+        id: add_reaction
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
+          echo "reaction_id=$REACTION_ID" >> $GITHUB_OUTPUT
+
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
@@ -37,7 +46,7 @@ jobs:
 
       - name: Post AI Review Comment
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           TAG="<!-- cassandra-ai-review -->"
           
@@ -45,13 +54,25 @@ jobs:
           echo -e "\n\n$TAG" >> review.md
 
           # Find if a comment with this tag already exists
-          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
+          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
 
           if [ -n "$COMMENT_ID" ]; then
             echo "Updating existing comment $COMMENT_ID..."
-            gh pr comment ${{ github.event.pull_request.number }} --edit "$COMMENT_ID" --body-file review.md
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@review.md
           else
             echo "Creating new comment..."
             gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
+          fi
+
+
+      - name: Remove Eyes Reaction
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          REACTION_ID="${{ steps.add_reaction.outputs.reaction_id }}"
+          if [ -n "$REACTION_ID" ]; then
+            gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$REACTION_ID
           fi
 
