@@ -54,6 +54,13 @@ To review changes between a base and a head commit/branch:
 | `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
 
+### Supported Models
+
+For a full list of available models and their IDs, refer to the official documentation:
+
+- **Google Gemini**: [Gemini API Model Documentation](https://ai.google.dev/gemini-api/docs/models/gemini)
+- **Anthropic Claude**: [Anthropic Claude Model Documentation](https://docs.anthropic.com/en/docs/about-claude/models)
+
 ## GitHub Actions Integration
 
 Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests.

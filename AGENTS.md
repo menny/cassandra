@@ -1,5 +1,14 @@
 # Cassandra: AI Agent Guidelines
 
+## LLM Providers & Models
+
+Cassandra supports multiple LLM providers. For the most up-to-date list of available models, their IDs, and capabilities, refer to the official documentation:
+
+- **Google Gemini**: [Gemini API Models](https://ai.google.dev/gemini-api/docs/models/gemini)
+- **Anthropic Claude**: [Anthropic Claude Models](https://docs.anthropic.com/en/docs/about-claude/models)
+
+When configuring Cassandra (via CLI or GitHub Action), ensure you use the correct Model ID as specified in these links.
+
 ## Repository Technical Details
 
 - **Language**: Go (targeting `1.24.4+`).
