@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -66,14 +67,7 @@ func (r *defaultReporter) ReportUsage(usage llm.Usage) {
 			breakdown = append(breakdown, fmt.Sprintf("%d thinking", usage.ThinkingTokens))
 		}
 		if len(breakdown) > 0 {
-			msg += " ("
-			for i, b := range breakdown {
-				if i > 0 {
-					msg += ", "
-				}
-				msg += b
-			}
-			msg += ")"
+			msg += " (" + strings.Join(breakdown, ", ") + ")"
 		}
 		fmt.Fprintln(r.w, msg)
 	}
