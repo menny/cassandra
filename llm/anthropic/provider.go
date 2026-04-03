@@ -140,14 +140,20 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 	resp := &llm.Response{
 		Usage: llm.Usage{
-			PromptTokens: int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens),
-			OutputTokens: int(msg.Usage.OutputTokens),
-			CachedTokens: int(msg.Usage.CacheReadInputTokens),
-			// In Anthropic, OutputTokens includes thinking tokens (for Claude 3.7+ Thinking)
-			// The SDK does not currently expose a separate thinking_tokens field
-			// unless we use a beta header, but let's stick to what's available.
+			PromptTokens:   -1,
+			OutputTokens:   -1,
+			ThinkingTokens: 0,
+			CachedTokens:   0,
 		},
 	}
+
+	// The SDK usage struct is not a pointer, but we check if we have values.
+	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
+		resp.Usage.PromptTokens = int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens)
+		resp.Usage.OutputTokens = int(msg.Usage.OutputTokens)
+		resp.Usage.CachedTokens = int(msg.Usage.CacheReadInputTokens)
+	}
+
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":
