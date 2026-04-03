@@ -30,7 +30,7 @@ jobs:
         uses: ./
         with:
           provider: 'google'
-          model_id: 'gemini-3-flash-preview'
+          model_id: 'gemini-3.1-pro'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}

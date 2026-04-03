@@ -74,7 +74,7 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
         uses: menny/cassandra@main
         with:
           provider: 'google'
-          model_id: 'gemini-1.5-pro'
+          model_id: 'gemini-3.1-flash'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           # The base branch to compare against (defaults to main)
           base: ${{ github.event.pull_request.base.ref }}
@@ -99,7 +99,7 @@ To keep the PR history clean, we recommend using a "persistent comment" strategy
         uses: menny/cassandra@main
         with:
           provider: 'google'
-          model_id: 'gemini-1.5-pro'
+          model_id: 'gemini-3.1-flash'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
