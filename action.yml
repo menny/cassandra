@@ -33,27 +33,16 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Checkout Cassandra
-      uses: actions/checkout@v4
-      with:
-        repository: menny/cassandra
-        path: .cassandra-action-src
-
-    - name: Setup Bazel
-      uses: bazel-contrib/setup-bazel@0.18.0
-      with:
-        bazelisk-cache: true
-        disk-cache: cassandra-ai-review
-        repository-cache: true
-
     - name: Run AI Review
       shell: bash
+      env:
+        PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
       run: |
         # Build the arguments array for the agent
         ARGS=(
           --provider "${{ inputs.provider }}"
           --model "${{ inputs.model_id }}"
-          --provider-api-key "${{ inputs.provider_api_key }}"
+          --provider-api-key "$PROVIDER_API_KEY"
           --base "${{ inputs.base }}"
           --head "${{ inputs.head }}"
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
@@ -69,6 +58,6 @@ runs:
           ARGS+=(--review-output-file "${{ github.workspace }}/${{ inputs.review_output_file }}")
         fi
 
-        # Execute via Bazel in the Cassandra source directory
-        cd .cassandra-action-src
+        # Execute via Bazel in the action's source directory
+        cd ${{ github.action_path }}
         bazelisk run //:ai-review-agent -- "${ARGS[@]}"

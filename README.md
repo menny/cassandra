@@ -70,6 +70,12 @@ Cassandra can be integrated into your GitHub Actions workflow to automatically r
 Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
 
 ```yaml
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Important: fetch all history for diffing
+
       - name: Run Cassandra AI Review
         uses: menny/cassandra@main
         with:
@@ -77,7 +83,7 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
           model_id: 'gemini-3-flash-preview'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           # The base branch to compare against (defaults to main)
-          base: ${{ github.event.pull_request.base.ref }}
+          base: ${{ github.event.pull_request.base.sha }}
           # The head branch/commit (defaults to HEAD)
           head: ${{ github.event.pull_request.head.sha }}
           # Optional: capture the review in a file
