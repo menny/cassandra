@@ -138,7 +138,22 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
-	resp := &llm.Response{}
+	resp := &llm.Response{
+		Usage: llm.Usage{
+			PromptTokens:   -1,
+			OutputTokens:   -1,
+			ThinkingTokens: 0,
+			CachedTokens:   0,
+		},
+	}
+
+	// The SDK usage struct is not a pointer, but we check if we have values.
+	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
+		resp.Usage.PromptTokens = int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens)
+		resp.Usage.OutputTokens = int(msg.Usage.OutputTokens)
+		resp.Usage.CachedTokens = int(msg.Usage.CacheReadInputTokens)
+	}
+
 	for _, block := range msg.Content {
 		switch block.Type {
 		case "text":

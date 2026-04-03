@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -36,6 +37,8 @@ type ToolDispatcher interface {
 type Reporter interface {
 	ReportIteration(iter int)
 	ReportToolCall(tc llm.ToolCall)
+	ReportUsage(usage llm.Usage)
+	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
 	ReportCapReached(maxIterations int)
 }
@@ -51,6 +54,29 @@ func (r *defaultReporter) ReportIteration(iter int) {
 
 func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
 	fmt.Fprintf(r.w, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
+}
+
+func (r *defaultReporter) ReportUsage(usage llm.Usage) {
+	if usage.PromptTokens >= 0 && usage.OutputTokens >= 0 {
+		msg := fmt.Sprintf("  [Tokens: %d input, %d output]", usage.TotalInput(), usage.TotalOutput())
+		var breakdown []string
+		if usage.CachedTokens > 0 {
+			breakdown = append(breakdown, fmt.Sprintf("%d cached", usage.CachedTokens))
+		}
+		if usage.ThinkingTokens > 0 {
+			breakdown = append(breakdown, fmt.Sprintf("%d thinking", usage.ThinkingTokens))
+		}
+		if len(breakdown) > 0 {
+			msg += " (" + strings.Join(breakdown, ", ") + ")"
+		}
+		fmt.Fprintln(r.w, msg)
+	}
+}
+
+func (r *defaultReporter) ReportUsageSummary(total llm.Usage) {
+	if total.PromptTokens > 0 || total.OutputTokens > 0 {
+		fmt.Fprintf(r.w, "Total session tokens: %d input, %d output\n", total.TotalInput(), total.TotalOutput())
+	}
 }
 
 func (r *defaultReporter) ReportFinalReview() {
@@ -77,9 +103,10 @@ func WithReporter(r Reporter) AgentOption {
 
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
-	llm      llm.Model
-	registry ToolDispatcher
-	reporter Reporter
+	llm        llm.Model
+	registry   ToolDispatcher
+	reporter   Reporter
+	totalUsage llm.Usage
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -116,12 +143,19 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 	tools := a.registry.ToTools()
 
+	defer func() {
+		a.reporter.ReportUsageSummary(a.totalUsage)
+	}()
+
 	for iter := range maxIterations {
 		a.reporter.ReportIteration(iter + 1)
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
 		}
+
+		a.reporter.ReportUsage(resp.Usage)
+		a.trackUsage(resp.Usage)
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
@@ -201,10 +235,29 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	if err != nil {
 		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
 	}
+
+	a.reporter.ReportUsage(resp.Usage)
+	a.trackUsage(resp.Usage)
+
 	if resp.Text == "" {
 		return "", fmt.Errorf("llm returned empty content on forced-final review")
 	}
 	return resp.Text, nil
+}
+
+func (a *Agent) trackUsage(usage llm.Usage) {
+	if usage.PromptTokens > 0 {
+		a.totalUsage.PromptTokens += usage.PromptTokens
+	}
+	if usage.OutputTokens > 0 {
+		a.totalUsage.OutputTokens += usage.OutputTokens
+	}
+	if usage.ThinkingTokens > 0 {
+		a.totalUsage.ThinkingTokens += usage.ThinkingTokens
+	}
+	if usage.CachedTokens > 0 {
+		a.totalUsage.CachedTokens += usage.CachedTokens
+	}
 }
 
 // compactToolCallArgs returns a short human-readable summary of tool arguments.

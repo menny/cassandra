@@ -93,14 +93,19 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 type spyReporter struct {
 	iterations   []int
 	toolCalls    []llm.ToolCall
+	usage        []llm.Usage
 	finalReviews int
 	capsReached  []int
 }
 
 func (s *spyReporter) ReportIteration(iter int)       { s.iterations = append(s.iterations, iter) }
 func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
-func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
-func (s *spyReporter) ReportCapReached(max int)       { s.capsReached = append(s.capsReached, max) }
+func (s *spyReporter) ReportUsage(usage llm.Usage)    { s.usage = append(s.usage, usage) }
+func (s *spyReporter) ReportUsageSummary(usage llm.Usage) {
+	// recording for completeness if needed
+}
+func (s *spyReporter) ReportFinalReview()       { s.finalReviews++ }
+func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

@@ -67,6 +67,32 @@ type ToolDef struct {
 	Parameters  map[string]any // full JSON Schema object
 }
 
+// Usage captures the number of tokens consumed in an interaction.
+// If a provider does not support a specific count, its value will be 0.
+// If the provider does not support token counting at all, all fields will be -1.
+type Usage struct {
+	PromptTokens   int // tokens in the input prompt
+	OutputTokens   int // tokens in the generated response (excluding thinking)
+	ThinkingTokens int // tokens used for model internal reasoning/thinking
+	CachedTokens   int // tokens served from a cache
+}
+
+// TotalInput returns the total number of input-side tokens (prompt + cached).
+func (u Usage) TotalInput() int {
+	if u.PromptTokens < 0 {
+		return -1
+	}
+	return u.PromptTokens + u.CachedTokens
+}
+
+// TotalOutput returns the total number of output-side tokens (output + thinking).
+func (u Usage) TotalOutput() int {
+	if u.OutputTokens < 0 {
+		return -1
+	}
+	return u.OutputTokens + u.ThinkingTokens
+}
+
 // Response is what the model returns from a single GenerateContent call.
 // At least one of Text or ToolCalls will be non-empty; providers that support
 // mixed streaming turns may populate both simultaneously.
@@ -75,6 +101,7 @@ type Response struct {
 	ToolCalls        []ToolCall     // set when the model wants to invoke tools
 	Reasoning        string         // set when the model provides internal reasoning
 	ProviderMetadata map[string]any // opaque data to be echoed in subsequent turns
+	Usage            Usage          // token usage for this interaction
 }
 
 // Model is the only interface core.Agent depends on.
