@@ -34,28 +34,6 @@ jobs:
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          review_output_file: 'review.md'
-
-      - name: Post AI Review Comment
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          TAG="<!-- cassandra-ai-review -->"
-          
-          # Append the tag for persistence
-          echo -e "\n\n$TAG" >> review.md
-
-          # Find if a comment with this tag already exists
-          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
-
-          if [ -n "$COMMENT_ID" ]; then
-            echo "Updating existing comment $COMMENT_ID..."
-            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@review.md
-          else
-            echo "Creating new comment..."
-            gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
-          fi
-
 
       - name: Remove Eyes Reaction
         if: always()
