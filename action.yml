@@ -40,7 +40,6 @@ runs:
         bazelisk-cache: true
         disk-cache: cassandra-ai-review
         repository-cache: true
-
     - name: Run AI Review
       shell: bash
       env:
@@ -58,7 +57,7 @@ runs:
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
           --review-output-file "$REVIEW_FILE"
         )
-        
+
         if [[ -n "${{ inputs.main_guidelines }}" ]]; then
           # Ensure path is absolute for the agent
           ARGS+=(--main_guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
@@ -67,10 +66,9 @@ runs:
         # Execute via Bazel in the action's source directory
         cd ${{ github.action_path }}
         bazel run //:ai-review-agent -- "${ARGS[@]}"
-        
+
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
-
     - name: Post AI Review Comment
       if: github.event_name == 'pull_request'
       shell: bash
@@ -78,7 +76,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
       run: |
         TAG="<!-- cassandra-ai-review -->"
-        
+
         # Append the tag for persistence
         echo -e "\n\n$TAG" >> "$REVIEW_FILE"
 
