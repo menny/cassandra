@@ -37,7 +37,7 @@ func main() {
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 
-	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
+	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 
