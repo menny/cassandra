@@ -33,6 +33,13 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.18.0
+      with:
+        bazelisk-cache: true
+        disk-cache: cassandra-ai-review
+        repository-cache: true
+
     - name: Run AI Review
       shell: bash
       env:
