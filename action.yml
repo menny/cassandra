@@ -1,0 +1,74 @@
+name: 'Cassandra AI Review'
+description: 'AI-powered code review for your pull requests using Cassandra.'
+inputs:
+  provider:
+    description: 'LLM provider to use (google, anthropic)'
+    required: true
+    default: 'google'
+  model_id:
+    description: 'LLM provider model id'
+    required: true
+    default: 'gemini-3-flash-preview'
+  provider_api_key:
+    description: 'API key for the selected provider'
+    required: true
+  base:
+    description: 'Base commit/branch for diff'
+    required: false
+    default: 'main'
+  head:
+    description: 'Head commit/branch for diff'
+    required: false
+    default: 'HEAD'
+  working_directory:
+    description: 'Working directory to review'
+    required: false
+    default: '.'
+  main_guidelines:
+    description: 'Path to a file overriding the built-in main guidelines'
+    required: false
+  review_output_file:
+    description: 'Path to a file where the final review will be written'
+    required: false
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout Cassandra
+      uses: actions/checkout@v4
+      with:
+        repository: menny/cassandra
+        path: .cassandra-action-src
+
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.18.0
+      with:
+        bazelisk-cache: true
+        disk-cache: cassandra-ai-review
+        repository-cache: true
+
+    - name: Run AI Review
+      shell: bash
+      run: |
+        # Build the arguments array for the agent
+        ARGS=(
+          --provider "${{ inputs.provider }}"
+          --model "${{ inputs.model_id }}"
+          --provider-api-key "${{ inputs.provider_api_key }}"
+          --base "${{ inputs.base }}"
+          --head "${{ inputs.head }}"
+          --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
+        )
+        
+        if [[ -n "${{ inputs.main_guidelines }}" ]]; then
+          # Ensure path is absolute for the agent
+          ARGS+=(--main_guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
+        fi
+        
+        if [[ -n "${{ inputs.review_output_file }}" ]]; then
+          # Ensure path is absolute for the agent
+          ARGS+=(--review-output-file "${{ github.workspace }}/${{ inputs.review_output_file }}")
+        fi
+
+        # Execute via Bazel in the Cassandra source directory
+        cd .cassandra-action-src
+        bazelisk run //:ai-review-agent -- "${ARGS[@]}"

@@ -56,21 +56,47 @@ To review changes between a base and a head commit/branch:
 
 ## GitHub Actions Integration
 
-You can use Cassandra in your CI to automatically review Pull Requests. To keep the PR history clean, we recommend using a "persistent comment" strategy that updates a single comment as new changes are pushed.
+Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests.
 
-Example workflow step:
+### Simple Usage
+
+Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
 
 ```yaml
+      - name: Run Cassandra AI Review
+        uses: menny/cassandra@main
+        with:
+          provider: 'google'
+          model_id: 'gemini-1.5-pro'
+          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
+          # The base branch to compare against (defaults to main)
+          base: ${{ github.event.pull_request.base.ref }}
+          # The head branch/commit (defaults to HEAD)
+          head: ${{ github.event.pull_request.head.sha }}
+          # Optional: capture the review in a file
+          review_output_file: 'review.md'
+```
+
+### Persistent PR Comment
+
+To keep the PR history clean, we recommend using a "persistent comment" strategy that updates a single comment as new changes are pushed.
+
+```yaml
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Important: fetch all history for diffing
+
       - name: Run Cassandra Review
-        run: |
-          bazel run //:ai-review-agent -- \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --provider google \
-            --model gemini-3.1-pro-preview \
-            --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
-            --cwd="${{ github.workspace }}" \
-            --review-output-file "review.md"
+        uses: menny/cassandra@main
+        with:
+          provider: 'google'
+          model_id: 'gemini-1.5-pro'
+          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          review_output_file: 'review.md'
 
       - name: Post AI Review Comment
         env:
@@ -78,6 +104,8 @@ Example workflow step:
         run: |
           TAG="<!-- cassandra-ai-review -->"
           echo -e "\n\n$TAG" >> review.md
+          
+          # Find existing comment
           COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
 
           if [ -n "$COMMENT_ID" ]; then

@@ -26,23 +26,15 @@ jobs:
           REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
           echo "reaction_id=$REACTION_ID" >> $GITHUB_OUTPUT
 
-      - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@0.18.0
-        with:
-          bazelisk-cache: true
-          disk-cache: cassandra-review
-          repository-cache: true
-
       - name: Run Cassandra Review
-        run: |
-          bazel run //:ai-review-agent -- \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --provider google \
-            --model gemini-3-flash-preview \
-            --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
-            --cwd="${{ github.workspace }}" \
-            --review-output-file "review.md"
+        uses: ./
+        with:
+          provider: 'google'
+          model_id: 'gemini-3-flash-preview'
+          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          review_output_file: 'review.md'
 
       - name: Post AI Review Comment
         env:
