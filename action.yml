@@ -27,9 +27,10 @@ inputs:
   main_guidelines:
     description: 'Path to a file overriding the built-in main guidelines'
     required: false
-  review_output_file:
-    description: 'Path to a file where the final review will be written'
+  reviewer_github_token:
+    description: 'GitHub token for posting comments'
     required: false
+    default: ${{ github.token }}
 runs:
   using: 'composite'
   steps:
@@ -45,7 +46,9 @@ runs:
       env:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
       run: |
-        # Build the arguments array for the agent
+        # Use a fixed path in the workspace for the review output
+        REVIEW_FILE="${{ github.workspace }}/cassandra_review.md"
+
         ARGS=(
           --provider "${{ inputs.provider }}"
           --model "${{ inputs.model_id }}"
@@ -53,18 +56,39 @@ runs:
           --base "${{ inputs.base }}"
           --head "${{ inputs.head }}"
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
+          --review-output-file "$REVIEW_FILE"
         )
         
         if [[ -n "${{ inputs.main_guidelines }}" ]]; then
           # Ensure path is absolute for the agent
           ARGS+=(--main_guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
         fi
-        
-        if [[ -n "${{ inputs.review_output_file }}" ]]; then
-          # Ensure path is absolute for the agent
-          ARGS+=(--review-output-file "${{ github.workspace }}/${{ inputs.review_output_file }}")
-        fi
 
         # Execute via Bazel in the action's source directory
         cd ${{ github.action_path }}
-        bazelisk run //:ai-review-agent -- "${ARGS[@]}"
+        bazel run //:ai-review-agent -- "${ARGS[@]}"
+        
+        # Export the review file path for the next step
+        echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
+
+    - name: Post AI Review Comment
+      if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+      run: |
+        TAG="<!-- cassandra-ai-review -->"
+        
+        # Append the tag for persistence
+        echo -e "\n\n$TAG" >> "$REVIEW_FILE"
+
+        # Find if a comment with this tag already exists
+        COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
+
+        if [ -n "$COMMENT_ID" ]; then
+          echo "Updating existing comment $COMMENT_ID..."
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@"$REVIEW_FILE"
+        else
+          echo "Creating new comment..."
+          gh pr comment ${{ github.event.pull_request.number }} --body-file "$REVIEW_FILE"
+        fi

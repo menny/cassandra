@@ -51,7 +51,7 @@ To review changes between a base and a head commit/branch:
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
 | `--main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
-| `--review-output-file` | Path to a file where the final review will be written | | No |
+| `--reviewer_github_token` | GitHub token for posting comments (Action only) | `${{ github.token }}` | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
 
 ### Supported Models
@@ -86,13 +86,11 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
           base: ${{ github.event.pull_request.base.sha }}
           # The head branch/commit (defaults to HEAD)
           head: ${{ github.event.pull_request.head.sha }}
-          # Optional: capture the review in a file
-          review_output_file: 'review.md'
 ```
 
 ### Persistent PR Comment
 
-To keep the PR history clean, we recommend using a "persistent comment" strategy that updates a single comment as new changes are pushed.
+To keep the PR history clean, Cassandra automatically manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed.
 
 ```yaml
     steps:
@@ -109,23 +107,6 @@ To keep the PR history clean, we recommend using a "persistent comment" strategy
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          review_output_file: 'review.md'
-
-      - name: Post AI Review Comment
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="<!-- cassandra-ai-review -->"
-          echo -e "\n\n$TAG" >> review.md
-          
-          # Find existing comment
-          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
-
-          if [ -n "$COMMENT_ID" ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --edit "$COMMENT_ID" --body-file review.md
-          else
-            gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
-          fi
 ```
 
 ## Architecture
