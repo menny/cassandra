@@ -39,7 +39,6 @@ To review changes between a base and a head commit/branch:
   --model gemini-3.1-pro-preview \
   --provider-api-key "YOUR_API_KEY"
 ```
-
 ## CLI Options
 
 | Flag | Description | Default | Required |
@@ -50,9 +49,23 @@ To review changes between a base and a head commit/branch:
 | `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
-| `--main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
-| `--reviewer_github_token` | GitHub token for posting comments (Action only) | `${{ github.token }}` | No |
+| `--main-guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
+
+## GitHub Action Inputs
+
+| Input | Description | Default | Required |
+|---|---|---|---|
+| `provider` | LLM provider to use (`google`, `anthropic`) | `google` | **Yes** |
+| `model_id` | LLM provider's specific model ID | `gemini-3-flash-preview` | **Yes** |
+| `provider_api_key` | API key for the selected provider | | **Yes** |
+| `base` | Base commit/branch for diff | `main` | No |
+| `head` | Head commit/branch for diff | `HEAD` | No |
+| `working_directory` | Working directory to review | `.` | No |
+| `main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `reviewer_github_token` | GitHub token for posting comments | `${{ github.token }}` | No |
+
 
 ### Supported Models
 

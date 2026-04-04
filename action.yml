@@ -45,6 +45,9 @@ runs:
       env:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
       run: |
+        # Ensure Bazel can hit the cache when running from the action path
+        cp "$GITHUB_WORKSPACE/.bazelrc" "${{ github.action_path }}/.bazelrc" || true
+
         # Use a fixed path in the workspace for the review output
         REVIEW_FILE="${{ github.workspace }}/cassandra_review.md"
 
@@ -60,7 +63,7 @@ runs:
 
         if [[ -n "${{ inputs.main_guidelines }}" ]]; then
           # Ensure path is absolute for the agent
-          ARGS+=(--main_guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
+          ARGS+=(--main-guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
         fi
 
         # Execute via Bazel in the action's source directory
@@ -77,11 +80,12 @@ runs:
       run: |
         TAG="<!-- cassandra-ai-review -->"
 
-        # Append the tag for persistence
-        echo -e "\n\n$TAG" >> "$REVIEW_FILE"
+        # Append the tag for persistence (using printf for reliability)
+        printf "\n\n%s\n" "$TAG" >> "$REVIEW_FILE"
 
         # Find if a comment with this tag already exists
         COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
+
 
         if [ -n "$COMMENT_ID" ]; then
           echo "Updating existing comment $COMMENT_ID..."

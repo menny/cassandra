@@ -31,7 +31,7 @@ func main() {
 	var reviewOutputFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file overriding the built-in main guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")

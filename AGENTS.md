@@ -19,8 +19,8 @@ When configuring Cassandra (via CLI or GitHub Action), ensure you use the correc
 
 ## Formatting & Linting
 
-This project uses `aspect_rules_lint` (v1.0.8) to integrate standard Go tooling directly into the Bazel graph:
-- **Formatter (`gofumpt`)**: You MUST ensure any code generated is properly formatted. Run `bazel run //:format` from the root of the workspace to auto-format all go files before committing.
+This project uses `aspect_rules_lint` (v2.3.0) to integrate standard tooling directly into the Bazel graph:
+- **Formatter**: You MUST ensure any code or configuration generated is properly formatted. Run `bazel run //:format` from the root of the workspace to auto-format all supported files (Go, Starlark/Bazel, YAML) before committing.
 - **Linter (`golangci-lint`)**: A `.golangci.yml` is maintained at the root. You MUST rely exclusively on the hermetic Bazel Go toolchain to run the linter natively by executing: `bazel run @rules_go//go -- run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run ./...`. Do not assume the presence of external CLI wrappers like `aspect` or `golangci-lint` on the host machine.
 
 ## Architecture Reference
