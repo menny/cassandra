@@ -39,7 +39,6 @@ To review changes between a base and a head commit/branch:
   --model gemini-3.1-pro-preview \
   --provider-api-key "YOUR_API_KEY"
 ```
-
 ## CLI Options
 
 | Flag | Description | Default | Required |
@@ -50,43 +49,67 @@ To review changes between a base and a head commit/branch:
 | `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
-| `--main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `--main-guidelines` | Path to a file overriding the built-in main guidelines | | No |
 | `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
 
+## GitHub Action Inputs
+
+| Input | Description | Default | Required |
+|---|---|---|---|
+| `provider` | LLM provider to use (`google`, `anthropic`) | `google` | **Yes** |
+| `model_id` | LLM provider's specific model ID | `gemini-3-flash-preview` | **Yes** |
+| `provider_api_key` | API key for the selected provider | | **Yes** |
+| `base` | Base commit/branch for diff | `main` | No |
+| `head` | Head commit/branch for diff | `HEAD` | No |
+| `working_directory` | Working directory to review | `.` | No |
+| `main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `reviewer_github_token` | GitHub token for posting comments | `${{ github.token }}` | No |
+
+
+### Supported Models
+
+For a full list of available models and their IDs, refer to the official documentation:
+
+- **Google Gemini**: [Gemini API Model Documentation](https://ai.google.dev/gemini-api/docs/models/gemini)
+- **Anthropic Claude**: [Anthropic Claude Model Documentation](https://docs.anthropic.com/en/docs/about-claude/models)
+
 ## GitHub Actions Integration
 
-You can use Cassandra in your CI to automatically review Pull Requests. To keep the PR history clean, we recommend using a "persistent comment" strategy that updates a single comment as new changes are pushed.
+Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests. By default, it manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed to keep the conversation history clean.
 
-Example workflow step:
+### Usage Example
+
+Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
 
 ```yaml
-      - name: Run Cassandra Review
-        run: |
-          bazel run //:ai-review-agent -- \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --provider google \
-            --model gemini-3.1-pro-preview \
-            --provider-api-key "${{ secrets.GEMINI_API_KEY }}" \
-            --cwd="${{ github.workspace }}" \
-            --review-output-file "review.md"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Important: fetch all history for diffing
 
-      - name: Post AI Review Comment
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="<!-- cassandra-ai-review -->"
-          echo -e "\n\n$TAG" >> review.md
-          COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .id" | head -n 1)
-
-          if [ -n "$COMMENT_ID" ]; then
-            gh pr comment ${{ github.event.pull_request.number }} --edit "$COMMENT_ID" --body-file review.md
-          else
-            gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
-          fi
+      - name: Run Cassandra AI Review
+        uses: menny/cassandra@main
+        with:
+          # You must set up the following 3 arguments
+          provider: 'google'
+          model_id: 'gemini-3-flash-preview'
+          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
+          # The base branch to compare against (defaults to main)
+          base: ${{ github.event.pull_request.base.sha }}
+          # The head branch/commit (defaults to HEAD)
+          head: ${{ github.event.pull_request.head.sha }}
+          # The GitHub token to use for review comments (defaults to GITHUB_TOKEN)
+          reviewer_github_token: ${{ secrets.REVIEWER_GITHUB_TOKEN }}
 ```
 
+If you are using `GITHUB_TOKEN`, you should also ensure the correct permissions:
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
 ## Architecture
 
 The project features a lean, custom native Go ReAct loop. Provider-specific interactions are handled via native SDKs (not `langchaingo`). Tools for codebase context gathering are injected securely through model-native Function Calling capabilities.

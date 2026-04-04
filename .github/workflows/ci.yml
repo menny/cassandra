@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches:
@@ -7,7 +6,6 @@ on:
   pull_request:
     branches:
       - '*'
-
 jobs:
   bazel:
     name: Build & Test
@@ -15,20 +13,16 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-
       - name: Build Codebase
         run: bazel build //...
-
       - name: Run Linter
         run: bazel run @rules_go//go -- run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run ./...
-
       - name: Enforce Formatting
         run: |
           bazel run //:format

@@ -1,0 +1,93 @@
+name: 'Cassandra AI Review'
+description: 'AI-powered code review for your pull requests using Cassandra.'
+inputs:
+  provider:
+    description: 'LLM provider to use (google, anthropic)'
+    required: true
+    default: 'google'
+  model_id:
+    description: 'LLM provider model id'
+    required: true
+    default: 'gemini-3-flash-preview'
+  provider_api_key:
+    description: 'API key for the selected provider'
+    required: true
+  base:
+    description: 'Base commit/branch for diff'
+    required: false
+    default: 'main'
+  head:
+    description: 'Head commit/branch for diff'
+    required: false
+    default: 'HEAD'
+  working_directory:
+    description: 'Working directory to review'
+    required: false
+    default: '.'
+  main_guidelines:
+    description: 'Path to a file overriding the built-in main guidelines'
+    required: false
+  reviewer_github_token:
+    description: 'GitHub token for posting comments'
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.18.0
+      with:
+        bazelisk-cache: true
+        disk-cache: cassandra-ai-review
+        repository-cache: true
+    - name: Run AI Review
+      shell: bash
+      env:
+        PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
+      run: |
+        # Use a fixed path in the workspace for the review output
+        REVIEW_FILE="${{ github.workspace }}/cassandra_review.md"
+
+        ARGS=(
+          --provider "${{ inputs.provider }}"
+          --model "${{ inputs.model_id }}"
+          --provider-api-key "$PROVIDER_API_KEY"
+          --base "${{ inputs.base }}"
+          --head "${{ inputs.head }}"
+          --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
+          --review-output-file "$REVIEW_FILE"
+        )
+
+        if [[ -n "${{ inputs.main_guidelines }}" ]]; then
+          # Ensure path is absolute for the agent
+          ARGS+=(--main-guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
+        fi
+
+        # Execute via Bazel in the action's source directory
+        cd "${{ github.action_path }}"
+        bazel run //:ai-review-agent -- "${ARGS[@]}"
+
+        # Export the review file path for the next step
+        echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
+    - name: Post AI Review Comment
+      if: github.event.pull_request.number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+      run: |
+        TAG="<!-- cassandra-ai-review -->"
+
+        # Append the tag for persistence (using printf for reliability)
+        printf "\n\n%s\n" "$TAG" >> "$REVIEW_FILE"
+
+        # Find if a comment with this tag already exists
+        COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
+
+
+        if [ -n "$COMMENT_ID" ]; then
+          echo "Updating existing comment $COMMENT_ID..."
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@"$REVIEW_FILE"
+        else
+          echo "Creating new comment..."
+          gh pr comment ${{ github.event.pull_request.number }} --body-file "$REVIEW_FILE"
+        fi

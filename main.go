@@ -31,13 +31,13 @@ func main() {
 	var reviewOutputFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main_guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file overriding the built-in main guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 
-	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-1.5-pro, claude-3-5-sonnet-20241022)")
+	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 

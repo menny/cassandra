@@ -5,6 +5,8 @@ load("@rules_go//go:def.bzl", "go_binary", "go_library")
 format_multirun(
     name = "format",
     go = "@aspect_rules_lint//format:gofumpt",
+    starlark = "@multitool//tools/buildifier",
+    yaml = "@multitool//tools/yamlfmt",
 )
 
 # gazelle:prefix github.com/menny/cassandra
