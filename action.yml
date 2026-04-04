@@ -64,7 +64,7 @@ runs:
         fi
 
         # Execute via Bazel in the action's source directory
-        cd ${{ github.action_path }}
+        cd "${{ github.action_path }}"
         bazel run //:ai-review-agent -- "${ARGS[@]}"
 
         # Export the review file path for the next step
@@ -74,7 +74,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
-      run: |2
+      run: |
         TAG="<!-- cassandra-ai-review -->"
 
         # Append the tag for persistence (using printf for reliability)

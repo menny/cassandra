@@ -92,6 +92,7 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
       - name: Run Cassandra AI Review
         uses: menny/cassandra@main
         with:
+          # You must set up the following 3 arguments
           provider: 'google'
           model_id: 'gemini-3-flash-preview'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
@@ -99,8 +100,16 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
           base: ${{ github.event.pull_request.base.sha }}
           # The head branch/commit (defaults to HEAD)
           head: ${{ github.event.pull_request.head.sha }}
+          # The GitHub token to use for review comments (defaults to GITHUB_TOKEN)
+          reviewer_github_token: ${{ secrets.REVIEWER_GITHUB_TOKEN }}
 ```
 
+If you are using `GITHUB_TOKEN`, you should also ensure the correct permissions:
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
 ## Architecture
 
 The project features a lean, custom native Go ReAct loop. Provider-specific interactions are handled via native SDKs (not `langchaingo`). Tools for codebase context gathering are injected securely through model-native Function Calling capabilities.
