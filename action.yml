@@ -45,9 +45,6 @@ runs:
       env:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
       run: |
-        # Ensure Bazel can hit the cache when running from the action path
-        cp "$GITHUB_WORKSPACE/.bazelrc" "${{ github.action_path }}/.bazelrc" || true
-
         # Use a fixed path in the workspace for the review output
         REVIEW_FILE="${{ github.workspace }}/cassandra_review.md"
 
@@ -73,11 +70,11 @@ runs:
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
     - name: Post AI Review Comment
-      if: github.event_name == 'pull_request'
+      if: github.event.pull_request.number != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
-      run: |
+      run: |2
         TAG="<!-- cassandra-ai-review -->"
 
         # Append the tag for persistence (using printf for reliability)

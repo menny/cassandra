@@ -76,9 +76,9 @@ For a full list of available models and their IDs, refer to the official documen
 
 ## GitHub Actions Integration
 
-Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests.
+Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests. By default, it manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed to keep the conversation history clean.
 
-### Simple Usage
+### Usage Example
 
 Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
 
@@ -98,27 +98,6 @@ Add the following step to your workflow (e.g., `.github/workflows/review.yml`):
           # The base branch to compare against (defaults to main)
           base: ${{ github.event.pull_request.base.sha }}
           # The head branch/commit (defaults to HEAD)
-          head: ${{ github.event.pull_request.head.sha }}
-```
-
-### Persistent PR Comment
-
-To keep the PR history clean, Cassandra automatically manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed.
-
-```yaml
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Important: fetch all history for diffing
-
-      - name: Run Cassandra Review
-        uses: menny/cassandra@main
-        with:
-          provider: 'google'
-          model_id: 'gemini-3-flash-preview'
-          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
-          base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
 ```
 
