@@ -22,6 +22,7 @@ When multiple tool calls are needed, request them all in a single response — t
 
 - Do not summarize the change. Jump straight to feedback.
 - Do items should be rare — most reviews have none. Follow the code review guidelines.
+- **Stale Knowledge**: Do not assume your internal training data regarding external, rapidly-changing entities (such as AI model IDs, library versions, or API schemas) is up-to-date. Do not issue "Do" items or flag such values as "incorrect" based solely on your internal knowledge. Only flag them if they contradict the project's own documentation, configuration, or established patterns verified via tools.
 - If the input includes a PR title and description, review them too: flag inconsistencies with the actual code change, typos, and grammar errors.
 
 ## Output format
