@@ -26,3 +26,6 @@ bazel-testlogs
 .idea/
 .vscode/
 *.swp
+
+# temp stuff
+scratch/
