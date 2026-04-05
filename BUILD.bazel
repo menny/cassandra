@@ -20,6 +20,7 @@ go_library(
     deps = [
         "//core",
         "//core/prompts",
+        "//llm",
         "//llm/factory",
         "//tools",
         "@com_github_spf13_pflag//:pflag",

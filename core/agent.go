@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,7 @@ type Reporter interface {
 	ReportUsage(usage llm.Usage)
 	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
+	ReportExtraction()
 	ReportCapReached(maxIterations int)
 }
 
@@ -81,6 +83,10 @@ func (r *defaultReporter) ReportUsageSummary(total llm.Usage) {
 
 func (r *defaultReporter) ReportFinalReview() {
 	fmt.Fprintln(r.w, "Cassandra is formulating the final review...")
+}
+
+func (r *defaultReporter) ReportExtraction() {
+	fmt.Fprintln(r.w, "Cassandra is extracting structured JSON findings...")
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
@@ -185,6 +191,36 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 	}
 
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
+}
+
+// ExtractStructuredReview takes a raw markdown review and converts it into a
+// machine-readable StructuredReview using a second LLM pass.
+func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt string, config llm.StructuredConfig) (*StructuredReview, error) {
+	a.reporter.ReportExtraction()
+
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Text: extractionSystemPrompt},
+		{Role: llm.RoleUser, Text: "Extract the structured review from the provided markdown."},
+	}
+
+	resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
+	if err != nil {
+		return nil, fmt.Errorf("extraction failed: %w", err)
+	}
+
+	a.reporter.ReportUsage(resp.Usage)
+	a.trackUsage(resp.Usage)
+
+	if resp.Text == "" {
+		return nil, fmt.Errorf("extraction returned empty content")
+	}
+
+	var review StructuredReview
+	if err := json.Unmarshal([]byte(resp.Text), &review); err != nil {
+		return nil, fmt.Errorf("failed to parse structured review: %w\nRaw output: %s", err, resp.Text)
+	}
+
+	return &review, nil
 }
 
 func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {

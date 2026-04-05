@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/prompts"
+	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
 )
@@ -29,6 +31,8 @@ func main() {
 	var mainGuidelines string
 	var maxTokens int
 	var reviewOutputFile string
+	var outputJSONFile string
+	var extractionModel string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file overriding the built-in main guidelines")
@@ -36,6 +40,8 @@ func main() {
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
+	flag.StringVar(&outputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
+	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -139,5 +145,26 @@ func main() {
 			log.Fatalf("Failed to write review to %s: %v", reviewOutputFile, err)
 		}
 		stderr.Printf("Review written to %s\n", reviewOutputFile)
+	}
+
+	if outputJSONFile != "" {
+		extractionPrompt := prompts.BuildExtractionPrompt(result)
+		structured, err := agent.ExtractStructuredReview(ctx, extractionPrompt, llm.StructuredConfig{
+			ModelOverride: extractionModel,
+			MaxTokens:     maxTokens,
+		})
+		if err != nil {
+			log.Fatalf("Structured extraction failed: %v", err)
+		}
+
+		jsonBytes, err := json.MarshalIndent(structured, "", "  ")
+		if err != nil {
+			log.Fatalf("Failed to marshal structured review: %v", err)
+		}
+
+		if err := os.WriteFile(outputJSONFile, jsonBytes, 0o644); err != nil {
+			log.Fatalf("Failed to write structured review to %s: %v", outputJSONFile, err)
+		}
+		stderr.Printf("Structured review written to %s\n", outputJSONFile)
 	}
 }

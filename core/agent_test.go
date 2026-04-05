@@ -50,6 +50,11 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	return resp, nil
 }
 
+func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, _ map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
+	// For testing, just treat it like GenerateContent but record the call.
+	return m.GenerateContent(context.Background(), msgs, nil, 0)
+}
+
 // textResponse builds a Response with plain text and no tool calls.
 func textResponse(content string) *llm.Response {
 	return &llm.Response{Text: content}
@@ -95,6 +100,7 @@ type spyReporter struct {
 	toolCalls    []llm.ToolCall
 	usage        []llm.Usage
 	finalReviews int
+	extractions  int
 	capsReached  []int
 }
 
@@ -105,6 +111,7 @@ func (s *spyReporter) ReportUsageSummary(usage llm.Usage) {
 	// recording for completeness if needed
 }
 func (s *spyReporter) ReportFinalReview()       { s.finalReviews++ }
+func (s *spyReporter) ReportExtraction()        { s.extractions++ }
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -472,6 +479,44 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 	// 1 loop iteration + 1 forced-final call = 2 total LLM calls.
 	if len(lm.calls) != 2 {
 		t.Errorf("expected 2 LLM calls, got %d", len(lm.calls))
+	}
+}
+
+func TestAgent_ExtractStructuredReview(t *testing.T) {
+	rawReview := "LGTM! The code is clean.\n\nFile: main.go\nLine 10: good check."
+	structuredJSON := `{
+		"raw_free_text": "LGTM! The code is clean.\n\nFile: main.go\nLine 10: good check.",
+		"approval": {
+			"approved": true,
+			"rationale": "Code is clean"
+		},
+		"files_review": [
+			{
+				"path": "main.go",
+				"lines": "10",
+				"review": "good check."
+			}
+		]
+	}`
+
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse(structuredJSON),
+	}}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+	got, err := agent.ExtractStructuredReview(context.Background(), "sys prompt", llm.StructuredConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.RawFreeText != rawReview {
+		t.Errorf("got RawFreeText %q, want %q", got.RawFreeText, rawReview)
+	}
+	if !got.Approval.Approved {
+		t.Errorf("expected approved=true")
+	}
+	if len(got.FilesReview) != 1 || got.FilesReview[0].Path != "main.go" {
+		t.Errorf("unexpected FilesReview: %+v", got.FilesReview)
 	}
 }
 
