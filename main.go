@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
@@ -147,7 +148,7 @@ func main() {
 	fmt.Println(result)
 
 	if reviewOutputFile != "" {
-		if err := os.WriteFile(reviewOutputFile, []byte(result), 0o644); err != nil {
+		if err := core.WriteFileWithDirs(reviewOutputFile, []byte(result)); err != nil {
 			log.Fatalf("Failed to write review to %s: %v", reviewOutputFile, err)
 		}
 		stderr.Printf("Review written to %s\n", reviewOutputFile)
@@ -168,7 +169,7 @@ func main() {
 			log.Fatalf("Failed to marshal structured review: %v", err)
 		}
 
-		if err := os.WriteFile(outputJSONFile, jsonBytes, 0o644); err != nil {
+		if err := core.WriteFileWithDirs(outputJSONFile, jsonBytes); err != nil {
 			log.Fatalf("Failed to write structured review to %s: %v", outputJSONFile, err)
 		}
 		stderr.Printf("Structured review written to %s\n", outputJSONFile)
