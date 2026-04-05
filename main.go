@@ -92,6 +92,12 @@ func main() {
 	if mainGuidelines != "" {
 		stderr.Printf("  Main Guidelines: %s\n", mainGuidelines)
 	}
+	if outputJSONFile != "" {
+		stderr.Printf("  Structured Output JSON: %s\n", outputJSONFile)
+		if extractionModel != "" {
+			stderr.Printf("  Extraction Model: %s\n", extractionModel)
+		}
+	}
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
