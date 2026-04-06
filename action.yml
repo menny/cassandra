@@ -34,12 +34,34 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Prepare GitHub Token
+      id: prepare_token
+      shell: bash
+      env:
+        PROVIDED_TOKEN: ${{ inputs.reviewer_github_token }}
+        DEFAULT_TOKEN: ${{ github.token }}
+      run: |
+        # Fallback if the provided token is empty (e.g. secret not found)
+        FINAL_TOKEN="$PROVIDED_TOKEN"
+        if [[ -z "$FINAL_TOKEN" ]]; then
+          echo "::warning::reviewer_github_token is empty. Falling back to default GITHUB_TOKEN."
+          FINAL_TOKEN="$DEFAULT_TOKEN"
+        fi
+
+        if [[ -z "$FINAL_TOKEN" ]]; then
+          echo "::error::No GitHub token available. Cannot continue."
+          exit 1
+        fi
+
+        # Mask the token so it doesn't show up in logs
+        echo "::add-mask::$FINAL_TOKEN"
+        echo "token=$FINAL_TOKEN" >> $GITHUB_OUTPUT
     - name: Add Eyes Reaction
       if: github.event.pull_request.number != ''
       shell: bash
       continue-on-error: true
       env:
-        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
         REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
         if [ -n "$REACTION_ID" ]; then
@@ -84,30 +106,15 @@ runs:
       if: github.event.pull_request.number != ''
       shell: bash
       env:
-        PROVIDED_TOKEN: ${{ inputs.reviewer_github_token }}
-        DEFAULT_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
-        # Fallback if the provided token is empty (e.g. secret not found)
-        export GITHUB_TOKEN="$PROVIDED_TOKEN"
-        if [[ -z "$GITHUB_TOKEN" ]]; then
-          echo "::warning::reviewer_github_token is empty. Falling back to default GITHUB_TOKEN."
-          export GITHUB_TOKEN="$DEFAULT_TOKEN"
-        fi
-
-        if [[ -z "$GITHUB_TOKEN" ]]; then
-          echo "::error::No GitHub token available. Cannot post comment."
-          exit 1
-        fi
-
         TAG="<!-- cassandra-ai-review -->"
-
 
         # Append the tag for persistence (using printf for reliability)
         printf "\n\n%s\n" "$TAG" >> "$REVIEW_FILE"
 
         # Find if a comment with this tag already exists
         COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
-
 
         if [ -n "$COMMENT_ID" ]; then
           echo "Updating existing comment $COMMENT_ID..."
@@ -121,7 +128,7 @@ runs:
       shell: bash
       continue-on-error: true
       env:
-        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
         if [ -n "$CASSANDRA_REACTION_ID" ]; then
           gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$CASSANDRA_REACTION_ID
