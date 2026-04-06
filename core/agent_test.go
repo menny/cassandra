@@ -17,7 +17,8 @@ import (
 // mockLLM records every GenerateContent call and returns scripted responses in order.
 type mockLLM struct {
 	responses []*llm.Response
-	calls     [][]llm.Message // captured message history per call, in order
+	calls     [][]llm.Message  // captured message history per call, in order
+	schemas   []map[string]any // captured schemas for structured calls
 	callIdx   int
 }
 
@@ -50,7 +51,8 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	return resp, nil
 }
 
-func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, _ map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
+func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
+	m.schemas = append(m.schemas, schema)
 	// For testing, just treat it like GenerateContent but record the call.
 	return m.GenerateContent(context.Background(), msgs, nil, 0)
 }
@@ -508,10 +510,27 @@ func TestAgent_ExtractStructuredReview(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// RawFreeText should be empty from LLM, caller populates it.
+	// 1. Verify LLM is NOT asked for raw_free_text in the schema.
+	if len(lm.schemas) != 1 {
+		t.Fatalf("expected 1 schema call, got %d", len(lm.schemas))
+	}
+	props := lm.schemas[0]["properties"].(map[string]any)
+	if _, exists := props["raw_free_text"]; exists {
+		t.Errorf("schema should NOT contain raw_free_text property")
+	}
+
+	// 2. Verify LLM did NOT provide RawFreeText.
 	if got.RawFreeText != "" {
 		t.Errorf("got RawFreeText %q, want empty", got.RawFreeText)
 	}
+
+	// 3. Verify final output includes it (simulating main.go assignment).
+	const rawReview = "LGTM! The code is clean.\n\nFile: main.go\nLine 10: good check."
+	got.RawFreeText = rawReview
+	if got.RawFreeText != rawReview {
+		t.Errorf("got RawFreeText %q, want %q after assignment", got.RawFreeText, rawReview)
+	}
+
 	if !got.Approval.Approved {
 		t.Errorf("expected approved=true")
 	}
