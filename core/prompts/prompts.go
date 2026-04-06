@@ -10,8 +10,16 @@ import (
 //go:embed reviewer_prompt.md
 var reviewerPrompt string
 
+//go:embed extraction_prompt.md
+var extractionPrompt string
+
 //go:embed code_review_main_guidelines.md
 var mainGuidelines string
+
+// BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
+func BuildExtractionPrompt() string {
+	return extractionPrompt
+}
 
 // BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
 // optional personal guidelines, and any relevant AGENTS.md files for the changed paths.

@@ -73,9 +73,23 @@ runs:
       if: github.event.pull_request.number != ''
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+        PROVIDED_TOKEN: ${{ inputs.reviewer_github_token }}
+        DEFAULT_TOKEN: ${{ github.token }}
       run: |
+        # Fallback if the provided token is empty (e.g. secret not found)
+        export GITHUB_TOKEN="$PROVIDED_TOKEN"
+        if [[ -z "$GITHUB_TOKEN" ]]; then
+          echo "::warning::reviewer_github_token is empty. Falling back to default GITHUB_TOKEN."
+          export GITHUB_TOKEN="$DEFAULT_TOKEN"
+        fi
+
+        if [[ -z "$GITHUB_TOKEN" ]]; then
+          echo "::error::No GitHub token available. Cannot post comment."
+          exit 1
+        fi
+
         TAG="<!-- cassandra-ai-review -->"
+
 
         # Append the tag for persistence (using printf for reliability)
         printf "\n\n%s\n" "$TAG" >> "$REVIEW_FILE"

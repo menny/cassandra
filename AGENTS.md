@@ -60,6 +60,9 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ### 4. Performance Mindfulness
 - **Redundant I/O**: When walking the directory tree for configuration or guidelines (like `REVIEWERS.md`), use directory-based caching to avoid redundant disk lookups. If a directory subtree has already been searched for a specific filename, terminate the walk-up early.
 
+### 5. Token Efficiency
+- **Mindful Generation**: When designing LLM interactions (prompts, schemas, or post-processing), prioritize strategies that minimize output tokens. Avoid asking the model to echo large amounts of existing text; instead, prefer manual assembly or reference-based extraction to reduce latency and API costs.
+
 ## Git Commit Guidelines
 
 When committing changes on behalf of the user, strictly follow these commit message rules based on Conventional Commits:

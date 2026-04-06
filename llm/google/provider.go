@@ -53,6 +53,40 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	return parseGenaiResponse(resp)
 }
 
+// GenerateStructuredContent sends a request to the Gemini API with a JSON
+// Schema to enforce structured output.
+func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm.Message, schema map[string]any, config llm.StructuredConfig) (*llm.Response, error) {
+	contents, systemInstruction, err := toContents(messages)
+	if err != nil {
+		return nil, fmt.Errorf("google: building contents: %w", err)
+	}
+
+	modelName := p.modelName
+	if config.ModelOverride != "" {
+		modelName = config.ModelOverride
+	}
+
+	maxTokens := config.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
+
+	genaiConfig := &genai.GenerateContentConfig{
+		MaxOutputTokens:  int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
+		ResponseMIMEType: "application/json",
+		ResponseSchema:   convertSchema(schema),
+	}
+	if systemInstruction != nil {
+		genaiConfig.SystemInstruction = systemInstruction
+	}
+
+	resp, err := p.client.Models.GenerateContent(ctx, modelName, contents, genaiConfig)
+	if err != nil {
+		return nil, fmt.Errorf("google: %w", err)
+	}
+	return parseGenaiResponse(resp)
+}
+
 // toContents converts []llm.Message to the []*genai.Content slice expected by
 // the SDK, extracting any system-role message as a separate instruction.
 func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error) {

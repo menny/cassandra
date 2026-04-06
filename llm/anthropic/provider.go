@@ -56,6 +56,71 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	return parseAnthropicResponse(resp)
 }
 
+// GenerateStructuredContent sends a request to the Anthropic API with a single
+// tool and forces the model to use it to provide structured output.
+func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm.Message, schema map[string]any, config llm.StructuredConfig) (*llm.Response, error) {
+	systemBlocks, msgParams, err := toAnthropicMessages(messages)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: building messages: %w", err)
+	}
+
+	modelName := p.modelName
+	if config.ModelOverride != "" {
+		modelName = config.ModelOverride
+	}
+
+	maxTokens := config.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
+
+	// Define a synthetic tool to enforce the structured response.
+	toolName := "submit_review"
+	tool := anthropicsdk.ToolParam{
+		Name:        toolName,
+		Description: param.NewOpt("Returns the structured code review."),
+		InputSchema: anthropicsdk.ToolInputSchemaParam{
+			Type:       "object",
+			Properties: schema["properties"],
+			Required:   util.ParseRequired(schema["required"]),
+		},
+	}
+
+	sdkParams := anthropicsdk.MessageNewParams{
+		Model:     anthropicsdk.Model(modelName),
+		MaxTokens: int64(maxTokens),
+		Messages:  msgParams,
+		Tools:     []anthropicsdk.ToolUnionParam{{OfTool: &tool}},
+		// Force the model to use our extraction tool.
+		ToolChoice: anthropicsdk.ToolChoiceUnionParam{
+			OfTool: &anthropicsdk.ToolChoiceToolParam{
+				Type: "tool",
+				Name: toolName,
+			},
+		},
+	}
+	if len(systemBlocks) > 0 {
+		sdkParams.System = systemBlocks
+	}
+
+	resp, err := p.client.Messages.New(ctx, sdkParams)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: structured: %w", err)
+	}
+
+	normalized, err := parseAnthropicResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	// For forced tool choice, we expect the structured data in the first tool call.
+	if len(normalized.ToolCalls) > 0 {
+		normalized.Text = normalized.ToolCalls[0].Arguments
+	}
+
+	return normalized, nil
+}
+
 // toAnthropicMessages splits a []llm.Message into a system-prompt block slice
 // and a user/assistant message slice, as required by the Anthropic API.
 func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam, []anthropicsdk.MessageParam, error) {

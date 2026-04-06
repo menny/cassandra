@@ -104,8 +104,20 @@ type Response struct {
 	Usage            Usage          // token usage for this interaction
 }
 
+// StructuredConfig provides options for structured output generation.
+type StructuredConfig struct {
+	// ModelOverride allows using a different model for the structured pass.
+	ModelOverride string
+	// MaxTokens limits the length of the LLM response.
+	MaxTokens int
+}
+
 // Model is the only interface core.Agent depends on.
 // Implementations live in llm/anthropic and llm/google.
 type Model interface {
 	GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
+	// GenerateStructuredContent requests the model to produce output adhering to
+	// the provided JSON Schema. The schema should be a map[string]any following
+	// the JSON Schema specification.
+	GenerateStructuredContent(ctx context.Context, messages []Message, schema map[string]any, config StructuredConfig) (*Response, error)
 }
