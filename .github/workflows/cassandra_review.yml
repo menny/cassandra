@@ -14,14 +14,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Add Eyes Reaction
-        id: add_reaction
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
-          echo "reaction_id=$REACTION_ID" >> $GITHUB_OUTPUT
       - name: Run Cassandra Review
         uses: ./
         with:
@@ -30,13 +22,3 @@ jobs:
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-      - name: Remove Eyes Reaction
-        if: always()
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          REACTION_ID="${{ steps.add_reaction.outputs.reaction_id }}"
-          if [ -n "$REACTION_ID" ]; then
-            gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$REACTION_ID
-          fi
