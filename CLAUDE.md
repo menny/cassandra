@@ -1,1 +1,1 @@
-Read @AGENTS.md for guidelines
+AGENTS.md
