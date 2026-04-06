@@ -163,6 +163,9 @@ func main() {
 			log.Fatalf("Structured extraction failed: %v", err)
 		}
 
+		// Populate the raw text manually to save tokens during extraction
+		structured.RawFreeText = result
+
 		jsonBytes, err := json.MarshalIndent(structured, "", "  ")
 		if err != nil {
 			log.Fatalf("Failed to marshal structured review: %v", err)

@@ -2,10 +2,10 @@ package core
 
 // StructuredReview represents the final extracted code review in a machine-readable format.
 type StructuredReview struct {
-	RawFreeText        string       `json:"raw_free_text"`
-	Approval           Approval     `json:"approval"`
-	NoneSpecificReview string       `json:"none_specific_review,omitempty"`
-	FilesReview        []FileReview `json:"files_review"`
+	RawFreeText       string       `json:"raw_free_text"`
+	Approval          Approval     `json:"approval"`
+	NonSpecificReview string       `json:"non_specific_review,omitempty"`
+	FilesReview       []FileReview `json:"files_review"`
 }
 
 // Approval represents the overall decision on the code changes.
@@ -23,13 +23,11 @@ type FileReview struct {
 
 // StructuredReviewSchema is the JSON Schema representation of StructuredReview.
 // This is used by LLM providers to enforce the output format.
+// Note: raw_free_text is excluded from the schema to save tokens; it is
+// populated manually by the caller.
 var StructuredReviewSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{
-		"raw_free_text": map[string]any{
-			"type":        "string",
-			"description": "The complete, original markdown review from the Agent.",
-		},
 		"approval": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -44,7 +42,7 @@ var StructuredReviewSchema = map[string]any{
 			},
 			"required": []string{"approved", "rationale"},
 		},
-		"none_specific_review": map[string]any{
+		"non_specific_review": map[string]any{
 			"type":        "string",
 			"description": "General review notes that are not tied to specific files or line ranges.",
 		},
@@ -70,5 +68,5 @@ var StructuredReviewSchema = map[string]any{
 			},
 		},
 	},
-	"required": []string{"raw_free_text", "approval", "files_review"},
+	"required": []string{"approval", "files_review"},
 }

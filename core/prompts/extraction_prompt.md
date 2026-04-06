@@ -4,12 +4,11 @@ You are an expert code review parser. Your task is to take a raw markdown code r
 
 ## Guidelines:
 
-1. **Raw Free Text**: Copy the entire original markdown review into the `raw_free_text` field without modifications.
-2. **Approval**:
+1. **Approval**:
    - `approved`: This must be a strict boolean (true/false). If the review contains a clear approval (e.g., "LGTM", "Looks good"), set to `true`. If there are blocking issues or a clear rejection, set to `false`.
    - `rationale`: Provide a brief, high-level summary of the reasoning behind the approval or rejection.
-3. **Non-Specific Review**: If the review contains general comments that aren't tied to a specific file or line range (e.g., architecture, consistency, high-level logic), include them in the `none_specific_review` field.
-4. **Files Review**:
+2. **Non-Specific Review**: If the review contains general comments that aren't tied to a specific file or line range (e.g., architecture, consistency, high-level logic), include them in the `non_specific_review` field.
+3. **Files Review**:
    - `path`: The relative path to the file.
    - `lines`: A single line number (e.g., "42") or a single hyphenated range (e.g., "10-25"). **DO NOT** provide multiple ranges or comma-separated lists.
    - `review`: The detailed feedback for that specific location.

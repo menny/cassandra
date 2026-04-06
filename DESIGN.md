@@ -85,7 +85,7 @@ When the `--output-json` flag is provided, the system performs a post-processing
     "approved": true,
     "rationale": "..."
   },
-  "none_specific_review": "...",
+  "non_specific_review": "...",
   "files_review": [
     {
       "path": "path/to/file",
