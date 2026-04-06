@@ -34,6 +34,17 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Add Eyes Reaction
+      if: github.event.pull_request.number != ''
+      shell: bash
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+      run: |
+        REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
+        if [ -n "$REACTION_ID" ]; then
+          echo "CASSANDRA_REACTION_ID=$REACTION_ID" >> $GITHUB_ENV
+        fi
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.18.0
       with:
@@ -104,4 +115,14 @@ runs:
         else
           echo "Creating new comment..."
           gh pr comment ${{ github.event.pull_request.number }} --body-file "$REVIEW_FILE"
+        fi
+    - name: Remove Eyes Reaction
+      if: always() && github.event.pull_request.number != ''
+      shell: bash
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ inputs.reviewer_github_token }}
+      run: |
+        if [ -n "$CASSANDRA_REACTION_ID" ]; then
+          gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$CASSANDRA_REACTION_ID
         fi
