@@ -41,7 +41,7 @@ func main() {
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 	flag.StringVar(&outputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
-	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass")
+	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -154,8 +154,8 @@ func main() {
 	}
 
 	if outputJSONFile != "" {
-		extractionPrompt := prompts.BuildExtractionPrompt(result)
-		structured, err := agent.ExtractStructuredReview(ctx, extractionPrompt, llm.StructuredConfig{
+		extractionPrompt := prompts.BuildExtractionPrompt()
+		structured, err := agent.ExtractStructuredReview(ctx, extractionPrompt, result, llm.StructuredConfig{
 			ModelOverride: extractionModel,
 			MaxTokens:     maxTokens,
 		})

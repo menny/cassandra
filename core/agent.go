@@ -195,12 +195,12 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.
-func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt string, config llm.StructuredConfig) (*StructuredReview, error) {
+func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt, rawReview string, config llm.StructuredConfig) (*StructuredReview, error) {
 	a.reporter.ReportExtraction()
 
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Text: extractionSystemPrompt},
-		{Role: llm.RoleUser, Text: "Extract the structured review from the provided markdown."},
+		{Role: llm.RoleUser, Text: rawReview},
 	}
 
 	resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)

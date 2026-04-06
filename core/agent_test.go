@@ -485,6 +485,7 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 }
 
 func TestAgent_ExtractStructuredReview(t *testing.T) {
+	const rawReview = "LGTM! The code is clean.\n\nFile: main.go\nLine 10: good check."
 	// Note: raw_free_text is NOT in the LLM output anymore.
 	structuredJSON := `{
 		"approval": {
@@ -505,7 +506,7 @@ func TestAgent_ExtractStructuredReview(t *testing.T) {
 	}}
 
 	agent := newTestAgent(lm, newMockDispatcher())
-	got, err := agent.ExtractStructuredReview(context.Background(), "sys prompt", llm.StructuredConfig{})
+	got, err := agent.ExtractStructuredReview(context.Background(), "sys prompt", rawReview, llm.StructuredConfig{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -525,7 +526,6 @@ func TestAgent_ExtractStructuredReview(t *testing.T) {
 	}
 
 	// 3. Verify final output includes it (simulating main.go assignment).
-	const rawReview = "LGTM! The code is clean.\n\nFile: main.go\nLine 10: good check."
 	got.RawFreeText = rawReview
 	if got.RawFreeText != rawReview {
 		t.Errorf("got RawFreeText %q, want %q after assignment", got.RawFreeText, rawReview)

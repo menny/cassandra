@@ -42,6 +42,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
   ```go
   type Model interface {
       GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
+      GenerateStructuredContent(ctx context.Context, messages []Message, schema map[string]any, config StructuredConfig) (*Response, error)
   }
   ```
 - **Shared Types**: Standardizes `Message`, `ToolDef`, `ToolCall`, `ToolResult`, and `Response` across all providers.

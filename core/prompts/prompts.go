@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 //go:embed reviewer_prompt.md
@@ -18,9 +17,8 @@ var extractionPrompt string
 var mainGuidelines string
 
 // BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
-func BuildExtractionPrompt(rawReview string) string {
-	// Simple string replacement since we don't need complex templates yet.
-	return strings.ReplaceAll(extractionPrompt, "{{.RawReview}}", rawReview)
+func BuildExtractionPrompt() string {
+	return extractionPrompt
 }
 
 // BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
