@@ -28,6 +28,14 @@ func main() {
 
 	flag.Parse()
 
+	if repoFullName == "" {
+		log.Fatal("--repo-full-name is required")
+	}
+
+	if prNumber <= 0 {
+		log.Fatal("--pr is required and must be greater than 0")
+	}
+
 	if len(flag.Args()) < 1 {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment)")
 	}
