@@ -16,6 +16,15 @@ When configuring Cassandra (via CLI or GitHub Action), ensure you use the correc
   - Standard `go.mod` and `go.sum` files are maintained, and Bazel resolves Go dependencies via Gazelle's `go_deps` extension in `MODULE.bazel`.
   - *Note:* Do not upgrade to Bazel 9 without verifying `rules_go` compatibility, as recent Bazel releases removed Xcode configuration targets required by the legacy CGo pipeline on macOS.
 - **LLM Abstraction**: Provider-agnostic `llm.Model` interface defined in `llm/llm.go`. Implementations in `llm/anthropic` (using `github.com/anthropics/anthropic-sdk-go`) and `llm/google` (using `google.golang.org/genai`). Construct via `llm/factory.New()`.
+- **GitHub Utility**: A standalone tool for PR lifecycle management (reactions, comments) implemented in `cmd/github/main.go`.
+
+## Project Structure
+
+- `cmd/ai_reviewer/`: Main AI review agent entry point.
+- `cmd/github/`: GitHub utility for PR interactions.
+- `core/`: Core agent logic, ReAct loop, and prompts.
+- `llm/`: LLM provider abstractions and implementations.
+- `tools/`: Tool registry and local codebase exploration tools.
 
 ## Formatting & Linting
 
