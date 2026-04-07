@@ -3,12 +3,20 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "prompts",
     srcs = ["prompts.go"],
-    embedsrcs = [
-        "extraction_prompt.md",
-        "reviewer_prompt.md",
-    ],
+    embedsrcs = [":all_prompts"],
     importpath = "github.com/menny/cassandra/core/prompts",
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "all_prompts",
+    srcs = glob(
+        [
+            "*.md",
+            "library/*.md",
+        ],
+        exclude = ["library/README.md"],
+    ),
 )
 
 go_test(

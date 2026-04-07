@@ -1,5 +1,0 @@
-filegroup(
-    name = "all_prompts",
-    srcs = glob(["*.md"]),
-    visibility = ["//visibility:public"],
-)

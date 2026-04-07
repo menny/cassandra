@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
@@ -36,7 +35,7 @@ func main() {
 	var extractionModel string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (required)")
+	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
@@ -78,22 +77,14 @@ func main() {
 	if providerAPIKey == "" {
 		missing = append(missing, "--provider-api-key")
 	}
-	if mainGuidelines == "" {
-		missing = append(missing, "--main-guidelines")
-	}
 
 	if len(missing) > 0 {
 		stderr.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
 		os.Exit(1)
 	}
 
-	originalWD, err := os.Getwd()
-	if err != nil {
-		log.Fatalf("Failed to get current working directory: %v", err)
-	}
-
 	// Resolve main guidelines content
-	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines, originalWD)
+	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines)
 	if err != nil {
 		log.Fatalf("Failed to resolve main guidelines: %v", err)
 	}
@@ -193,17 +184,12 @@ func main() {
 	}
 }
 
-func resolveMainGuidelinesContent(guidelinesPath, originalWD string) (string, error) {
+func resolveMainGuidelinesContent(guidelinesPath string) (string, error) {
 	// Try the path as provided first
 	if content, err := os.ReadFile(guidelinesPath); err == nil {
 		return string(content), nil
 	}
 
-	// Try as a named prompt in the library (relative to original WD)
-	libPath := filepath.Join(originalWD, "reviewer_prompts", guidelinesPath+".md")
-	if content, err := os.ReadFile(libPath); err == nil {
-		return string(content), nil
-	}
-
-	return "", fmt.Errorf("failed to resolve main guidelines from %q or %q", guidelinesPath, libPath)
+	// Try as a named prompt in the library (embedded)
+	return prompts.GetLibraryPrompt(guidelinesPath)
 }

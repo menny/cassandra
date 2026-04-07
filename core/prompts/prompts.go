@@ -1,7 +1,7 @@
 package prompts
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,9 +13,21 @@ var reviewerPrompt string
 //go:embed extraction_prompt.md
 var extractionPrompt string
 
+//go:embed library/*.md
+var libraryFS embed.FS
+
 // BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
 func BuildExtractionPrompt() string {
 	return extractionPrompt
+}
+
+// GetLibraryPrompt returns the content of a named prompt from the library.
+func GetLibraryPrompt(name string) (string, error) {
+	content, err := libraryFS.ReadFile(filepath.Join("library", name+".md"))
+	if err != nil {
+		return "", fmt.Errorf("prompt %q not found in library: %w", name, err)
+	}
+	return string(content), nil
 }
 
 // BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,

@@ -16,28 +16,21 @@ func TestResolveMainGuidelinesContent(t *testing.T) {
 	localContent := "local rules content"
 	require.NoError(t, os.WriteFile(localFile, []byte(localContent), 0o644))
 
-	// Create a "library" prompt
-	libDir := filepath.Join(tmpDir, "reviewer_prompts")
-	require.NoError(t, os.MkdirAll(libDir, 0o755))
-	libFile := filepath.Join(libDir, "google.md")
-	libContent := "google rules content"
-	require.NoError(t, os.WriteFile(libFile, []byte(libContent), 0o644))
-
 	t.Run("resolves local file path", func(t *testing.T) {
-		content, err := resolveMainGuidelinesContent(localFile, tmpDir)
+		content, err := resolveMainGuidelinesContent(localFile)
 		require.NoError(t, err)
 		require.Equal(t, localContent, content)
 	})
 
-	t.Run("resolves named prompt from library", func(t *testing.T) {
-		content, err := resolveMainGuidelinesContent("google", tmpDir)
+	t.Run("resolves named prompt from embedded library", func(t *testing.T) {
+		content, err := resolveMainGuidelinesContent("google")
 		require.NoError(t, err)
-		require.Equal(t, libContent, content)
+		require.Contains(t, content, "Google Engineering Practices")
 	})
 
 	t.Run("fails on non-existent path and name", func(t *testing.T) {
-		_, err := resolveMainGuidelinesContent("non-existent", tmpDir)
+		_, err := resolveMainGuidelinesContent("non-existent-at-all")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to resolve main guidelines")
+		require.Contains(t, err.Error(), "prompt \"non-existent-at-all\" not found in library")
 	})
 }
