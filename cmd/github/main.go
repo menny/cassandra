@@ -134,13 +134,13 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 
 	if existingCommentID != 0 {
 		_, _, err := client.Issues.EditComment(ctx, owner, repo, existingCommentID, &github.IssueComment{
-			Body: github.String(content),
+			Body: github.Ptr(content),
 		})
 		return err
 	}
 
 	_, _, err = client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
-		Body: github.String(content),
+		Body: github.Ptr(content),
 	})
 	return err
 }
