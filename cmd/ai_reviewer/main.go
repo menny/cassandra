@@ -83,11 +83,14 @@ func main() {
 	}
 
 	if len(missing) > 0 {
-		fmt.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
+		stderr.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
 		os.Exit(1)
 	}
 
-	originalWD, _ := os.Getwd()
+	originalWD, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("Failed to get current working directory: %v", err)
+	}
 
 	// Resolve main guidelines content
 	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines, originalWD)
