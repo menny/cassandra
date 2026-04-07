@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_binary", "go_library")
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 
 go_library(
     name = "ai_reviewer_lib",
@@ -22,4 +22,11 @@ go_binary(
     pure = "on",
     static = "on",
     visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ai_reviewer_test",
+    srcs = ["main_test.go"],
+    embed = [":ai_reviewer_lib"],
+    deps = ["@com_github_stretchr_testify//require"],
 )

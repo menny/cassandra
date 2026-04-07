@@ -1,9 +1,10 @@
 package prompts
 
 import (
-	_ "embed"
+	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -13,27 +14,33 @@ var reviewerPrompt string
 //go:embed extraction_prompt.md
 var extractionPrompt string
 
-//go:embed code_review_main_guidelines.md
-var mainGuidelines string
+//go:embed library/*.md
+var libraryFS embed.FS
 
 // BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
 func BuildExtractionPrompt() string {
 	return extractionPrompt
 }
 
-// BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
-// optional personal guidelines, and any relevant AGENTS.md files for the changed paths.
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesOverride string) (string, error) {
-	guidelines := mainGuidelines
-	if mainGuidelinesOverride != "" {
-		content, err := os.ReadFile(mainGuidelinesOverride)
-		if err != nil {
-			return "", fmt.Errorf("failed to read main guidelines override: %w", err)
-		}
-		guidelines = string(content)
+// GetLibraryPrompt returns the content of a named prompt from the library.
+func GetLibraryPrompt(name string) (string, error) {
+	content, err := libraryFS.ReadFile(path.Join("library", name+".md"))
+	if err != nil {
+		return "", fmt.Errorf("prompt %q not found in library: %w", name, err)
+	}
+	return string(content), nil
+}
+
+// BuildSystemPrompt constructs the full system prompt by combining base prompts,
+// the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
+// in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
+// personal.ai_code_review_guidelines.md located in the workspace root.
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string) (string, error) {
+	if mainGuidelinesContent == "" {
+		return "", fmt.Errorf("main guidelines content is required")
 	}
 
-	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + guidelines
+	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent
 
 	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
 	if len(reviewersMDs) > 0 {

@@ -9,6 +9,9 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 ### 1. AI Review Entrypoint (`cmd/ai_reviewer/main.go`)
 - Parses user intent. Supports reviewing changes between commits/branches (`--base` and `--head`).
 - Dynamically accepts `--provider` (`google` or `anthropic`), `--model`, and `--provider-api-key` to abstract away the underlying LLM dependency.
+- **Main Guidelines**: Defaults to `general`. This can be:
+  - A path to a local Markdown file (absolute or relative to the current directory).
+  - The name of a pre-defined prompt from the internal library (e.g., `asana-do-try-consider`, `google`, `palantir`).
 - Coordinates the flow from git diff extraction to system prompt building, and finally running the review agent.
 
 ### 2. GitHub Utility (`cmd/github/main.go`)

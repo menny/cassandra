@@ -35,7 +35,7 @@ func main() {
 	var extractionModel string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
@@ -79,8 +79,14 @@ func main() {
 	}
 
 	if len(missing) > 0 {
-		fmt.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
+		stderr.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
 		os.Exit(1)
+	}
+
+	// Resolve main guidelines content
+	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines)
+	if err != nil {
+		log.Fatalf("Failed to resolve main guidelines: %v", err)
 	}
 
 	stderr.Println("=== Cassandra Configuration ===")
@@ -133,7 +139,7 @@ func main() {
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
-	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
+	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent)
 	if err != nil {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}
@@ -176,4 +182,14 @@ func main() {
 		}
 		stderr.Printf("Structured review written to %s\n", outputJSONFile)
 	}
+}
+
+func resolveMainGuidelinesContent(guidelinesPath string) (string, error) {
+	// Try the path as provided first
+	if content, err := os.ReadFile(guidelinesPath); err == nil {
+		return string(content), nil
+	}
+
+	// Try as a named prompt in the library (embedded)
+	return prompts.GetLibraryPrompt(guidelinesPath)
 }

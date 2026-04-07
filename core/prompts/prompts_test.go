@@ -53,7 +53,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	prompt, err := BuildSystemPrompt(tmpDir, changedFiles, "")
+	prompt, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
@@ -78,14 +78,10 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	overridePath := filepath.Join(tmpDir, "override.md")
-	require.NoError(t, os.WriteFile(overridePath, []byte("CUSTOM GUIDELINES HERE"), 0o644))
-
-	prompt, err := BuildSystemPrompt(tmpDir, nil, overridePath)
+	prompt, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
 	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
 	require.True(t, strings.Contains(prompt, "CUSTOM GUIDELINES HERE"))
-	require.False(t, strings.Contains(prompt, "Is this code maintainable, easy to work with, and safe?"))
 }
