@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -23,7 +24,7 @@ func BuildExtractionPrompt() string {
 
 // GetLibraryPrompt returns the content of a named prompt from the library.
 func GetLibraryPrompt(name string) (string, error) {
-	content, err := libraryFS.ReadFile(filepath.Join("library", name+".md"))
+	content, err := libraryFS.ReadFile(path.Join("library", name+".md"))
 	if err != nil {
 		return "", fmt.Errorf("prompt %q not found in library: %w", name, err)
 	}
