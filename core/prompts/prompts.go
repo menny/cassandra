@@ -30,8 +30,10 @@ func GetLibraryPrompt(name string) (string, error) {
 	return string(content), nil
 }
 
-// BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
-// optional personal guidelines, and any relevant AGENTS.md files for the changed paths.
+// BuildSystemPrompt constructs the full system prompt by combining base prompts,
+// the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
+// in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
+// personal.ai_code_review_guidelines.md located in the workspace root.
 func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string) (string, error) {
 	if mainGuidelinesContent == "" {
 		return "", fmt.Errorf("main guidelines content is required")
