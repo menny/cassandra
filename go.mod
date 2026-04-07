@@ -4,17 +4,23 @@ go 1.24.4
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.27.1
+	github.com/google/go-github/v69 v69.2.0
+	github.com/migueleliasweb/go-github-mock v1.5.0
 	github.com/spf13/pflag v1.0.6
 	google.golang.org/genai v1.51.0
 )
 
 require (
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-github/v73 v73.0.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	golang.org/x/time v0.11.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 

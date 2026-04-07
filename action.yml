@@ -28,7 +28,7 @@ inputs:
     description: 'Path to a file overriding the built-in main guidelines'
     required: false
   reviewer_github_token:
-    description: 'GitHub token for posting comments'
+    description: 'GitHub token for posting comments and managing reactions'
     required: false
     default: ${{ github.token }}
 runs:
@@ -56,6 +56,12 @@ runs:
         # Mask the token so it doesn't show up in logs
         echo "::add-mask::$FINAL_TOKEN"
         echo "token=$FINAL_TOKEN" >> $GITHUB_OUTPUT
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.18.0
+      with:
+        bazelisk-cache: true
+        disk-cache: cassandra-ai-review
+        repository-cache: true
     - name: Add Eyes Reaction
       if: github.event.pull_request.number != ''
       shell: bash
@@ -63,23 +69,20 @@ runs:
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
-        REACTION_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions -f content='eyes' --jq '.id // empty')
+        # Use the action's source directory for Bazel.
+        # This binary replaces the 'gh' CLI for managing PR reactions.
+        cd "${{ github.action_path }}"
+        REACTION_ID=$(bazel run //cmd/github:github -- add-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --content "eyes")
         if [ -n "$REACTION_ID" ]; then
           echo "CASSANDRA_REACTION_ID=$REACTION_ID" >> $GITHUB_ENV
         fi
-    - name: Setup Bazel
-      uses: bazel-contrib/setup-bazel@0.18.0
-      with:
-        bazelisk-cache: true
-        disk-cache: cassandra-ai-review
-        repository-cache: true
     - name: Run AI Review
       shell: bash
       env:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
       run: |
-        # Use a fixed path in the workspace for the review output
-        REVIEW_FILE="${{ github.workspace }}/cassandra_review.md"
+        # Use a temporary file for the review output
+        REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
 
         ARGS=(
           --provider "${{ inputs.provider }}"
@@ -98,7 +101,7 @@ runs:
 
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
-        bazel run //:ai-review-agent -- "${ARGS[@]}"
+        bazel run //cmd/ai_reviewer:ai_reviewer -- "${ARGS[@]}"
 
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
@@ -108,21 +111,9 @@ runs:
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
-        TAG="<!-- cassandra-ai-review -->"
-
-        # Append the tag for persistence (using printf for reliability)
-        printf "\n\n%s\n" "$TAG" >> "$REVIEW_FILE"
-
-        # Find if a comment with this tag already exists
-        COMMENT_ID=$(gh pr view ${{ github.event.pull_request.number }} --json comments --jq ".comments[] | select(.body | contains(\"$TAG\")) | .url" | head -n 1 | sed 's/.*#issuecomment-//')
-
-        if [ -n "$COMMENT_ID" ]; then
-          echo "Updating existing comment $COMMENT_ID..."
-          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$COMMENT_ID" -F body=@"$REVIEW_FILE"
-        else
-          echo "Creating new comment..."
-          gh pr comment ${{ github.event.pull_request.number }} --body-file "$REVIEW_FILE"
-        fi
+        # Execute via Bazel in the action's source directory
+        cd "${{ github.action_path }}"
+        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "<!-- cassandra-ai-review -->"
     - name: Remove Eyes Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash
@@ -131,5 +122,7 @@ runs:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
         if [ -n "$CASSANDRA_REACTION_ID" ]; then
-          gh api -X DELETE repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/reactions/$CASSANDRA_REACTION_ID
+          # Execute via Bazel in the action's source directory
+          cd "${{ github.action_path }}"
+          bazel run //cmd/github:github -- remove-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --reaction-id "$CASSANDRA_REACTION_ID"
         fi

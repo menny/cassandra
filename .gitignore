@@ -29,3 +29,7 @@ bazel-testlogs
 
 # temp stuff
 scratch/
+
+# Conductor
+conductor/plan.md
+conductor/tracks/**/plan.md

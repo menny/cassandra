@@ -9,7 +9,8 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 - **Local Git Diff Review**: Review your local uncommitted changes against a base branch before pushing.
 - **Provider Agnostic**: Natively supports Anthropic and Google models through a unified abstraction.
 - **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files, glob matching, and pattern searching with `grep`) to autonomously gather surrounding context about your codebase before finalizing feedback.
-- **CI/CD Ready**: Supports outputting reviews directly to files, making it easy to integrate with GitHub Actions or other CI pipelines.
+- **Visual Status Indicators**: Automatically adds an "eyes" reaction to Pull Requests while the review is in progress, providing immediate feedback.
+- **CI/CD Ready**: Supports outputting reviews directly to files or as structured JSON, making it easy to integrate with GitHub Actions or other CI pipelines.
 
 ## Requirements
 
@@ -21,10 +22,10 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 
 Build the binary using standard Go commands:
 ```bash
-go build -o ai-review-agent main.go
+go build -o ai-review-agent ./cmd/ai_reviewer
 ```
 
-*(Alternatively, you can build using Bazel: `bazel build //...`)*
+*(Alternatively, you can build using Bazel: `bazel run //cmd/ai_reviewer:ai_reviewer`)*
 
 ## Usage
 
@@ -39,6 +40,7 @@ To review changes between a base and a head commit/branch:
   --model gemini-3.1-pro-preview \
   --provider-api-key "YOUR_API_KEY"
 ```
+
 ## CLI Options
 
 | Flag | Description | Default | Required |
@@ -51,6 +53,8 @@ To review changes between a base and a head commit/branch:
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
 | `--main-guidelines` | Path to a file overriding the built-in main guidelines | | No |
 | `--review-output-file` | Path to a file where the final review will be written | | No |
+| `--output-json` | Path to a file where the structured JSON review will be written | | No |
+| `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
 
 ## GitHub Action Inputs
@@ -64,7 +68,7 @@ To review changes between a base and a head commit/branch:
 | `head` | Head commit/branch for diff | `HEAD` | No |
 | `working_directory` | Working directory to review | `.` | No |
 | `main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
-| `reviewer_github_token` | GitHub token for posting comments | `${{ github.token }}` | No |
+| `reviewer_github_token` | GitHub token for posting comments and reactions | `${{ github.token }}` | No |
 
 
 ### Supported Models
@@ -76,7 +80,12 @@ For a full list of available models and their IDs, refer to the official documen
 
 ## GitHub Actions Integration
 
-Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests. By default, it manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed to keep the conversation history clean.
+Cassandra can be integrated into your GitHub Actions workflow to automatically review Pull Requests.
+
+### Key Benefits
+- **Persistent Comments**: Manages a single "persistent comment" on the Pull Request, updating it as new changes are pushed to keep the conversation history clean.
+- **Visual Feedback**: Automatically adds an "eyes" reaction to the PR description when the review starts and removes it when finished.
+- **Secure Token Handling**: Uses a dedicated token preparation step with masking for secure and robust interactions.
 
 ### Usage Example
 
@@ -113,3 +122,4 @@ permissions:
 ## Architecture
 
 The project features a lean, custom native Go ReAct loop. Provider-specific interactions are handled via native SDKs (not `langchaingo`). Tools for codebase context gathering are injected securely through model-native Function Calling capabilities.
+

@@ -1,6 +1,5 @@
 load("@aspect_rules_lint//format:defs.bzl", "format_multirun")
 load("@gazelle//:def.bzl", "gazelle")
-load("@rules_go//go:def.bzl", "go_binary", "go_library")
 
 format_multirun(
     name = "format",
@@ -11,27 +10,3 @@ format_multirun(
 
 # gazelle:prefix github.com/menny/cassandra
 gazelle(name = "gazelle")
-
-go_library(
-    name = "cassandra_lib",
-    srcs = ["main.go"],
-    importpath = "github.com/menny/cassandra",
-    visibility = ["//visibility:private"],
-    deps = [
-        "//core",
-        "//core/prompts",
-        "//llm",
-        "//llm/factory",
-        "//tools",
-        "@com_github_spf13_pflag//:pflag",
-    ],
-)
-
-go_binary(
-    name = "ai-review-agent",
-    basename = "cassandra",
-    embed = [":cassandra_lib"],
-    pure = "on",
-    static = "on",
-    visibility = ["//visibility:public"],
-)

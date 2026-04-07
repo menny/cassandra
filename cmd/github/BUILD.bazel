@@ -1,0 +1,32 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+
+go_library(
+    name = "github_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/menny/cassandra/cmd/github",
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_github_google_go_github_v69//github",
+        "@com_github_spf13_pflag//:pflag",
+    ],
+)
+
+go_binary(
+    name = "github",
+    basename = "cassandra-github-util",
+    embed = [":github_lib"],
+    pure = "on",
+    static = "on",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "github_test",
+    srcs = ["main_test.go"],
+    embed = [":github_lib"],
+    deps = [
+        "@com_github_google_go_github_v69//github",
+        "@com_github_migueleliasweb_go_github_mock//src/mock",
+        "@com_github_stretchr_testify//assert",
+    ],
+)
