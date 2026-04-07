@@ -22,10 +22,10 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 
 Build the binary using standard Go commands:
 ```bash
-go build -o ai-review-agent main.go
+go build -o ai-review-agent ./cmd/ai_reviewer
 ```
 
-*(Alternatively, you can build using Bazel: `bazel run //:ai-review-agent`)*
+*(Alternatively, you can build using Bazel: `bazel run //cmd/ai_reviewer:ai_reviewer`)*
 
 ## Usage
 

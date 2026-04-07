@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "ai_reviewer_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/menny/cassandra/cmd/ai_reviewer",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//core",
+        "//core/prompts",
+        "//llm",
+        "//llm/factory",
+        "//tools",
+        "@com_github_spf13_pflag//:pflag",
+    ],
+)
+
+go_binary(
+    name = "ai_reviewer",
+    basename = "cassandra",
+    embed = [":ai_reviewer_lib"],
+    pure = "on",
+    static = "on",
+    visibility = ["//visibility:public"],
+)

@@ -6,12 +6,20 @@ This document details the architecture, technical decisions, and layout of the C
 
 The system is designed as a CLI-driven, autonomous AI worker. It acts essentially as a ReAct (Reasoning and Acting) loop, leveraging the Function Calling (Tool Use) capabilities of modern LLMs to explore codebases locally or remotely before finalizing its code review.
 
-### 1. CLI Entrypoint (`main.go`)
+### 1. AI Review Entrypoint (`cmd/ai_reviewer/main.go`)
 - Parses user intent. Supports reviewing changes between commits/branches (`--base` and `--head`).
 - Dynamically accepts `--provider` (`google` or `anthropic`), `--model`, and `--provider-api-key` to abstract away the underlying LLM dependency.
 - Coordinates the flow from git diff extraction to system prompt building, and finally running the review agent.
 
-### 2. Core AI Engine (`core/agent.go`)
+### 2. GitHub Utility (`cmd/github/main.go`)
+- A standalone utility used by the GitHub Action to manage the lifecycle of a review on a PR.
+- **Actions**:
+  - `add-reaction`: Adds a visual status indicator (e.g., 'eyes') to the PR body.
+  - `remove-reaction`: Cleans up reactions after the review completes.
+  - `post-comment`: Manages a "persistent" comment by searching for a unique tag (e.g., `<!-- cassandra-ai-review -->`) and either creating a new comment or updating an existing one.
+- Built as a separate binary to minimize the footprint and dependencies required for basic GitHub interactions.
+
+### 3. Core AI Engine (`core/agent.go`)
 - Implements a simple, typed Go ReAct loop in `RunReview`.
 - **The ReAct Loop Flow**:
   1. **Initialization**: Starts with a system prompt and the user request (containing the git diff).
