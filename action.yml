@@ -25,8 +25,9 @@ inputs:
     required: false
     default: '.'
   main_guidelines:
-    description: 'Path to a file overriding the built-in main guidelines'
+    description: 'Path to a file or a named prompt from the library (general, asana-do-try-consider, google, conventional-comments, palantir, minimalist, security-first)'
     required: false
+    default: 'general'
   reviewer_github_token:
     description: 'GitHub token for posting comments and managing reactions'
     required: false
@@ -92,15 +93,22 @@ runs:
           --head "${{ inputs.head }}"
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
           --review-output-file "$REVIEW_FILE"
-        )
+          )
 
-        if [[ -n "${{ inputs.main_guidelines }}" ]]; then
-          # Ensure path is absolute for the agent
-          ARGS+=(--main-guidelines "${{ github.workspace }}/${{ inputs.main_guidelines }}")
-        fi
+          # Try to resolve main guidelines:
+          # 1. As a path in the repo being reviewed
+          # 2. As a named prompt in the action's library
+          # The CLI handles both, but we try to provide an absolute path for the repo version.
+          REPO_GUIDELINES="${{ github.workspace }}/${{ inputs.working_directory }}/${{ inputs.main_guidelines }}"
+          if [[ -f "$REPO_GUIDELINES" ]]; then
+          ARGS+=(--main-guidelines "$REPO_GUIDELINES")
+          else
+          ARGS+=(--main-guidelines "${{ inputs.main_guidelines }}")
+          fi
 
-        # Execute via Bazel in the action's source directory
-        cd "${{ github.action_path }}"
+          # Execute via Bazel in the action's source directory
+          cd "${{ github.action_path }}"
+
         bazel run //cmd/ai_reviewer:ai_reviewer -- "${ARGS[@]}"
 
         # Export the review file path for the next step

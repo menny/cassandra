@@ -51,7 +51,7 @@ To review changes between a base and a head commit/branch:
 | `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
-| `--main-guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | | **Yes** |
 | `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--output-json` | Path to a file where the structured JSON review will be written | | No |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
@@ -67,7 +67,7 @@ To review changes between a base and a head commit/branch:
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
 | `working_directory` | Working directory to review | `.` | No |
-| `main_guidelines` | Path to a file overriding the built-in main guidelines | | No |
+| `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `reviewer_github_token` | GitHub token for posting comments and reactions | `${{ github.token }}` | No |
 
 

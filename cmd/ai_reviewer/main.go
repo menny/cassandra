@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	flag "github.com/spf13/pflag"
@@ -35,7 +36,7 @@ func main() {
 	var extractionModel string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file overriding the built-in main guidelines")
+	flag.StringVar(&mainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (required)")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
@@ -77,10 +78,21 @@ func main() {
 	if providerAPIKey == "" {
 		missing = append(missing, "--provider-api-key")
 	}
+	if mainGuidelines == "" {
+		missing = append(missing, "--main-guidelines")
+	}
 
 	if len(missing) > 0 {
 		fmt.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
 		os.Exit(1)
+	}
+
+	originalWD, _ := os.Getwd()
+
+	// Resolve main guidelines content
+	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines, originalWD)
+	if err != nil {
+		log.Fatalf("Failed to resolve main guidelines: %v", err)
 	}
 
 	stderr.Println("=== Cassandra Configuration ===")
@@ -133,7 +145,7 @@ func main() {
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
-	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelines)
+	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent)
 	if err != nil {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}
@@ -176,4 +188,19 @@ func main() {
 		}
 		stderr.Printf("Structured review written to %s\n", outputJSONFile)
 	}
+}
+
+func resolveMainGuidelinesContent(guidelinesPath, originalWD string) (string, error) {
+	// Try the path as provided first
+	if content, err := os.ReadFile(guidelinesPath); err == nil {
+		return string(content), nil
+	}
+
+	// Try as a named prompt in the library (relative to original WD)
+	libPath := filepath.Join(originalWD, "reviewer_prompts", guidelinesPath+".md")
+	if content, err := os.ReadFile(libPath); err == nil {
+		return string(content), nil
+	}
+
+	return "", fmt.Errorf("failed to resolve main guidelines from %q or %q", guidelinesPath, libPath)
 }

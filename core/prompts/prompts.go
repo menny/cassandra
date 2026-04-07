@@ -13,9 +13,6 @@ var reviewerPrompt string
 //go:embed extraction_prompt.md
 var extractionPrompt string
 
-//go:embed code_review_main_guidelines.md
-var mainGuidelines string
-
 // BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
 func BuildExtractionPrompt() string {
 	return extractionPrompt
@@ -23,17 +20,12 @@ func BuildExtractionPrompt() string {
 
 // BuildSystemPrompt constructs the full system prompt from base prompts, general guidelines,
 // optional personal guidelines, and any relevant AGENTS.md files for the changed paths.
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesOverride string) (string, error) {
-	guidelines := mainGuidelines
-	if mainGuidelinesOverride != "" {
-		content, err := os.ReadFile(mainGuidelinesOverride)
-		if err != nil {
-			return "", fmt.Errorf("failed to read main guidelines override: %w", err)
-		}
-		guidelines = string(content)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string) (string, error) {
+	if mainGuidelinesContent == "" {
+		return "", fmt.Errorf("main guidelines content is required")
 	}
 
-	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + guidelines
+	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent
 
 	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
 	if len(reviewersMDs) > 0 {
