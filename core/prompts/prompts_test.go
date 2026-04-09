@@ -59,6 +59,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
 	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
 	require.True(t, strings.Contains(prompt, "Is this code maintainable, easy to work with, and safe?"))
+	require.True(t, strings.Contains(prompt, "Skepticism of Internal Knowledge"))
 
 	// Check that reviewers is inside code_review_guidelines:
 	guidelinesIndex := strings.Index(prompt, "<code_review_guidelines>")
