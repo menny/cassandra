@@ -29,9 +29,9 @@ inputs:
     required: false
     default: 'general'
   metadata_tag:
-    description: 'Tag to identify Cassandra comments in the metadata and for updating previous comments'
+    description: 'Tag to identify Cassandra comments (inner text only, will be wrapped in <!-- ... -->)'
     required: false
-    default: '<!-- cassandra-ai-review -->'
+    default: 'cassandra-ai-review'
   reviewer_github_token:
     description: 'GitHub token for posting comments and managing reactions'
     required: false

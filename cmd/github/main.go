@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v69/github"
 	"github.com/menny/cassandra/core"
@@ -45,6 +46,13 @@ func main() {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
 	}
 
+	// Process tag: only the inner text is provided, we wrap it in HTML comment tags.
+	// Default to 'cassandra-ai-review' if empty.
+	if tag == "" {
+		tag = "cassandra-ai-review"
+	}
+	tag = fmt.Sprintf("<!-- %s -->", tag)
+
 	action := flag.Arg(0)
 	ctx := context.Background()
 	token := os.Getenv("GITHUB_TOKEN")
@@ -77,8 +85,8 @@ func main() {
 		}
 
 	case "post-comment":
-		if bodyFile == "" || tag == "" {
-			log.Fatal("--file and --tag are required for post-comment")
+		if bodyFile == "" {
+			log.Fatal("--file is required for post-comment")
 		}
 		err := postComment(ctx, client, owner, repo, prNumber, bodyFile, tag)
 		if err != nil {
@@ -138,7 +146,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 	}
 
 	content := string(body)
-	if !strings.Contains(content, tag) {
+	if tag != "" && !strings.Contains(content, tag) {
 		content = fmt.Sprintf("%s\n\n%s", content, tag)
 	}
 
@@ -156,7 +164,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 			return fmt.Errorf("failed to list comments: %w", err)
 		}
 		for _, c := range comments {
-			if strings.Contains(c.GetBody(), tag) {
+			if tag != "" && strings.Contains(c.GetBody(), tag) {
 				// We found a matching comment. Since the API returns results in
 				// ascending chronological order, the last one we find is the latest.
 				latestCommentID = c.GetID()
@@ -192,7 +200,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		Title:         pr.GetTitle(),
 		Description:   pr.GetBody(),
 		Author:        pr.GetUser().GetLogin(),
-		CreatedAt:     pr.GetCreatedAt().Time,
+		CreatedAt:     getCreatedAt(pr.CreatedAt),
 		IdentifiedTag: tag,
 	}
 
@@ -213,7 +221,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 				Author: c.GetUser().GetLogin(),
 				Body:   body,
 				IsSelf: isSelf,
-				Date:   c.GetCreatedAt().Time,
+				Date:   getCreatedAt(c.CreatedAt),
 			})
 		}
 
@@ -240,7 +248,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 				Author:    c.GetUser().GetLogin(),
 				Body:      body,
 				IsSelf:    isSelf,
-				Date:      c.GetCreatedAt().Time,
+				Date:      getCreatedAt(c.CreatedAt),
 				Path:      c.GetPath(),
 				Line:      c.GetLine(),
 				StartLine: c.GetStartLine(),
@@ -259,4 +267,11 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 	})
 
 	return metadata, nil
+}
+
+func getCreatedAt(ts *github.Timestamp) time.Time {
+	if ts == nil {
+		return time.Time{}
+	}
+	return ts.Time
 }
