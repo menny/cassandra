@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
 	"github.com/google/go-github/v69/github"
+	"github.com/menny/cassandra/core"
 	flag "github.com/spf13/pflag"
 )
 
@@ -18,13 +20,15 @@ func main() {
 	var reactionID int64
 	var bodyFile string
 	var tag string
+	var outputFile string
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
 	flag.StringVar(&reactionContent, "content", "eyes", "Reaction content (e.g. eyes, rocket, heart)")
 	flag.Int64Var(&reactionID, "reaction-id", 0, "Reaction ID for removal")
 	flag.StringVar(&bodyFile, "file", "", "Path to the comment body file")
-	flag.StringVar(&tag, "tag", "", "Tag to identify the comment for updates")
+	flag.StringVar(&tag, "tag", "", "Tag to identify the comment for updates or self-identification")
+	flag.StringVar(&outputFile, "output", "", "Path to the output file (for get-metadata)")
 
 	flag.Parse()
 
@@ -37,7 +41,7 @@ func main() {
 	}
 
 	if len(flag.Args()) < 1 {
-		log.Fatal("Action required (add-reaction, remove-reaction, post-comment)")
+		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
 	}
 
 	action := flag.Arg(0)
@@ -78,6 +82,26 @@ func main() {
 		err := postComment(ctx, client, owner, repo, prNumber, bodyFile, tag)
 		if err != nil {
 			log.Fatalf("Failed to post comment: %v", err)
+		}
+
+	case "get-metadata":
+		metadata, err := getMetadata(ctx, client, owner, repo, prNumber, tag)
+		if err != nil {
+			log.Fatalf("Failed to get metadata: %v", err)
+		}
+		metadata.RepoFullName = repoFullName
+
+		bytes, err := json.MarshalIndent(metadata, "", "  ")
+		if err != nil {
+			log.Fatalf("Failed to marshal metadata: %v", err)
+		}
+
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, bytes, 0o644); err != nil {
+				log.Fatalf("Failed to write metadata to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(string(bytes))
 		}
 
 	default:
@@ -151,4 +175,49 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		Body: github.Ptr(content),
 	})
 	return err
+}
+
+func getMetadata(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string) (*core.PRMetadata, error) {
+	pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	metadata := &core.PRMetadata{
+		PRNumber:      prNumber,
+		Title:         pr.GetTitle(),
+		Description:   pr.GetBody(),
+		Author:        pr.GetUser().GetLogin(),
+		CreatedAt:     pr.GetCreatedAt().Time,
+		IdentifiedTag: tag,
+	}
+
+	opts := &github.IssueListCommentsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+
+	for {
+		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list comments: %w", err)
+		}
+
+		for _, c := range comments {
+			body := c.GetBody()
+			isSelf := tag != "" && strings.Contains(body, tag)
+			metadata.Comments = append(metadata.Comments, core.PRComment{
+				Author: c.GetUser().GetLogin(),
+				Body:   body,
+				IsSelf: isSelf,
+				Date:   c.GetCreatedAt().Time,
+			})
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	return metadata, nil
 }

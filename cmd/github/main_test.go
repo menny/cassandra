@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v69/github"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
@@ -155,4 +156,55 @@ func TestPostComment_FileNotFound(t *testing.T) {
 	err := postComment(context.Background(), client, "owner", "repo", 1, "non-existent.md", "<!-- tag -->")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read body file")
+}
+
+func TestGetMetadata(t *testing.T) {
+	setupMock := func() *github.Client {
+		mockedHTTPClient := mock.NewMockedHTTPClient(
+			mock.WithRequestMatch(
+				mock.GetReposPullsByOwnerByRepoByPullNumber,
+				github.PullRequest{
+					Number:    github.Ptr(1),
+					Title:     github.Ptr("PR Title"),
+					Body:      github.Ptr("PR Description"),
+					User:      &github.User{Login: github.Ptr("author")},
+					CreatedAt: &github.Timestamp{Time: time.Now()},
+				},
+			),
+			mock.WithRequestMatch(
+				mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+				[]github.IssueComment{
+					{
+						User:      &github.User{Login: github.Ptr("user1")},
+						Body:      github.Ptr("comment 1"),
+						CreatedAt: &github.Timestamp{Time: time.Now()},
+					},
+					{
+						User:      &github.User{Login: github.Ptr("cassandra")},
+						Body:      github.Ptr("comment 2 <!-- tag-a -->"),
+						CreatedAt: &github.Timestamp{Time: time.Now()},
+					},
+				},
+			),
+		)
+		return github.NewClient(mockedHTTPClient)
+	}
+
+	t.Run("with tag-a", func(t *testing.T) {
+		client := setupMock()
+		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "<!-- tag-a -->")
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(metadata.Comments))
+		assert.False(t, metadata.Comments[0].IsSelf)
+		assert.True(t, metadata.Comments[1].IsSelf)
+	})
+
+	t.Run("with tag-b", func(t *testing.T) {
+		client := setupMock()
+		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "<!-- tag-b -->")
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(metadata.Comments))
+		assert.False(t, metadata.Comments[0].IsSelf)
+		assert.False(t, metadata.Comments[1].IsSelf)
+	})
 }

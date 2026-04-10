@@ -4,9 +4,49 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/menny/cassandra/core"
 	"github.com/stretchr/testify/require"
 )
+
+func TestFormatMetadata(t *testing.T) {
+	now := time.Date(2026, 4, 9, 10, 0, 0, 0, time.UTC)
+	metadata := core.PRMetadata{
+		RepoFullName: "owner/repo",
+		Author:       "author1",
+		CreatedAt:    now,
+		Title:        "PR Title",
+		Description:  "PR Description",
+		Comments: []core.PRComment{
+			{
+				Author: "user1",
+				Body:   "comment 1",
+				Date:   now.Add(time.Hour),
+				IsSelf: false,
+			},
+			{
+				Author: "cassandra",
+				Body:   "comment 2",
+				Date:   now.Add(2 * time.Hour),
+				IsSelf: true,
+			},
+		},
+	}
+
+	formatted := formatMetadata(metadata)
+
+	require.Contains(t, formatted, "### PR Metadata")
+	require.Contains(t, formatted, "- **Repository**: owner/repo")
+	require.Contains(t, formatted, "- **Author**: author1")
+	require.Contains(t, formatted, "- **Date**: 2026-04-09")
+	require.Contains(t, formatted, "- **Title**: PR Title")
+	require.Contains(t, formatted, "- **Description**: PR Description")
+
+	require.Contains(t, formatted, "### PR Comments")
+	require.Contains(t, formatted, "- **user1** (2026-04-09 11:00): comment 1")
+	require.Contains(t, formatted, "- **cassandra (Cassandra Bot)** (2026-04-09 12:00): comment 2")
+}
 
 func TestResolveMainGuidelinesContent(t *testing.T) {
 	tmpDir := t.TempDir()
