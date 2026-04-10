@@ -144,7 +144,9 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 
 	// Find existing comment
 	opts := &github.IssueListCommentsOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
 	}
 
 	var latestCommentID int64
@@ -155,9 +157,8 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		}
 		for _, c := range comments {
 			if strings.Contains(c.GetBody(), tag) {
-				// We found a matching comment. Since ListComments returns results in
-				// ascending chronological order, we keep updating latestCommentID
-				// until we reach the end of the lists.
+				// We found a matching comment. Since the API returns results in
+				// ascending chronological order, the last one we find is the latest.
 				latestCommentID = c.GetID()
 			}
 		}
