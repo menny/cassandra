@@ -28,6 +28,10 @@ inputs:
     description: 'Path to a file or a named prompt from the library (general, asana-do-try-consider, google, conventional-comments, palantir, minimalist, security-first)'
     required: false
     default: 'general'
+  metadata_tag:
+    description: 'Tag to identify Cassandra comments (inner text only, will be wrapped in <!-- ... -->)'
+    required: false
+    default: 'cassandra-ai-review'
   reviewer_github_token:
     description: 'GitHub token for posting comments and managing reactions'
     required: false
@@ -77,6 +81,16 @@ runs:
         if [ -n "$REACTION_ID" ]; then
           echo "CASSANDRA_REACTION_ID=$REACTION_ID" >> $GITHUB_ENV
         fi
+    - name: Fetch PR Metadata
+      if: github.event.pull_request.number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+      run: |
+        METADATA_FILE="${{ runner.temp }}/cassandra_metadata.json"
+        cd "${{ github.action_path }}"
+        bazel run //cmd/github:github -- get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "${{ inputs.metadata_tag }}" --output "$METADATA_FILE"
+        echo "METADATA_FILE=$METADATA_FILE" >> $GITHUB_ENV
     - name: Run AI Review
       shell: bash
       env:
@@ -93,9 +107,13 @@ runs:
           --head "${{ inputs.head }}"
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
           --review-output-file "$REVIEW_FILE"
-          )
+        )
 
-          # Try to resolve main guidelines:
+        if [[ -f "$METADATA_FILE" ]]; then
+          ARGS+=(--metadata-json "$METADATA_FILE")
+        fi
+
+        # Try to resolve main guidelines:
           # 1. As a path in the repo being reviewed
           # 2. As a named prompt in the action's library
           # The CLI handles both, but we try to provide an absolute path for the repo version.
@@ -121,7 +139,7 @@ runs:
       run: |
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "<!-- cassandra-ai-review -->"
+        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "${{ inputs.metadata_tag }}"
     - name: Remove Eyes Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash

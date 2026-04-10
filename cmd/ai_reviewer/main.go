@@ -33,6 +33,7 @@ func main() {
 	var reviewOutputFile string
 	var outputJSONFile string
 	var extractionModel string
+	var metadataJSONFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
@@ -42,6 +43,7 @@ func main() {
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 	flag.StringVar(&outputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
 	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
+	flag.StringVar(&metadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -104,6 +106,9 @@ func main() {
 			stderr.Printf("  Extraction Model: %s\n", extractionModel)
 		}
 	}
+	if metadataJSONFile != "" {
+		stderr.Printf("  Metadata JSON: %s\n", metadataJSONFile)
+	}
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
@@ -135,6 +140,20 @@ func main() {
 
 	requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
 	changedFiles = files
+
+	if metadataJSONFile != "" {
+		metadataBytes, err := os.ReadFile(metadataJSONFile)
+		if err != nil {
+			stderr.Printf("Warning: failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
+		} else {
+			var metadata core.PRMetadata
+			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+				stderr.Printf("Warning: failed to parse metadata JSON: %v. Proceeding without metadata.\n", err)
+			} else {
+				requestText = formatMetadata(metadata) + "\n\n" + requestText
+			}
+		}
+	}
 
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
@@ -192,4 +211,48 @@ func resolveMainGuidelinesContent(guidelinesPath string) (string, error) {
 
 	// Try as a named prompt in the library (embedded)
 	return prompts.GetLibraryPrompt(guidelinesPath)
+}
+
+func formatMetadata(metadata core.PRMetadata) string {
+	var sb strings.Builder
+	sb.WriteString("### PR Metadata\n")
+	if metadata.RepoFullName != "" {
+		sb.WriteString(fmt.Sprintf("- **Repository**: %s\n", metadata.RepoFullName))
+	}
+	sb.WriteString(fmt.Sprintf("- **Author**: %s\n", metadata.Author))
+	sb.WriteString(fmt.Sprintf("- **Date**: %s\n", metadata.CreatedAt.Format("2006-01-02")))
+	sb.WriteString(fmt.Sprintf("- **Title**: %s\n", metadata.Title))
+	if metadata.Description != "" {
+		sb.WriteString(fmt.Sprintf("- **Description**: %s\n", metadata.Description))
+	}
+
+	if len(metadata.Comments) > 0 {
+		sb.WriteString("\n### PR Comments\n")
+		for _, c := range metadata.Comments {
+			author := c.Author
+			if c.IsSelf {
+				author = fmt.Sprintf("%s (Cassandra Bot)", author)
+			}
+			location := ""
+			if c.Path != "" {
+				if c.Line > 0 {
+					if c.StartLine > 0 && c.StartLine != c.Line {
+						location = fmt.Sprintf(" on %s:%d-%d", c.Path, c.StartLine, c.Line)
+					} else {
+						location = fmt.Sprintf(" on %s:%d", c.Path, c.Line)
+					}
+				} else {
+					location = fmt.Sprintf(" on %s (file-level)", c.Path)
+				}
+			}
+			sb.WriteString(fmt.Sprintf("- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location))
+			// Indent body and wrap in blockquote to maintain Markdown structure
+			lines := strings.Split(c.Body, "\n")
+			for _, line := range lines {
+				sb.WriteString(fmt.Sprintf("  > %s\n", line))
+			}
+		}
+	}
+
+	return sb.String()
 }

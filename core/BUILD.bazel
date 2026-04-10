@@ -4,6 +4,7 @@ go_library(
     name = "core",
     srcs = [
         "agent.go",
+        "github.go",
         "io_util.go",
         "review_types.go",
     ],

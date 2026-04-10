@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v69/github"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
@@ -155,4 +156,95 @@ func TestPostComment_FileNotFound(t *testing.T) {
 	err := postComment(context.Background(), client, "owner", "repo", 1, "non-existent.md", "<!-- tag -->")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read body file")
+}
+
+func TestPostComment_Latest(t *testing.T) {
+	tmpDir := t.TempDir()
+	bodyFile := filepath.Join(tmpDir, "body.md")
+	err := os.WriteFile(bodyFile, []byte("test body"), 0o644)
+	assert.NoError(t, err)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			[]github.IssueComment{
+				{
+					ID:   github.Ptr(int64(1)),
+					Body: github.Ptr("old body <!-- tag -->"),
+				},
+				{
+					ID:   github.Ptr(int64(2)),
+					Body: github.Ptr("newer body <!-- tag -->"),
+				},
+			},
+		),
+		mock.WithRequestMatch(
+			mock.PatchReposIssuesCommentsByOwnerByRepoByCommentId,
+			github.IssueComment{ID: github.Ptr(int64(2))},
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	assert.NoError(t, err)
+}
+
+func TestGetMetadata(t *testing.T) {
+	setupMock := func() *github.Client {
+		mockedHTTPClient := mock.NewMockedHTTPClient(
+			mock.WithRequestMatch(
+				mock.GetReposPullsByOwnerByRepoByPullNumber,
+				github.PullRequest{
+					Number:    github.Ptr(1),
+					Title:     github.Ptr("PR Title"),
+					Body:      github.Ptr("PR Description"),
+					User:      &github.User{Login: github.Ptr("author")},
+					CreatedAt: &github.Timestamp{Time: time.Now()},
+				},
+			),
+			mock.WithRequestMatch(
+				mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+				[]github.IssueComment{
+					{
+						User:      &github.User{Login: github.Ptr("user1")},
+						Body:      github.Ptr("comment 1"),
+						CreatedAt: &github.Timestamp{Time: time.Now().Add(-time.Hour)},
+					},
+				},
+			),
+			mock.WithRequestMatch(
+				mock.GetReposPullsCommentsByOwnerByRepoByPullNumber,
+				[]github.PullRequestComment{
+					{
+						User:      &github.User{Login: github.Ptr("cassandra")},
+						Body:      github.Ptr("comment 2 <!-- tag-a -->"),
+						CreatedAt: &github.Timestamp{Time: time.Now()},
+						Path:      github.Ptr("file.go"),
+						Line:      github.Ptr(10),
+						StartLine: github.Ptr(5),
+					},
+				},
+			),
+		)
+		return github.NewClient(mockedHTTPClient)
+	}
+
+	t.Run("with tag-a", func(t *testing.T) {
+		client := setupMock()
+		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "<!-- tag-a -->")
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(metadata.Comments))
+		assert.False(t, metadata.Comments[0].IsSelf)
+		assert.True(t, metadata.Comments[1].IsSelf)
+		assert.Equal(t, 5, metadata.Comments[1].StartLine)
+	})
+
+	t.Run("with tag-b", func(t *testing.T) {
+		client := setupMock()
+		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "<!-- tag-b -->")
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(metadata.Comments))
+		assert.False(t, metadata.Comments[0].IsSelf)
+		assert.False(t, metadata.Comments[1].IsSelf)
+	})
 }
