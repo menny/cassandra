@@ -31,7 +31,7 @@ inputs:
   metadata_tag:
     description: 'Tag to identify Cassandra comments (inner text only, will be wrapped in <!-- ... -->)'
     required: false
-    default: 'cassandra-ai-review'
+    default: 'cassandra-ai-review-${{ github.workflow }}'
   reviewer_github_token:
     description: 'GitHub token for posting comments and managing reactions'
     required: false
@@ -86,26 +86,33 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+        METADATA_TAG: ${{ inputs.metadata_tag }}
       run: |
         METADATA_FILE="${{ runner.temp }}/cassandra_metadata.json"
         cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "${{ inputs.metadata_tag }}" --output "$METADATA_FILE"
+        bazel run //cmd/github:github -- get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "$METADATA_TAG" --output "$METADATA_FILE"
         echo "METADATA_FILE=$METADATA_FILE" >> $GITHUB_ENV
     - name: Run AI Review
       shell: bash
       env:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
+        PROVIDER: ${{ inputs.provider }}
+        MODEL_ID: ${{ inputs.model_id }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
       run: |
         # Use a temporary file for the review output
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
 
         ARGS=(
-          --provider "${{ inputs.provider }}"
-          --model "${{ inputs.model_id }}"
+          --provider "$PROVIDER"
+          --model "$MODEL_ID"
           --provider-api-key "$PROVIDER_API_KEY"
-          --base "${{ inputs.base }}"
-          --head "${{ inputs.head }}"
-          --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
+          --base "$BASE"
+          --head "$HEAD"
+          --cwd "${{ github.workspace }}/$WORKING_DIRECTORY"
           --review-output-file "$REVIEW_FILE"
         )
 
@@ -114,18 +121,18 @@ runs:
         fi
 
         # Try to resolve main guidelines:
-          # 1. As a path in the repo being reviewed
-          # 2. As a named prompt in the action's library
-          # The CLI handles both, but we try to provide an absolute path for the repo version.
-          REPO_GUIDELINES="${{ github.workspace }}/${{ inputs.working_directory }}/${{ inputs.main_guidelines }}"
-          if [[ -f "$REPO_GUIDELINES" ]]; then
+        # 1. As a path in the repo being reviewed
+        # 2. As a named prompt in the action's library
+        # The CLI handles both, but we try to provide an absolute path for the repo version.
+        REPO_GUIDELINES="${{ github.workspace }}/$WORKING_DIRECTORY/$MAIN_GUIDELINES"
+        if [[ -f "$REPO_GUIDELINES" ]]; then
           ARGS+=(--main-guidelines "$REPO_GUIDELINES")
-          else
-          ARGS+=(--main-guidelines "${{ inputs.main_guidelines }}")
-          fi
+        else
+          ARGS+=(--main-guidelines "$MAIN_GUIDELINES")
+        fi
 
-          # Execute via Bazel in the action's source directory
-          cd "${{ github.action_path }}"
+        # Execute via Bazel in the action's source directory
+        cd "${{ github.action_path }}"
 
         bazel run //cmd/ai_reviewer:ai_reviewer -- "${ARGS[@]}"
 
@@ -136,10 +143,11 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+        METADATA_TAG: ${{ inputs.metadata_tag }}
       run: |
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "${{ inputs.metadata_tag }}"
+        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "$METADATA_TAG"
     - name: Remove Eyes Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash
