@@ -158,6 +158,37 @@ func TestPostComment_FileNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to read body file")
 }
 
+func TestPostComment_Latest(t *testing.T) {
+	tmpDir := t.TempDir()
+	bodyFile := filepath.Join(tmpDir, "body.md")
+	err := os.WriteFile(bodyFile, []byte("test body"), 0o644)
+	assert.NoError(t, err)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			[]github.IssueComment{
+				{
+					ID:   github.Ptr(int64(1)),
+					Body: github.Ptr("old body <!-- tag -->"),
+				},
+				{
+					ID:   github.Ptr(int64(2)),
+					Body: github.Ptr("newer body <!-- tag -->"),
+				},
+			},
+		),
+		mock.WithRequestMatch(
+			mock.PatchReposIssuesCommentsByOwnerByRepoByCommentId,
+			github.IssueComment{ID: github.Ptr(int64(2))},
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	assert.NoError(t, err)
+}
+
 func TestGetMetadata(t *testing.T) {
 	setupMock := func() *github.Client {
 		mockedHTTPClient := mock.NewMockedHTTPClient(
@@ -190,6 +221,7 @@ func TestGetMetadata(t *testing.T) {
 						CreatedAt: &github.Timestamp{Time: time.Now()},
 						Path:      github.Ptr("file.go"),
 						Line:      github.Ptr(10),
+						StartLine: github.Ptr(5),
 					},
 				},
 			),
@@ -204,6 +236,7 @@ func TestGetMetadata(t *testing.T) {
 		assert.Equal(t, 2, len(metadata.Comments))
 		assert.False(t, metadata.Comments[0].IsSelf)
 		assert.True(t, metadata.Comments[1].IsSelf)
+		assert.Equal(t, 5, metadata.Comments[1].StartLine)
 	})
 
 	t.Run("with tag-b", func(t *testing.T) {

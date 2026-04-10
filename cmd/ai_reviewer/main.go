@@ -144,13 +144,15 @@ func main() {
 	if metadataJSONFile != "" {
 		metadataBytes, err := os.ReadFile(metadataJSONFile)
 		if err != nil {
-			log.Fatalf("Failed to read metadata JSON: %v", err)
+			stderr.Printf("Warning: failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
+		} else {
+			var metadata core.PRMetadata
+			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+				stderr.Printf("Warning: failed to parse metadata JSON: %v. Proceeding without metadata.\n", err)
+			} else {
+				requestText = formatMetadata(metadata) + "\n\n" + requestText
+			}
 		}
-		var metadata core.PRMetadata
-		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-			log.Fatalf("Failed to parse metadata JSON: %v", err)
-		}
-		requestText = formatMetadata(metadata) + "\n\n" + requestText
 	}
 
 	// Compute max ReAct iterations based on changed files.
@@ -233,7 +235,15 @@ func formatMetadata(metadata core.PRMetadata) string {
 			}
 			location := ""
 			if c.Path != "" {
-				location = fmt.Sprintf(" on %s:%d", c.Path, c.Line)
+				if c.Line > 0 {
+					if c.StartLine > 0 && c.StartLine != c.Line {
+						location = fmt.Sprintf(" on %s:%d-%d", c.Path, c.StartLine, c.Line)
+					} else {
+						location = fmt.Sprintf(" on %s:%d", c.Path, c.Line)
+					}
+				} else {
+					location = fmt.Sprintf(" on %s (file-level)", c.Path)
+				}
 			}
 			sb.WriteString(fmt.Sprintf("- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location))
 			// Indent body and wrap in blockquote to maintain Markdown structure

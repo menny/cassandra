@@ -147,7 +147,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 
-	var existingCommentID int64
+	var latestCommentID int64
 	for {
 		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
 		if err != nil {
@@ -155,18 +155,20 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		}
 		for _, c := range comments {
 			if strings.Contains(c.GetBody(), tag) {
-				existingCommentID = c.GetID()
-				break
+				// We found a matching comment. Since ListComments returns results in
+				// ascending chronological order, we keep updating latestCommentID
+				// until we reach the end of the lists.
+				latestCommentID = c.GetID()
 			}
 		}
-		if existingCommentID != 0 || resp.NextPage == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
 
-	if existingCommentID != 0 {
-		_, _, err := client.Issues.EditComment(ctx, owner, repo, existingCommentID, &github.IssueComment{
+	if latestCommentID != 0 {
+		_, _, err := client.Issues.EditComment(ctx, owner, repo, latestCommentID, &github.IssueComment{
 			Body: github.Ptr(content),
 		})
 		return err
@@ -234,12 +236,13 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 			body := c.GetBody()
 			isSelf := tag != "" && strings.Contains(body, tag)
 			metadata.Comments = append(metadata.Comments, core.PRComment{
-				Author: c.GetUser().GetLogin(),
-				Body:   body,
-				IsSelf: isSelf,
-				Date:   c.GetCreatedAt().Time,
-				Path:   c.GetPath(),
-				Line:   c.GetLine(),
+				Author:    c.GetUser().GetLogin(),
+				Body:      body,
+				IsSelf:    isSelf,
+				Date:      c.GetCreatedAt().Time,
+				Path:      c.GetPath(),
+				Line:      c.GetLine(),
+				StartLine: c.GetStartLine(),
 			})
 		}
 
