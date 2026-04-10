@@ -20,4 +20,6 @@ type PRComment struct {
 	Body   string    `json:"body"`
 	IsSelf bool      `json:"is_self"`
 	Date   time.Time `json:"date"`
+	Path   string    `json:"path,omitempty"`
+	Line   int       `json:"line,omitempty"`
 }

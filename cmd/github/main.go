@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/google/go-github/v69/github"
@@ -199,7 +200,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 	for {
 		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list comments: %w", err)
+			return nil, fmt.Errorf("failed to list issue comments: %w", err)
 		}
 
 		for _, c := range comments {
@@ -218,6 +219,40 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		}
 		opts.Page = resp.NextPage
 	}
+
+	// Fetch PR Review Comments (inline code comments)
+	reviewOpts := &github.PullRequestListCommentsOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	for {
+		comments, resp, err := client.PullRequests.ListComments(ctx, owner, repo, prNumber, reviewOpts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list review comments: %w", err)
+		}
+
+		for _, c := range comments {
+			body := c.GetBody()
+			isSelf := tag != "" && strings.Contains(body, tag)
+			metadata.Comments = append(metadata.Comments, core.PRComment{
+				Author: c.GetUser().GetLogin(),
+				Body:   body,
+				IsSelf: isSelf,
+				Date:   c.GetCreatedAt().Time,
+				Path:   c.GetPath(),
+				Line:   c.GetLine(),
+			})
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		reviewOpts.Page = resp.NextPage
+	}
+
+	// Sort comments by date to provide chronological context
+	sort.Slice(metadata.Comments, func(i, j int) bool {
+		return metadata.Comments[i].Date.Before(metadata.Comments[j].Date)
+	})
 
 	return metadata, nil
 }

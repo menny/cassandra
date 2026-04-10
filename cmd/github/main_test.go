@@ -177,12 +177,19 @@ func TestGetMetadata(t *testing.T) {
 					{
 						User:      &github.User{Login: github.Ptr("user1")},
 						Body:      github.Ptr("comment 1"),
-						CreatedAt: &github.Timestamp{Time: time.Now()},
+						CreatedAt: &github.Timestamp{Time: time.Now().Add(-time.Hour)},
 					},
+				},
+			),
+			mock.WithRequestMatch(
+				mock.GetReposPullsCommentsByOwnerByRepoByPullNumber,
+				[]github.PullRequestComment{
 					{
 						User:      &github.User{Login: github.Ptr("cassandra")},
 						Body:      github.Ptr("comment 2 <!-- tag-a -->"),
 						CreatedAt: &github.Timestamp{Time: time.Now()},
+						Path:      github.Ptr("file.go"),
+						Line:      github.Ptr(10),
 					},
 				},
 			),

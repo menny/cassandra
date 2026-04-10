@@ -107,13 +107,13 @@ runs:
           --head "${{ inputs.head }}"
           --cwd "${{ github.workspace }}/${{ inputs.working_directory }}"
           --review-output-file "$REVIEW_FILE"
-          )
+        )
 
-          if [[ -f "$METADATA_FILE" ]]; then
+        if [[ -f "$METADATA_FILE" ]]; then
           ARGS+=(--metadata-json "$METADATA_FILE")
-          fi
+        fi
 
-          # Try to resolve main guidelines:
+        # Try to resolve main guidelines:
           # 1. As a path in the repo being reviewed
           # 2. As a named prompt in the action's library
           # The CLI handles both, but we try to provide an absolute path for the repo version.

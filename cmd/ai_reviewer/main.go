@@ -231,7 +231,16 @@ func formatMetadata(metadata core.PRMetadata) string {
 			if c.IsSelf {
 				author = fmt.Sprintf("%s (Cassandra Bot)", author)
 			}
-			sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", author, c.Date.Format("2006-01-02 15:04"), c.Body))
+			location := ""
+			if c.Path != "" {
+				location = fmt.Sprintf(" on %s:%d", c.Path, c.Line)
+			}
+			sb.WriteString(fmt.Sprintf("- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location))
+			// Indent body and wrap in blockquote to maintain Markdown structure
+			lines := strings.Split(c.Body, "\n")
+			for _, line := range lines {
+				sb.WriteString(fmt.Sprintf("  > %s\n", line))
+			}
 		}
 	}
 

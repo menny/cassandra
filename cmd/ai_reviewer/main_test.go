@@ -44,8 +44,10 @@ func TestFormatMetadata(t *testing.T) {
 	require.Contains(t, formatted, "- **Description**: PR Description")
 
 	require.Contains(t, formatted, "### PR Comments")
-	require.Contains(t, formatted, "- **user1** (2026-04-09 11:00): comment 1")
-	require.Contains(t, formatted, "- **cassandra (Cassandra Bot)** (2026-04-09 12:00): comment 2")
+	require.Contains(t, formatted, "- **user1** (2026-04-09 11:00):")
+	require.Contains(t, formatted, "  > comment 1")
+	require.Contains(t, formatted, "- **cassandra (Cassandra Bot)** (2026-04-09 12:00):")
+	require.Contains(t, formatted, "  > comment 2")
 }
 
 func TestResolveMainGuidelinesContent(t *testing.T) {
