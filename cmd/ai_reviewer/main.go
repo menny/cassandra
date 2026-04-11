@@ -34,9 +34,11 @@ func main() {
 	var outputJSONFile string
 	var extractionModel string
 	var metadataJSONFile string
+	var approvalEvaluationPromptFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
+	flag.StringVar(&approvalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
@@ -91,6 +93,15 @@ func main() {
 		log.Fatalf("Failed to resolve main guidelines: %v", err)
 	}
 
+	var approvalEvaluationContent string
+	if approvalEvaluationPromptFile != "" {
+		content, err := os.ReadFile(approvalEvaluationPromptFile)
+		if err != nil {
+			log.Fatalf("Failed to read approval evaluation prompt file: %v", err)
+		}
+		approvalEvaluationContent = string(content)
+	}
+
 	stderr.Println("=== Cassandra Configuration ===")
 	stderr.Printf("  Working Directory: %s\n", targetDir)
 	stderr.Printf("  Base: %s\n", base)
@@ -108,6 +119,9 @@ func main() {
 	}
 	if metadataJSONFile != "" {
 		stderr.Printf("  Metadata JSON: %s\n", metadataJSONFile)
+	}
+	if approvalEvaluationPromptFile != "" {
+		stderr.Printf("  Approval Evaluation Prompt File: %s\n", approvalEvaluationPromptFile)
 	}
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
@@ -158,7 +172,7 @@ func main() {
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
-	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent)
+	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, approvalEvaluationContent)
 	if err != nil {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}

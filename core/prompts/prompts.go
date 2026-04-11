@@ -14,6 +14,9 @@ var reviewerPrompt string
 //go:embed extraction_prompt.md
 var extractionPrompt string
 
+//go:embed approval_evaluation_prompt.md
+var approvalEvaluationPrompt string
+
 //go:embed library/*.md
 var libraryFS embed.FS
 
@@ -35,9 +38,13 @@ func GetLibraryPrompt(name string) (string, error) {
 // the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
 // in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
 // personal.ai_code_review_guidelines.md located in the workspace root.
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string) (string, error) {
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent, approvalEvaluationContent string) (string, error) {
 	if mainGuidelinesContent == "" {
 		return "", fmt.Errorf("main guidelines content is required")
+	}
+
+	if approvalEvaluationContent == "" {
+		approvalEvaluationContent = approvalEvaluationPrompt
 	}
 
 	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent
@@ -50,6 +57,8 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		}
 	}
 	prompt += "\n</code_review_guidelines>\n"
+
+	prompt += "\n<approval_evaluation_guidelines>\n" + approvalEvaluationContent + "\n</approval_evaluation_guidelines>\n"
 
 	personalPath := filepath.Join(workspaceRoot, "personal.ai_code_review_guidelines.md")
 	if personalBytes, err := os.ReadFile(personalPath); err == nil {
