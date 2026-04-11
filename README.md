@@ -10,6 +10,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 - **Provider Agnostic**: Natively supports Anthropic and Google models through a unified abstraction.
 - **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files, glob matching, and pattern searching with `grep`) to autonomously gather surrounding context about your codebase before finalizing feedback.
 - **Visual Status Indicators**: Automatically adds an "eyes" reaction to Pull Requests while the review is in progress, providing immediate feedback.
+- **Inline PR Reviews**: Supports formal GitHub PR Reviews with line-level feedback, including automatic dismissal of stale reviews and deduplication of comments.
 - **CI/CD Ready**: Supports outputting reviews directly to files or as structured JSON, making it easy to integrate with GitHub Actions or other CI pipelines.
 
 ## Requirements
@@ -71,6 +72,9 @@ To review changes between a base and a head commit/branch:
 | `metadata_tag` | Tag to identify Cassandra comments (inner text only, will be wrapped in `<!-- ... -->`) | `cassandra-ai-review-${{ github.workflow }}` | No |
 | `reaction_icon` | The reaction icon to add to the PR description while the review is in progress (e.g., `eyes`, `rocket`, `heart`) | `eyes` | No |
 | `reviewer_github_token` | GitHub token for posting comments and reactions | `${{ github.token }}` | No |
+| `use_inline_comments` | Whether to post inline comments to the PR (requires structured JSON output) | `true` | No |
+| `submit_review_action` | Whether to allow formal "approve/reject" actions or force neutral "comment" | `false` | No |
+| `delete_old_comments` | Whether to delete previous bot-authored inline comments before posting a new review | `true` | No |
 
 
 ### Supported Models
