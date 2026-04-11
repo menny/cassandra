@@ -158,7 +158,10 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	content := string(body)
+	return postCommentText(ctx, client, owner, repo, prNumber, string(body), tag)
+}
+
+func postCommentText(ctx context.Context, client *github.Client, owner, repo string, prNumber int, content, tag string) error {
 	if tag != "" && !strings.Contains(content, tag) {
 		content = fmt.Sprintf("%s\n\n%s", content, tag)
 	}
@@ -196,7 +199,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return err
 	}
 
-	_, _, err = client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
+	_, _, err := client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
 		Body: github.Ptr(content),
 	})
 	return err
@@ -304,15 +307,27 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	if metadataFile != "" {
 		metadataBytes, err := os.ReadFile(metadataFile)
 		if err == nil {
-			_ = json.Unmarshal(metadataBytes, &metadata)
+			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+				log.Printf("Warning: failed to unmarshal metadata: %v", err)
+			}
+		}
+	}
+
+	// 1. Post Non-Specific Review as a separate comment
+	if sr.NonSpecificReview != "" {
+		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, tag); err != nil {
+			log.Printf("Warning: failed to post non-specific review comment: %v", err)
 		}
 	}
 
 	comments := []*github.DraftReviewComment{}
+	reviewRationale := sr.Approval.Rationale
+
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
 		if err != nil {
-			log.Printf("Warning: failed to parse lines for %s: %v. Skipping inline comment.", fr.Path, err)
+			log.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
+			reviewRationale = fmt.Sprintf("%s\n\n- **%s**: %s", reviewRationale, fr.Path, fr.Review)
 			continue
 		}
 
@@ -337,19 +352,23 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		comment := &github.DraftReviewComment{
 			Path: github.Ptr(fr.Path),
 			Body: github.Ptr(commentBody),
-			Line: github.Ptr(endLine),
 		}
-		if startLine != endLine {
-			comment.StartLine = github.Ptr(startLine)
-			comment.StartSide = github.Ptr("RIGHT")
+
+		if endLine > 0 {
+			comment.Line = github.Ptr(endLine)
+			if startLine != endLine {
+				comment.StartLine = github.Ptr(startLine)
+				comment.StartSide = github.Ptr("RIGHT")
+			}
+			comments = append(comments, comment)
+		} else {
+			// File-level comment - go-github v69 doesn't support SubjectType: file on DraftReviewComment.
+			// Fallback: append to the main review rationale.
+			reviewRationale = fmt.Sprintf("%s\n\n- **%s** (file-level): %s", reviewRationale, fr.Path, fr.Review)
 		}
-		comments = append(comments, comment)
 	}
 
-	reviewBody := sr.Approval.Rationale
-	if sr.NonSpecificReview != "" {
-		reviewBody = fmt.Sprintf("%s\n\n### General Feedback\n%s", reviewBody, sr.NonSpecificReview)
-	}
+	reviewBody := reviewRationale
 	if tag != "" {
 		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
 	}
@@ -361,8 +380,8 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		}
 	}
 
-	action := sr.Approval.Action
-	if !allowReviewAction {
+	action := strings.ToUpper(strings.TrimSpace(sr.Approval.Action))
+	if !allowReviewAction || (action != "APPROVE" && action != "REQUEST_CHANGES" && action != "COMMENT") {
 		action = "COMMENT"
 	}
 
@@ -372,8 +391,33 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		Comments: comments,
 	}
 
-	_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-	return err
+	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	if err != nil {
+		// If we get a 422 error, it might be due to a line hallucination (line not in diff).
+		// Fallback: post the review without inline comments so we don't lose the summary feedback.
+		if resp != nil && resp.StatusCode == 422 && len(comments) > 0 {
+			log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", err)
+			reviewRequest.Comments = nil
+
+			// Append the skipped comments to the body so they aren't lost
+			var sb strings.Builder
+			sb.WriteString(reviewRequest.GetBody())
+			sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
+			for _, c := range comments {
+				loc := ""
+				if c.Line != nil {
+					loc = fmt.Sprintf(" at line %d", *c.Line)
+				}
+				sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", c.GetPath(), loc, c.GetBody()))
+			}
+			reviewRequest.Body = github.Ptr(sb.String())
+
+			_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+			return err
+		}
+		return err
+	}
+	return nil
 }
 
 func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string) error {

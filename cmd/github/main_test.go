@@ -295,6 +295,20 @@ func TestPostStructuredReview(t *testing.T) {
 	_ = os.WriteFile(metadataFile, metadataBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			[]github.IssueComment{},
+		),
+		mock.WithRequestMatchHandler(
+			mock.PostReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var comment github.IssueComment
+				_ = json.NewDecoder(r.Body).Decode(&comment)
+				assert.Contains(t, *comment.Body, "General feedback")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.IssueComment{ID: github.Ptr(int64(101))}))
+			}),
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +317,7 @@ func TestPostStructuredReview(t *testing.T) {
 
 				assert.Equal(t, "APPROVE", *req.Event)
 				assert.Contains(t, *req.Body, "LGTM!")
-				assert.Contains(t, *req.Body, "General feedback")
+				assert.NotContains(t, *req.Body, "General feedback") // Should NOT be in review body
 				assert.Contains(t, *req.Body, "<!-- tag -->")
 
 				// Only one comment should be present (the non-duplicate)
@@ -441,5 +455,157 @@ func TestDismissPreviousReviews(t *testing.T) {
 	client := github.NewClient(mockedHTTPClient)
 
 	err := dismissPreviousReviews(context.Background(), client, "owner", "repo", 1, "<!-- tag -->")
+	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_422Fallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "Summary feedback",
+			Action:    "APPROVE",
+		},
+		FilesReview: []core.FileReview{
+			{
+				Path:   "file.go",
+				Lines:  "999", // Hallucinated line
+				Review: "Something important",
+			},
+		},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	callCount := 0
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				if callCount == 1 {
+					// First attempt: fail with 422
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message": "Unprocessable Entity"}`))
+				} else {
+					// Second attempt: verify fallback payload
+					var req github.PullRequestReviewRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					assert.Equal(t, 0, len(req.Comments))
+					assert.Contains(t, *req.Body, "Detailed Inline Feedback (Fallback)")
+					assert.Contains(t, *req.Body, "file.go")
+					assert.Contains(t, *req.Body, "Something important")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+				}
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+}
+
+func TestPostStructuredReview_WhitespaceAndOrder(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "LGTM!",
+			Action:    "approve", // lowercase
+		},
+		FilesReview: []core.FileReview{
+			{
+				Path:   "file1.go",
+				Lines:  " 10 - 20 ", // whitespace
+				Review: "Range comment",
+			},
+			{
+				Path:   "file2.go",
+				Lines:  "50-40", // reverse order
+				Review: "Reverse comment",
+			},
+		},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				assert.Equal(t, "APPROVE", *req.Event) // normalized
+				assert.Equal(t, 2, len(req.Comments))
+
+				// Verify first comment
+				assert.Equal(t, "file1.go", *req.Comments[0].Path)
+				assert.Equal(t, 10, *req.Comments[0].StartLine)
+				assert.Equal(t, 20, *req.Comments[0].Line)
+
+				// Verify second comment (swapped)
+				assert.Equal(t, "file2.go", *req.Comments[1].Path)
+				assert.Equal(t, 40, *req.Comments[1].StartLine)
+				assert.Equal(t, 50, *req.Comments[1].Line)
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
+	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_FileLevel(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "LGTM!",
+			Action:    "APPROVE",
+		},
+		FilesReview: []core.FileReview{
+			{
+				Path:   "README.md",
+				Lines:  "", // file-level
+				Review: "Good documentation",
+			},
+		},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				assert.Equal(t, 0, len(req.Comments)) // appends to body instead
+				assert.Contains(t, *req.Body, "README.md")
+				assert.Contains(t, *req.Body, "Good documentation")
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
 	assert.NoError(t, err)
 }
