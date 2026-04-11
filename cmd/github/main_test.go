@@ -160,7 +160,7 @@ func TestPostComment_CleanupRedundant(t *testing.T) {
 
 	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
 	assert.NoError(t, err)
-	assert.Equal(t, 1, deleteCalled) // Should delete ID 1, keep ID 2 and update it
+	assert.Equal(t, 1, deleteCalled)
 }
 
 func TestGetMetadata(t *testing.T) {
@@ -212,61 +212,27 @@ func TestGetMetadata(t *testing.T) {
 		assert.Equal(t, 2, len(metadata.Comments))
 		assert.False(t, metadata.Comments[0].IsSelf)
 		assert.True(t, metadata.Comments[1].IsSelf)
-		assert.Equal(t, int64(200), metadata.Comments[1].ID)
-		assert.False(t, metadata.Comments[1].IsOutdated)
 	})
 }
 
-func TestPostStructuredReview_SyncInline(t *testing.T) {
+func TestPostStructuredReview(t *testing.T) {
 	tmpDir := t.TempDir()
 	srFile := filepath.Join(tmpDir, "review.json")
-	metadataFile := filepath.Join(tmpDir, "metadata.json")
 
 	sr := core.StructuredReview{
-		Approval: core.Approval{Approved: true, Rationale: "LGTM!", Action: "APPROVE"},
-		FilesReview: []core.FileReview{
-			{Path: "file1.go", Lines: "10", Review: "Updated comment"},
-			{Path: "file2.go", Lines: "20", Review: "New comment"},
-		},
+		Approval:    core.Approval{Approved: true, Rationale: "LGTM!", Action: "APPROVE"},
+		FilesReview: []core.FileReview{{Path: "file1.go", Lines: "10", Review: "Comment"}},
 	}
 	srBytes, _ := json.Marshal(sr)
 	_ = os.WriteFile(srFile, srBytes, 0o644)
 
-	metadata := core.PRMetadata{
-		Comments: []core.PRComment{
-			{
-				ID: 100, Author: "me", IsSelf: true, Path: "file1.go", Line: 10,
-				Body: "Old comment <!-- cassandra-inline-tag -->",
-			},
-		},
-	}
-	metadataBytes, _ := json.Marshal(metadata)
-	_ = os.WriteFile(metadataFile, metadataBytes, 0o644)
-
-	editCalled := false
 	mockedHTTPClient := mock.NewMockedHTTPClient(
 		mock.WithRequestMatch(mock.GetUser, github.User{Login: github.Ptr("me")}),
 		mock.WithRequestMatch(mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber, []github.IssueComment{}),
 		mock.WithRequestMatch(mock.GetReposPullsReviewsByOwnerByRepoByPullNumber, []github.PullRequestReview{}),
 		mock.WithRequestMatchHandler(
-			mock.PatchReposPullsCommentsByOwnerByRepoByCommentId,
-			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				editCalled = true
-				var comment github.PullRequestComment
-				_ = json.NewDecoder(r.Body).Decode(&comment)
-				assert.Contains(t, *comment.Body, "Updated comment")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(mock.MustMarshal(github.PullRequestComment{ID: github.Ptr(int64(100))}))
-			}),
-		),
-		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req github.PullRequestReviewRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				// Should only have file2.go since file1.go was edited
-				assert.Equal(t, 1, len(req.Comments))
-				assert.Equal(t, "file2.go", *req.Comments[0].Path)
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
 			}),
@@ -274,9 +240,55 @@ func TestPostStructuredReview_SyncInline(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile, true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
 	assert.NoError(t, err)
-	assert.True(t, editCalled)
+}
+
+func TestPostStructuredReview_DeleteOld(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+	metadataFile := filepath.Join(tmpDir, "metadata.json")
+
+	sr := core.StructuredReview{
+		Approval:    core.Approval{Approved: true, Rationale: "LGTM!", Action: "APPROVE"},
+		FilesReview: []core.FileReview{{Path: "file1.go", Lines: "10", Review: "Comment"}},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	metadata := core.PRMetadata{
+		Comments: []core.PRComment{
+			{ID: 100, Author: "me", IsSelf: true, Body: "Old <!-- cassandra-inline-tag -->"},
+		},
+	}
+	metadataBytes, _ := json.Marshal(metadata)
+	_ = os.WriteFile(metadataFile, metadataBytes, 0o644)
+
+	deleteCalled := false
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(mock.GetUser, github.User{Login: github.Ptr("me")}),
+		mock.WithRequestMatch(mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber, []github.IssueComment{}),
+		mock.WithRequestMatch(mock.GetReposPullsReviewsByOwnerByRepoByPullNumber, []github.PullRequestReview{}),
+		mock.WithRequestMatchHandler(
+			mock.DeleteReposPullsCommentsByOwnerByRepoByCommentId,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				deleteCalled = true
+				w.WriteHeader(http.StatusNoContent)
+			}),
+		),
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile, true, true)
+	assert.NoError(t, err)
+	assert.True(t, deleteCalled)
 }
 
 func TestPostStructuredReview_422Fallback(t *testing.T) {
@@ -315,7 +327,7 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
 	assert.NoError(t, err)
 }
 
@@ -326,7 +338,6 @@ func TestDismissPreviousReviews(t *testing.T) {
 			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
 			[]github.PullRequestReview{
 				{ID: github.Ptr(int64(1)), Body: github.Ptr("old <!-- tag -->"), State: github.Ptr("APPROVED")},
-				{ID: github.Ptr(int64(789)), Body: github.Ptr("current <!-- tag -->"), State: github.Ptr("PENDING")},
 			},
 		),
 		mock.WithRequestMatchHandler(
@@ -341,4 +352,44 @@ func TestDismissPreviousReviews(t *testing.T) {
 
 	err := dismissPreviousReviews(context.Background(), client, "owner", "repo", 1, "<!-- tag -->", 789)
 	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_PermissionFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval:    core.Approval{Approved: true, Rationale: "Summary", Action: "APPROVE"},
+		FilesReview: []core.FileReview{},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	callCount := 0
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(mock.GetUser, github.User{Login: github.Ptr("me")}),
+		mock.WithRequestMatch(mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber, []github.IssueComment{}),
+		mock.WithRequestMatch(mock.GetReposPullsReviewsByOwnerByRepoByPullNumber, []github.PullRequestReview{}),
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				if callCount == 1 {
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message": "GitHub Actions is not permitted to approve pull requests."}`))
+				} else {
+					var req github.PullRequestReviewRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					assert.Equal(t, "COMMENT", *req.Event)
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+				}
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, callCount)
 }

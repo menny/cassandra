@@ -25,6 +25,7 @@ func main() {
 	var outputFile string
 	var metadataFile string
 	var allowReviewAction bool
+	var deleteOldComments bool
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -35,6 +36,7 @@ func main() {
 	flag.StringVar(&outputFile, "output", "", "Path to the output file (for get-metadata)")
 	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
 	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
+	flag.BoolVar(&deleteOldComments, "delete-old-comments", true, "Whether to delete previous bot-authored inline comments before posting a new review.")
 
 	flag.Parse()
 
@@ -101,7 +103,7 @@ func main() {
 		if bodyFile == "" {
 			log.Fatal("--file is required for post-structured-review")
 		}
-		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile, allowReviewAction)
+		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile, allowReviewAction, deleteOldComments)
 		if err != nil {
 			log.Fatalf("Failed to post structured review: %v", err)
 		}
@@ -322,7 +324,7 @@ func getCreatedAt(ts *github.Timestamp) time.Time {
 	return ts.Time
 }
 
-func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string, allowReviewAction bool) error {
+func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string, allowReviewAction, deleteOldComments bool) error {
 	reviewBytes, err := os.ReadFile(bodyFile)
 	if err != nil {
 		return fmt.Errorf("failed to read structured review file: %w", err)
@@ -345,7 +347,26 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		}
 	}
 
-	// 1. Post Non-Specific Review as a separate comment
+	// 1. Dismiss previous reviews BEFORE providing new review
+	if tag != "" {
+		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag, 0); err != nil {
+			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+		}
+	}
+
+	// 2. Delete old inline comments if requested
+	if tag != "" && deleteOldComments {
+		inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
+		for _, c := range metadata.Comments {
+			if c.IsSelf && strings.Contains(c.Body, inlineTag) {
+				if _, err := client.PullRequests.DeleteComment(ctx, owner, repo, c.ID); err != nil {
+					log.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
+				}
+			}
+		}
+	}
+
+	// 3. Post Non-Specific Review as a separate comment
 	if sr.NonSpecificReview != "" {
 		mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
 		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
@@ -370,29 +391,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, inlineTag)
 		}
 
-		// Check if we've already made a comment at this exact location
-		var existingComment *core.PRComment
-		for _, c := range metadata.Comments {
-			if c.IsSelf && c.Path == fr.Path && c.Line == endLine && !c.IsOutdated && strings.Contains(c.Body, inlineTag) {
-				existingComment = &c
-				break
-			}
-		}
-
-		if existingComment != nil {
-			// Update existing comment if content changed
-			if strings.TrimSpace(existingComment.Body) != strings.TrimSpace(commentBody) {
-				_, _, err := client.PullRequests.EditComment(ctx, owner, repo, existingComment.ID, &github.PullRequestComment{
-					Body: github.Ptr(commentBody),
-				})
-				if err != nil {
-					log.Printf("Warning: failed to update inline comment %d: %v", existingComment.ID, err)
-				}
-			}
-			continue
-		}
-
-		// New location: create new comment in the review
+		// New location (or after deletion): create new comment in the review
 		comment := &github.DraftReviewComment{
 			Path: github.Ptr(fr.Path),
 			Body: github.Ptr(commentBody),
@@ -427,59 +426,34 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		Comments: comments,
 	}
 
-	newReview, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 	if err != nil {
 		// 422 Fallback logic
 		if resp != nil && resp.StatusCode == 422 {
 			errStr := err.Error()
-			needsRetry := false
+			isPermissionError := strings.Contains(errStr, "not permitted to approve")
 
-			if strings.Contains(errStr, "not permitted to approve") {
+			if isPermissionError {
 				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
-				needsRetry = true
 			}
 
 			if len(reviewRequest.Comments) > 0 {
-				var errRetry error
-				if needsRetry {
-					_, _, errRetry = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				log.Printf("Warning: failed to post structured review (hallucinations or permissions): %v. Retrying without inline comments.", errStr)
+				reviewRequest.Comments = nil
+				var sb strings.Builder
+				sb.WriteString(reviewBody)
+				sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
+				for _, fr := range sr.FilesReview {
+					sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
 				}
-
-				if errRetry != nil || !needsRetry {
-					log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
-					reviewRequest.Comments = nil
-					var sb strings.Builder
-					sb.WriteString(reviewRequest.GetBody())
-					sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
-					for _, c := range comments {
-						loc := ""
-						if c.Line != nil {
-							loc = fmt.Sprintf(" at line %d", *c.Line)
-						}
-						sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", c.GetPath(), loc, c.GetBody()))
-					}
-					reviewRequest.Body = github.Ptr(sb.String())
-					newReview, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-				}
-			} else if needsRetry {
-				newReview, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				reviewRequest.Body = github.Ptr(sb.String())
 			}
-		}
-		if err != nil {
+
+			_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 			return err
 		}
-	}
-
-	// Dismiss previous reviews with the same tag
-	if tag != "" {
-		newReviewID := int64(0)
-		if newReview != nil {
-			newReviewID = newReview.GetID()
-		}
-		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag, newReviewID); err != nil {
-			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
-		}
+		return err
 	}
 
 	return nil

@@ -48,6 +48,10 @@ inputs:
     description: 'Whether to allow the AI to submit "approve/reject" actions or force it to only "comment". Options: "true" (allow approve/reject), "false" (force to "comment").'
     required: false
     default: 'false'
+  delete_old_comments:
+    description: 'Whether to delete previous bot-authored inline comments before posting a new review to keep the PR clean.'
+    required: false
+    default: 'true'
 runs:
   using: 'composite'
   steps:
@@ -184,8 +188,14 @@ runs:
           --metadata-file "$METADATA_FILE"
         )
 
-        if [[ "$ALLOW_REVIEW_ACTION" == "true" ]]; then
+        if [[ "${{ inputs.submit_review_action }}" == "true" ]]; then
           ARGS+=(--allow-review-action)
+        fi
+
+        if [[ "${{ inputs.delete_old_comments }}" == "true" ]]; then
+          ARGS+=(--delete-old-comments)
+        else
+          ARGS+=(--delete-old-comments=false)
         fi
 
         bazel run //cmd/github:github -- "${ARGS[@]}"
