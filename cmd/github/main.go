@@ -167,10 +167,12 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	}
 
 	self, _, err := client.Users.Get(ctx, "")
+	selfLogin := ""
 	if err != nil {
-		return fmt.Errorf("failed to get self user: %w", err)
+		log.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
+	} else {
+		selfLogin = self.GetLogin()
 	}
-	selfLogin := self.GetLogin()
 
 	// Find existing comment
 	opts := &github.IssueListCommentsOptions{
@@ -186,10 +188,14 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 			return fmt.Errorf("failed to list comments: %w", err)
 		}
 		for _, c := range comments {
-			if tag != "" && strings.Contains(c.GetBody(), tag) && c.GetUser().GetLogin() == selfLogin {
-				// We found a matching comment from ourselves. Since the API returns results in
-				// ascending chronological order, the last one we find is the latest.
-				latestCommentID = c.GetID()
+			if tag != "" && strings.Contains(c.GetBody(), tag) {
+				// If we have a selfLogin, we use it to be sure.
+				// If not, we trust the unique tag.
+				if selfLogin == "" || c.GetUser().GetLogin() == selfLogin {
+					// We found a matching comment. Since the API returns results in
+					// ascending chronological order, the last one we find is the latest.
+					latestCommentID = c.GetID()
+				}
 			}
 		}
 		if resp.NextPage == 0 {
@@ -318,7 +324,9 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	var metadata core.PRMetadata
 	if metadataFile != "" {
 		metadataBytes, err := os.ReadFile(metadataFile)
-		if err == nil {
+		if err != nil {
+			log.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
+		} else {
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 				log.Printf("Warning: failed to unmarshal metadata: %v", err)
 			}

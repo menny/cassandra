@@ -656,3 +656,39 @@ func TestPostStructuredReview_FileLevel(t *testing.T) {
 	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
 	assert.NoError(t, err)
 }
+
+func TestPostComment_UserGetError(t *testing.T) {
+	tmpDir := t.TempDir()
+	bodyFile := filepath.Join(tmpDir, "body.md")
+	err := os.WriteFile(bodyFile, []byte("test body"), 0o644)
+	assert.NoError(t, err)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.GetUser,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
+			}),
+		),
+		mock.WithRequestMatch(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			[]github.IssueComment{
+				{
+					ID:   github.Ptr(int64(456)),
+					Body: github.Ptr("old body <!-- tag -->"),
+					User: &github.User{Login: github.Ptr("any-user")},
+				},
+			},
+		),
+		mock.WithRequestMatch(
+			mock.PatchReposIssuesCommentsByOwnerByRepoByCommentId,
+			github.IssueComment{ID: github.Ptr(int64(456))},
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	// Should NOT error even if GetUser fails
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	assert.NoError(t, err)
+}
