@@ -44,6 +44,10 @@ inputs:
     description: 'Whether to post inline comments to the PR (requires the reviewer to output a structured JSON file).'
     required: false
     default: 'true'
+  submit_review_action:
+    description: 'Whether to allow the AI to submit "approve/reject" actions or force it to only "comment". Options: "true" (allow approve/reject), "false" (force to "comment").'
+    required: false
+    default: 'false'
 runs:
   using: 'composite'
   steps:
@@ -166,10 +170,25 @@ runs:
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
         METADATA_TAG: ${{ inputs.metadata_tag }}
+        ALLOW_REVIEW_ACTION: ${{ inputs.submit_review_action }}
       run: |
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- post-structured-review --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$JSON_FILE" --tag "$METADATA_TAG" --metadata-file "$METADATA_FILE"
+        
+        ARGS=(
+          post-structured-review
+          --repo-full-name "${{ github.repository }}"
+          --pr "${{ github.event.pull_request.number }}"
+          --file "$JSON_FILE"
+          --tag "$METADATA_TAG"
+          --metadata-file "$METADATA_FILE"
+        )
+        
+        if [[ "$ALLOW_REVIEW_ACTION" == "true" ]]; then
+          ARGS+=(--allow-review-action)
+        fi
+        
+        bazel run //cmd/github:github -- "${ARGS[@]}"
     - name: Remove Status Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash

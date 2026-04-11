@@ -320,7 +320,7 @@ func TestPostStructuredReview(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile, true)
 	assert.NoError(t, err)
 }
 
@@ -364,6 +364,41 @@ func TestPostStructuredReview_NoMetadata(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "")
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
+	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_OverrideAction(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "LGTM!",
+			Action:    "APPROVE",
+		},
+		FilesReview: []core.FileReview{},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				assert.Equal(t, "COMMENT", *req.Event) // Overridden from APPROVE to COMMENT
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", false) // allowReviewAction = false
 	assert.NoError(t, err)
 }

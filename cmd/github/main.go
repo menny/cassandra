@@ -24,6 +24,7 @@ func main() {
 	var tag string
 	var outputFile string
 	var metadataFile string
+	var allowReviewAction bool
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -33,6 +34,7 @@ func main() {
 	flag.StringVar(&tag, "tag", "", "Tag to identify the comment for updates or self-identification")
 	flag.StringVar(&outputFile, "output", "", "Path to the output file (for get-metadata)")
 	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
+	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
 
 	flag.Parse()
 
@@ -99,7 +101,7 @@ func main() {
 		if bodyFile == "" {
 			log.Fatal("--file is required for post-structured-review")
 		}
-		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile)
+		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile, allowReviewAction)
 		if err != nil {
 			log.Fatalf("Failed to post structured review: %v", err)
 		}
@@ -287,7 +289,7 @@ func getCreatedAt(ts *github.Timestamp) time.Time {
 	return ts.Time
 }
 
-func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string) error {
+func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string, allowReviewAction bool) error {
 	reviewBytes, err := os.ReadFile(bodyFile)
 	if err != nil {
 		return fmt.Errorf("failed to read structured review file: %w", err)
@@ -352,9 +354,14 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
 	}
 
+	action := sr.Approval.Action
+	if !allowReviewAction {
+		action = "COMMENT"
+	}
+
 	reviewRequest := &github.PullRequestReviewRequest{
 		Body:     github.Ptr(reviewBody),
-		Event:    github.Ptr(sr.Approval.Action),
+		Event:    github.Ptr(action),
 		Comments: comments,
 	}
 
