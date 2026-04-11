@@ -175,6 +175,7 @@ runs:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
         METADATA_TAG: ${{ inputs.metadata_tag }}
         ALLOW_REVIEW_ACTION: ${{ inputs.submit_review_action }}
+        DELETE_OLD_COMMENTS: ${{ inputs.delete_old_comments }}
       run: |
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
@@ -188,11 +189,11 @@ runs:
           --metadata-file "$METADATA_FILE"
         )
 
-        if [[ "${{ inputs.submit_review_action }}" == "true" ]]; then
+        if [[ "$ALLOW_REVIEW_ACTION" == "true" ]]; then
           ARGS+=(--allow-review-action)
         fi
 
-        if [[ "${{ inputs.delete_old_comments }}" == "true" ]]; then
+        if [[ "$DELETE_OLD_COMMENTS" == "true" ]]; then
           ARGS+=(--delete-old-comments)
         else
           ARGS+=(--delete-old-comments=false)

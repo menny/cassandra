@@ -432,13 +432,19 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		if resp != nil && resp.StatusCode == 422 {
 			errStr := err.Error()
 			isPermissionError := strings.Contains(errStr, "not permitted to approve")
+			hasComments := len(reviewRequest.Comments) > 0
+
+			if !isPermissionError && !hasComments {
+				// No changes to make to the request, so a retry will just fail again.
+				return err
+			}
 
 			if isPermissionError {
 				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
 			}
 
-			if len(reviewRequest.Comments) > 0 {
+			if hasComments {
 				log.Printf("Warning: failed to post structured review (hallucinations or permissions): %v. Retrying without inline comments.", errStr)
 				reviewRequest.Comments = nil
 				var sb strings.Builder
