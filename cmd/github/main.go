@@ -449,18 +449,24 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			isPermissionError := strings.Contains(errStr, "not permitted to approve")
 			hasComments := len(reviewRequest.Comments) > 0
 
-			if !isPermissionError && !hasComments {
-				// No changes to make to the request, so a retry will just fail again.
-				return err
-			}
-
 			if isPermissionError {
 				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
+
+				// Try again with COMMENT action, keeping inline comments
+				_, resp, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				if err == nil {
+					return nil
+				}
+				// If it still fails with 422, it's likely a line hallucination issue
+				if resp == nil || resp.StatusCode != 422 {
+					return err
+				}
+				errStr = err.Error()
 			}
 
 			if hasComments {
-				log.Printf("Warning: failed to post structured review (hallucinations or permissions): %v. Retrying without inline comments.", errStr)
+				log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
 				reviewRequest.Comments = nil
 				var sb strings.Builder
 				sb.WriteString(reviewBody)
@@ -469,10 +475,10 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 					sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
 				}
 				reviewRequest.Body = github.Ptr(sb.String())
-			}
 
-			_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-			return err
+				_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				return err
+			}
 		}
 		return err
 	}

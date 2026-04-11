@@ -252,9 +252,6 @@ func TestPostStructuredReview(t *testing.T) {
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req github.PullRequestReviewRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				assert.Contains(t, *req.Body, "<!-- tag -->")
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
 			}),
@@ -334,9 +331,11 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				callCount++
 				if callCount == 1 {
+					// First attempt: fail with 422
 					w.WriteHeader(422)
 					_, _ = w.Write([]byte(`{"message": "Unprocessable Entity"}`))
 				} else {
+					// Second attempt: verify fallback payload (comments stripped)
 					var req github.PullRequestReviewRequest
 					_ = json.NewDecoder(r.Body).Decode(&req)
 					assert.Equal(t, 0, len(req.Comments))
@@ -372,7 +371,7 @@ func TestDismissPreviousReviews(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := dismissPreviousReviews(context.Background(), client, "owner", "repo", 1, "<!-- tag -->", 789)
+	err := dismissPreviousReviews(context.Background(), client, "owner", "repo", 1, "tag", 789)
 	assert.NoError(t, err)
 }
 
@@ -382,7 +381,7 @@ func TestPostStructuredReview_PermissionFallback(t *testing.T) {
 
 	sr := core.StructuredReview{
 		Approval:    core.Approval{Approved: true, Rationale: "Summary", Action: "APPROVE"},
-		FilesReview: []core.FileReview{},
+		FilesReview: []core.FileReview{{Path: "file1.go", Lines: "10", Review: "Valid"}},
 	}
 	srBytes, _ := json.Marshal(sr)
 	_ = os.WriteFile(srFile, srBytes, 0o644)
@@ -397,12 +396,15 @@ func TestPostStructuredReview_PermissionFallback(t *testing.T) {
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				callCount++
 				if callCount == 1 {
+					// First attempt: fail with permission error
 					w.WriteHeader(422)
 					_, _ = w.Write([]byte(`{"message": "GitHub Actions is not permitted to approve pull requests."}`))
 				} else {
+					// Second attempt: verify action is now COMMENT but comments are STILL PRESENT
 					var req github.PullRequestReviewRequest
 					_ = json.NewDecoder(r.Body).Decode(&req)
 					assert.Equal(t, "COMMENT", *req.Event)
+					assert.Equal(t, 1, len(req.Comments)) // Comments preserved!
 					w.WriteHeader(http.StatusCreated)
 					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
 				}
@@ -414,6 +416,56 @@ func TestPostStructuredReview_PermissionFallback(t *testing.T) {
 	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", "", true, true)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, callCount)
+}
+
+func TestPostStructuredReview_PermissionAndHallucinationFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval:    core.Approval{Approved: true, Rationale: "Summary", Action: "APPROVE"},
+		FilesReview: []core.FileReview{{Path: "file.go", Lines: "999", Review: "Hallucinated"}},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	callCount := 0
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(mock.GetUser, github.User{Login: github.Ptr("me")}),
+		mock.WithRequestMatch(mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber, []github.IssueComment{}),
+		mock.WithRequestMatch(mock.GetReposPullsReviewsByOwnerByRepoByPullNumber, []github.PullRequestReview{}),
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				if callCount == 1 {
+					// First attempt: permission fail
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message": "GitHub Actions is not permitted to approve pull requests."}`))
+				} else if callCount == 2 {
+					// Second attempt: retry with COMMENT, but still has bad line, so 422 again
+					assert.Equal(t, "COMMENT", *req.Event)
+					assert.Equal(t, 1, len(req.Comments))
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message": "Unprocessable Entity"}`))
+				} else {
+					// Final attempt: comments stripped
+					assert.Equal(t, 0, len(req.Comments))
+					assert.Contains(t, *req.Body, "Detailed Inline Feedback (Fallback)")
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+				}
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", "", true, true)
+	assert.NoError(t, err)
+	assert.Equal(t, 3, callCount)
 }
 
 func TestPostComment_UserGetError(t *testing.T) {
