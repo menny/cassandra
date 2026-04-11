@@ -174,7 +174,7 @@ runs:
       run: |
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
-        
+
         ARGS=(
           post-structured-review
           --repo-full-name "${{ github.repository }}"
@@ -183,11 +183,11 @@ runs:
           --tag "$METADATA_TAG"
           --metadata-file "$METADATA_FILE"
         )
-        
+
         if [[ "$ALLOW_REVIEW_ACTION" == "true" ]]; then
           ARGS+=(--allow-review-action)
         fi
-        
+
         bazel run //cmd/github:github -- "${ARGS[@]}"
     - name: Remove Status Reaction
       if: always() && github.event.pull_request.number != ''

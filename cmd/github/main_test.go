@@ -402,3 +402,44 @@ func TestPostStructuredReview_OverrideAction(t *testing.T) {
 	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", false) // allowReviewAction = false
 	assert.NoError(t, err)
 }
+
+func TestDismissPreviousReviews(t *testing.T) {
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{
+				{
+					ID:    github.Ptr(int64(1)),
+					Body:  github.Ptr("Old review <!-- tag -->"),
+					State: github.Ptr("APPROVED"),
+				},
+				{
+					ID:    github.Ptr(int64(2)),
+					Body:  github.Ptr("Another review <!-- tag -->"),
+					State: github.Ptr("DISMISSED"),
+				},
+				{
+					ID:    github.Ptr(int64(3)),
+					Body:  github.Ptr("A review from someone else"),
+					State: github.Ptr("APPROVED"),
+				},
+			},
+		),
+		mock.WithRequestMatchHandler(
+			mock.PutReposPullsReviewsDismissalsByOwnerByRepoByPullNumberByReviewId,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify it's the right review ID being dismissed
+				// In the mock, it would be called for ID 1
+				var req github.PullRequestReviewDismissalRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				assert.Equal(t, "Superseded by a new AI review.", *req.Message)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(1))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := dismissPreviousReviews(context.Background(), client, "owner", "repo", 1, "<!-- tag -->")
+	assert.NoError(t, err)
+}

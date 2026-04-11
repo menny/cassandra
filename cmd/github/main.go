@@ -354,6 +354,13 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
 	}
 
+	// Dismiss previous reviews with the same tag to keep the PR timeline clean.
+	if tag != "" {
+		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag); err != nil {
+			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+		}
+	}
+
 	action := sr.Approval.Action
 	if !allowReviewAction {
 		action = "COMMENT"
@@ -367,4 +374,31 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 	return err
+}
+
+func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string) error {
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return err
+		}
+
+		for _, r := range reviews {
+			if strings.Contains(r.GetBody(), tag) && r.GetState() != "DISMISSED" {
+				_, _, err := client.PullRequests.DismissReview(ctx, owner, repo, prNumber, r.GetID(), &github.PullRequestReviewDismissalRequest{
+					Message: github.Ptr("Superseded by a new AI review."),
+				})
+				if err != nil {
+					log.Printf("Warning: failed to dismiss review %d: %v", r.GetID(), err)
+				}
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return nil
 }
