@@ -166,6 +166,12 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 		content = fmt.Sprintf("%s\n\n%s", content, tag)
 	}
 
+	self, _, err := client.Users.Get(ctx, "")
+	if err != nil {
+		return fmt.Errorf("failed to get self user: %w", err)
+	}
+	selfLogin := self.GetLogin()
+
 	// Find existing comment
 	opts := &github.IssueListCommentsOptions{
 		ListOptions: github.ListOptions{
@@ -180,8 +186,8 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 			return fmt.Errorf("failed to list comments: %w", err)
 		}
 		for _, c := range comments {
-			if tag != "" && strings.Contains(c.GetBody(), tag) {
-				// We found a matching comment. Since the API returns results in
+			if tag != "" && strings.Contains(c.GetBody(), tag) && c.GetUser().GetLogin() == selfLogin {
+				// We found a matching comment from ourselves. Since the API returns results in
 				// ascending chronological order, the last one we find is the latest.
 				latestCommentID = c.GetID()
 			}
@@ -199,7 +205,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 		return err
 	}
 
-	_, _, err := client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
+	_, _, err = client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
 		Body: github.Ptr(content),
 	})
 	return err
@@ -209,6 +215,11 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 	pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	commentTag := tag
+	if tag != "" {
+		commentTag = strings.Replace(tag, "<!-- ", "<!-- comment-", 1)
 	}
 
 	metadata := &core.PRMetadata{
@@ -259,7 +270,8 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && strings.Contains(body, tag)
+			// Inline comments use the special commentTag
+			isSelf := commentTag != "" && strings.Contains(body, commentTag)
 			metadata.Comments = append(metadata.Comments, core.PRComment{
 				Author:    c.GetUser().GetLogin(),
 				Body:      body,
@@ -323,6 +335,13 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	comments := []*github.DraftReviewComment{}
 	reviewRationale := sr.Approval.Rationale
 
+	commentTag := tag
+	if tag != "" {
+		// Distinguish between the main (non-specific) comment and the inline review comments
+		// by using a different prefix for the latter.
+		commentTag = strings.Replace(tag, "<!-- ", "<!-- comment-", 1)
+	}
+
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
 		if err != nil {
@@ -345,8 +364,8 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		}
 
 		commentBody := fr.Review
-		if tag != "" {
-			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, tag)
+		if commentTag != "" {
+			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, commentTag)
 		}
 
 		comment := &github.DraftReviewComment{

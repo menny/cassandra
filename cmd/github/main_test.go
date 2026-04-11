@@ -75,6 +75,10 @@ func TestPostComment_Create(t *testing.T) {
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
 		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			[]github.IssueComment{}, // No existing comments
 		),
@@ -97,11 +101,16 @@ func TestPostComment_Update(t *testing.T) {
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
 		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			[]github.IssueComment{
 				{
 					ID:   github.Ptr(int64(456)),
 					Body: github.Ptr("old body <!-- tag -->"),
+					User: &github.User{Login: github.Ptr("me")},
 				},
 			},
 		),
@@ -125,6 +134,10 @@ func TestPostComment_Pagination(t *testing.T) {
 	// Custom handler to simulate pagination
 	callCount := 0
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,11 +145,11 @@ func TestPostComment_Pagination(t *testing.T) {
 				if callCount == 1 {
 					// Page 1: return non-matching, with Link header to page 2
 					w.Header().Set("Link", `<https://api.github.com/repositories/1/issues/1/comments?page=2>; rel="next"`)
-					comments := []github.IssueComment{{ID: github.Ptr(int64(1)), Body: github.Ptr("no tag")}}
+					comments := []github.IssueComment{{ID: github.Ptr(int64(1)), Body: github.Ptr("no tag"), User: &github.User{Login: github.Ptr("other")}}}
 					_, _ = w.Write(mock.MustMarshal(comments))
 				} else {
 					// Page 2: return matching
-					comments := []github.IssueComment{{ID: github.Ptr(int64(2)), Body: github.Ptr("found <!-- tag -->")}}
+					comments := []github.IssueComment{{ID: github.Ptr(int64(2)), Body: github.Ptr("found <!-- tag -->"), User: &github.User{Login: github.Ptr("me")}}}
 					_, _ = w.Write(mock.MustMarshal(comments))
 				}
 			}),
@@ -168,15 +181,21 @@ func TestPostComment_Latest(t *testing.T) {
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
 		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			[]github.IssueComment{
 				{
 					ID:   github.Ptr(int64(1)),
 					Body: github.Ptr("old body <!-- tag -->"),
+					User: &github.User{Login: github.Ptr("me")},
 				},
 				{
 					ID:   github.Ptr(int64(2)),
 					Body: github.Ptr("newer body <!-- tag -->"),
+					User: &github.User{Login: github.Ptr("me")},
 				},
 			},
 		),
@@ -219,7 +238,7 @@ func TestGetMetadata(t *testing.T) {
 				[]github.PullRequestComment{
 					{
 						User:      &github.User{Login: github.Ptr("cassandra")},
-						Body:      github.Ptr("comment 2 <!-- tag-a -->"),
+						Body:      github.Ptr("comment 2 <!-- comment-tag-a -->"),
 						CreatedAt: &github.Timestamp{Time: time.Now()},
 						Path:      github.Ptr("file.go"),
 						Line:      github.Ptr(10),
@@ -282,11 +301,11 @@ func TestPostStructuredReview(t *testing.T) {
 	metadata := core.PRMetadata{
 		Comments: []core.PRComment{
 			{
-				Author: "cassandra",
+				Author: "me",
 				IsSelf: true,
 				Path:   "file2.go",
 				Line:   25,
-				Body:   "Duplicate comment <!-- tag -->",
+				Body:   "Duplicate comment <!-- comment-tag -->",
 				Date:   time.Now(),
 			},
 		},
@@ -295,6 +314,10 @@ func TestPostStructuredReview(t *testing.T) {
 	_ = os.WriteFile(metadataFile, metadataBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatch(
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			[]github.IssueComment{},
@@ -324,7 +347,7 @@ func TestPostStructuredReview(t *testing.T) {
 				assert.Equal(t, 1, len(req.Comments))
 				assert.Equal(t, "file1.go", *req.Comments[0].Path)
 				assert.Contains(t, *req.Comments[0].Body, "New comment")
-				assert.Contains(t, *req.Comments[0].Body, "<!-- tag -->")
+				assert.Contains(t, *req.Comments[0].Body, "<!-- comment-tag -->")
 				assert.Equal(t, 10, *req.Comments[0].Line)
 
 				w.WriteHeader(http.StatusCreated)
@@ -360,6 +383,10 @@ func TestPostStructuredReview_NoMetadata(t *testing.T) {
 	_ = os.WriteFile(srFile, srBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -398,6 +425,10 @@ func TestPostStructuredReview_OverrideAction(t *testing.T) {
 	_ = os.WriteFile(srFile, srBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -419,6 +450,10 @@ func TestPostStructuredReview_OverrideAction(t *testing.T) {
 
 func TestDismissPreviousReviews(t *testing.T) {
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatch(
 			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
 			[]github.PullRequestReview{
@@ -481,6 +516,10 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 
 	callCount := 0
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -537,6 +576,10 @@ func TestPostStructuredReview_WhitespaceAndOrder(t *testing.T) {
 	_ = os.WriteFile(srFile, srBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -589,6 +632,10 @@ func TestPostStructuredReview_FileLevel(t *testing.T) {
 	_ = os.WriteFile(srFile, srBytes, 0o644)
 
 	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
