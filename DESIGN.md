@@ -19,7 +19,8 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Actions**:
   - `add-reaction`: Adds a visual status indicator (e.g., 'eyes') to the PR body.
   - `remove-reaction`: Cleans up reactions after the review completes.
-  - `post-comment`: Manages a "persistent" comment by searching for a unique tag (e.g., `<!-- cassandra-ai-review-Workflow-Name -->`) and either creating a new comment or updating an existing one. This allows multiple review workflows to operate independently on the same PR.
+  - `post-comment`: Manages a "persistent" architectural comment. It ensures a single source of truth by updating the latest comment matching a unique tag (e.g., `<!-- cassandra-main-... -->`) and deleting any redundant duplicates.
+  - `post-structured-review`: Posts a formal GitHub Pull Request Review. It supports inline line-level comments, handles review dismissals, and implements multi-level fallback logic for API resilience.
 - Built as a separate binary to minimize the footprint and dependencies required for basic GitHub interactions.
 
 ### 3. Core AI Engine (`core/agent.go`)
@@ -95,7 +96,8 @@ When the `--output-json` flag is provided, the system performs a post-processing
   "raw_free_text": "...",
   "approval": {
     "approved": true,
-    "rationale": "..."
+    "rationale": "...",
+    "action": "APPROVE | REQUEST_CHANGES | COMMENT"
   },
   "non_specific_review": "...",
   "files_review": [
@@ -109,3 +111,14 @@ When the `--output-json` flag is provided, the system performs a post-processing
 ```
 
 This post-processing ensures the main reasoning pass remains unconstrained, while providing a machine-readable format for integration with other tools (e.g., CI/CD pipelines, GitHub Actions).
+
+## Review Resilience & State Management
+
+The GitHub interaction layer is designed to be highly resilient against common CI failure modes:
+
+1. **API Permission Fallbacks**: If the `GITHUB_TOKEN` is not permitted to submit formal "Approve" actions (a common default setting), the utility automatically downgrades the review to a neutral `COMMENT` while preserving all feedback.
+2. **Line Hallucination Recovery**: If the LLM suggests a comment on a line that is not part of the PR diff (a 422 error), the system automatically retries the submission without inline comments, appending the feedback to the main review body instead.
+3. **Clean PR State**:
+   - **Type-Specific Tagging**: Uses distinct tag prefixes (`cassandra-main-` and `cassandra-inline-`) to unambiguously identify different comment types.
+   - **Automatic Cleanup**: Before posting a new review, the system dismisses previous bot reviews and can optionally delete stale inline comments to keep the conversation tab focused.
+   - **Identity Verification**: When possible, it verifies both the `Tag` and the `Author` identity (handling `403 Forbidden` on `/user` gracefully) to ensure it only modifies its own comments.

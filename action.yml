@@ -40,6 +40,18 @@ inputs:
     description: 'The reaction icon to add to the PR description while the review is in progress (e.g., eyes, rocket, heart).'
     required: false
     default: 'eyes'
+  use_inline_comments:
+    description: 'Whether to post inline comments to the PR (requires the reviewer to output a structured JSON file).'
+    required: false
+    default: 'true'
+  submit_review_action:
+    description: 'Whether to allow the AI to submit "approve/reject" actions or force it to only "comment". Options: "true" (allow approve/reject), "false" (force to "comment").'
+    required: false
+    default: 'false'
+  delete_old_comments:
+    description: 'Whether to delete previous bot-authored inline comments before posting a new review to keep the PR clean.'
+    required: false
+    default: 'true'
 runs:
   using: 'composite'
   steps:
@@ -108,8 +120,9 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
         MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
       run: |
-        # Use a temporary file for the review output
+        # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
+        JSON_FILE="${{ runner.temp }}/cassandra_review.json"
 
         ARGS=(
           --provider "$PROVIDER"
@@ -119,6 +132,7 @@ runs:
           --head "$HEAD"
           --cwd "${{ github.workspace }}/$WORKING_DIRECTORY"
           --review-output-file "$REVIEW_FILE"
+          --output-json "$JSON_FILE"
         )
 
         if [[ -f "$METADATA_FILE" ]]; then
@@ -143,8 +157,9 @@ runs:
 
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
+        echo "JSON_FILE=$JSON_FILE" >> $GITHUB_ENV
     - name: Post AI Review Comment
-      if: github.event.pull_request.number != ''
+      if: github.event.pull_request.number != '' && inputs.use_inline_comments != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
@@ -153,6 +168,38 @@ runs:
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
         bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "$METADATA_TAG"
+    - name: Post AI Structured Review
+      if: github.event.pull_request.number != '' && inputs.use_inline_comments == 'true'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+        METADATA_TAG: ${{ inputs.metadata_tag }}
+        ALLOW_REVIEW_ACTION: ${{ inputs.submit_review_action }}
+        DELETE_OLD_COMMENTS: ${{ inputs.delete_old_comments }}
+      run: |
+        # Execute via Bazel in the action's source directory
+        cd "${{ github.action_path }}"
+
+        ARGS=(
+          post-structured-review
+          --repo-full-name "${{ github.repository }}"
+          --pr "${{ github.event.pull_request.number }}"
+          --file "$JSON_FILE"
+          --tag "$METADATA_TAG"
+          --metadata-file "$METADATA_FILE"
+        )
+
+        if [[ "$ALLOW_REVIEW_ACTION" == "true" ]]; then
+          ARGS+=(--allow-review-action)
+        fi
+
+        if [[ "$DELETE_OLD_COMMENTS" == "true" ]]; then
+          ARGS+=(--delete-old-comments)
+        else
+          ARGS+=(--delete-old-comments=false)
+        fi
+
+        bazel run //cmd/github:github -- "${ARGS[@]}"
     - name: Remove Status Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash

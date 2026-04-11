@@ -23,6 +23,9 @@ func main() {
 	var bodyFile string
 	var tag string
 	var outputFile string
+	var metadataFile string
+	var allowReviewAction bool
+	var deleteOldComments bool
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -31,6 +34,9 @@ func main() {
 	flag.StringVar(&bodyFile, "file", "", "Path to the comment body file")
 	flag.StringVar(&tag, "tag", "", "Tag to identify the comment for updates or self-identification")
 	flag.StringVar(&outputFile, "output", "", "Path to the output file (for get-metadata)")
+	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
+	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
+	flag.BoolVar(&deleteOldComments, "delete-old-comments", true, "Whether to delete previous bot-authored inline comments before posting a new review.")
 
 	flag.Parse()
 
@@ -46,12 +52,11 @@ func main() {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
 	}
 
-	// Process tag: only the inner text is provided, we wrap it in HTML comment tags.
+	// Process tag: only the inner text is provided.
 	// Default to 'cassandra-ai-review' if empty.
 	if tag == "" {
 		tag = "cassandra-ai-review"
 	}
-	tag = fmt.Sprintf("<!-- %s -->", tag)
 
 	action := flag.Arg(0)
 	ctx := context.Background()
@@ -93,6 +98,15 @@ func main() {
 			log.Fatalf("Failed to post comment: %v", err)
 		}
 
+	case "post-structured-review":
+		if bodyFile == "" {
+			log.Fatal("--file is required for post-structured-review")
+		}
+		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile, allowReviewAction, deleteOldComments)
+		if err != nil {
+			log.Fatalf("Failed to post structured review: %v", err)
+		}
+
 	case "get-metadata":
 		metadata, err := getMetadata(ctx, client, owner, repo, prNumber, tag)
 		if err != nil {
@@ -126,6 +140,20 @@ func parseRepo(fullName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// wrapTag wraps a raw slug into a hidden HTML comment tag with an optional prefix.
+// It sanitizes the slug to ensure it cannot break out of the HTML comment.
+func wrapTag(slug, prefix string) string {
+	// Sanitize slug:
+	// 1. Replace '--' with '__' because HTML comments cannot contain '--'.
+	// 2. Remove '<' and '>' to prevent breakout.
+	s := strings.ReplaceAll(slug, "--", "__")
+	s = strings.ReplaceAll(s, "<", "")
+	s = strings.ReplaceAll(s, ">", "")
+	s = strings.TrimSpace(s)
+
+	return fmt.Sprintf("<!-- %s%s -->", prefix, s)
+}
+
 func addReaction(ctx context.Context, client *github.Client, owner, repo string, prNumber int, content string) (int64, error) {
 	reaction, _, err := client.Reactions.CreateIssueReaction(ctx, owner, repo, prNumber, content)
 	if err != nil {
@@ -145,9 +173,21 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	content := string(body)
+	mainTag := wrapTag(tag, "cassandra-main-")
+	return postCommentText(ctx, client, owner, repo, prNumber, string(body), mainTag)
+}
+
+func postCommentText(ctx context.Context, client *github.Client, owner, repo string, prNumber int, content, tag string) error {
 	if tag != "" && !strings.Contains(content, tag) {
 		content = fmt.Sprintf("%s\n\n%s", content, tag)
+	}
+
+	self, _, err := client.Users.Get(ctx, "")
+	selfLogin := ""
+	if err != nil {
+		log.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
+	} else {
+		selfLogin = self.GetLogin()
 	}
 
 	// Find existing comment
@@ -158,6 +198,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 	}
 
 	var latestCommentID int64
+	var redundantCommentIDs []int64
 	for {
 		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
 		if err != nil {
@@ -165,15 +206,29 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		}
 		for _, c := range comments {
 			if tag != "" && strings.Contains(c.GetBody(), tag) {
-				// We found a matching comment. Since the API returns results in
-				// ascending chronological order, the last one we find is the latest.
-				latestCommentID = c.GetID()
+				// If we have a selfLogin, we use it to be sure.
+				// If not, we trust the unique tag.
+				if selfLogin == "" || c.GetUser().GetLogin() == selfLogin {
+					if latestCommentID != 0 {
+						redundantCommentIDs = append(redundantCommentIDs, latestCommentID)
+					}
+					// We found a matching comment. Since the API returns results in
+					// ascending chronological order, the last one we find is the latest.
+					latestCommentID = c.GetID()
+				}
 			}
 		}
 		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
+	}
+
+	// Delete redundant comments first
+	for _, id := range redundantCommentIDs {
+		if _, err := client.Issues.DeleteComment(ctx, owner, repo, id); err != nil {
+			log.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
+		}
 	}
 
 	if latestCommentID != 0 {
@@ -194,6 +249,10 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR: %w", err)
 	}
+
+	mainTag := wrapTag(tag, "cassandra-main-")
+	inlineTag := wrapTag(tag, "cassandra-inline-")
+	reviewTag := wrapTag(tag, "")
 
 	metadata := &core.PRMetadata{
 		PRNumber:      prNumber,
@@ -216,8 +275,9 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && strings.Contains(body, tag)
+			isSelf := tag != "" && (strings.Contains(body, mainTag) || strings.Contains(body, reviewTag))
 			metadata.Comments = append(metadata.Comments, core.PRComment{
+				ID:     c.GetID(),
 				Author: c.GetUser().GetLogin(),
 				Body:   body,
 				IsSelf: isSelf,
@@ -243,15 +303,17 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && strings.Contains(body, tag)
+			isSelf := tag != "" && strings.Contains(body, inlineTag)
 			metadata.Comments = append(metadata.Comments, core.PRComment{
-				Author:    c.GetUser().GetLogin(),
-				Body:      body,
-				IsSelf:    isSelf,
-				Date:      getCreatedAt(c.CreatedAt),
-				Path:      c.GetPath(),
-				Line:      c.GetLine(),
-				StartLine: c.GetStartLine(),
+				ID:         c.GetID(),
+				Author:     c.GetUser().GetLogin(),
+				Body:       body,
+				IsSelf:     isSelf,
+				Date:       getCreatedAt(c.CreatedAt),
+				Path:       c.GetPath(),
+				Line:       c.GetLine(),
+				StartLine:  c.GetStartLine(),
+				IsOutdated: c.Position == nil && c.OriginalPosition != nil,
 			})
 		}
 
@@ -274,4 +336,185 @@ func getCreatedAt(ts *github.Timestamp) time.Time {
 		return time.Time{}
 	}
 	return ts.Time
+}
+
+func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string, allowReviewAction, deleteOldComments bool) error {
+	reviewBytes, err := os.ReadFile(bodyFile)
+	if err != nil {
+		return fmt.Errorf("failed to read structured review file: %w", err)
+	}
+
+	var sr core.StructuredReview
+	if err := json.Unmarshal(reviewBytes, &sr); err != nil {
+		return fmt.Errorf("failed to unmarshal structured review: %w", err)
+	}
+
+	var metadata core.PRMetadata
+	if metadataFile != "" {
+		metadataBytes, err := os.ReadFile(metadataFile)
+		if err != nil {
+			log.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
+		} else {
+			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+				log.Printf("Warning: failed to unmarshal metadata: %v", err)
+			}
+		}
+	}
+
+	reviewTag := wrapTag(tag, "")
+	inlineTag := wrapTag(tag, "cassandra-inline-")
+	mainTag := wrapTag(tag, "cassandra-main-")
+
+	// 1. Dismiss previous reviews BEFORE providing new review
+	if tag != "" {
+		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, reviewTag, 0); err != nil {
+			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+		}
+	}
+
+	// 2. Delete old inline comments if requested
+	if tag != "" && deleteOldComments {
+		for _, c := range metadata.Comments {
+			if c.IsSelf && strings.Contains(c.Body, inlineTag) {
+				if _, err := client.PullRequests.DeleteComment(ctx, owner, repo, c.ID); err != nil {
+					log.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
+				}
+			}
+		}
+	}
+
+	// 3. Post Non-Specific Review as a separate comment
+	if sr.NonSpecificReview != "" {
+		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
+			log.Printf("Warning: failed to post non-specific review comment: %v", err)
+		}
+	}
+
+	comments := []*github.DraftReviewComment{}
+	reviewRationale := sr.Approval.Rationale
+
+	for _, fr := range sr.FilesReview {
+		startLine, endLine, err := fr.ParseLines()
+		if err != nil {
+			log.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
+			reviewRationale = fmt.Sprintf("%s\n\n- **%s**: %s", reviewRationale, fr.Path, fr.Review)
+			continue
+		}
+
+		commentBody := fr.Review
+		if tag != "" {
+			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, inlineTag)
+		}
+
+		// New location (or after deletion): create new comment in the review
+		comment := &github.DraftReviewComment{
+			Path: github.Ptr(fr.Path),
+			Body: github.Ptr(commentBody),
+		}
+
+		if endLine > 0 {
+			comment.Line = github.Ptr(endLine)
+			if startLine != endLine {
+				comment.StartLine = github.Ptr(startLine)
+				comment.StartSide = github.Ptr("RIGHT")
+			}
+			comments = append(comments, comment)
+		} else {
+			// Fallback for file-level
+			reviewRationale = fmt.Sprintf("%s\n\n- **%s** (file-level): %s", reviewRationale, fr.Path, fr.Review)
+		}
+	}
+
+	reviewBody := reviewRationale
+	if tag != "" {
+		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, reviewTag)
+	}
+
+	action := strings.ToUpper(strings.TrimSpace(sr.Approval.Action))
+	if !allowReviewAction || (action != "APPROVE" && action != "REQUEST_CHANGES" && action != "COMMENT") {
+		action = "COMMENT"
+	}
+
+	reviewRequest := &github.PullRequestReviewRequest{
+		Body:     github.Ptr(reviewBody),
+		Event:    github.Ptr(action),
+		Comments: comments,
+	}
+
+	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	if err != nil {
+		// 422 Fallback logic
+		if resp != nil && resp.StatusCode == 422 {
+			errStr := err.Error()
+			isPermissionError := strings.Contains(errStr, "not permitted to approve")
+			hasComments := len(reviewRequest.Comments) > 0
+
+			if isPermissionError {
+				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
+				reviewRequest.Event = github.Ptr("COMMENT")
+
+				// Try again with COMMENT action, keeping inline comments
+				_, resp, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				if err == nil {
+					return nil
+				}
+				// If it still fails with 422, it's likely a line hallucination issue
+				if resp == nil || resp.StatusCode != 422 {
+					return err
+				}
+				errStr = err.Error()
+			}
+
+			if hasComments {
+				log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
+				reviewRequest.Comments = nil
+				var sb strings.Builder
+				sb.WriteString(reviewRequest.GetBody())
+				sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
+				for _, fr := range sr.FilesReview {
+					_, endLine, err := fr.ParseLines()
+					if err == nil && endLine > 0 {
+						sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
+					}
+				}
+				reviewRequest.Body = github.Ptr(sb.String())
+
+				_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				return err
+			}
+		}
+		return err
+	}
+
+	return nil
+}
+
+func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string, skipReviewID int64) error {
+	opts := &github.ListOptions{PerPage: 100}
+	for {
+		reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return err
+		}
+
+		for _, r := range reviews {
+			if r.GetID() == skipReviewID {
+				continue
+			}
+			if strings.Contains(r.GetBody(), tag) && r.GetState() != "DISMISSED" {
+				_, _, err := client.PullRequests.DismissReview(ctx, owner, repo, prNumber, r.GetID(), &github.PullRequestReviewDismissalRequest{
+					Message: github.Ptr("Superseded by a new AI review."),
+				})
+				if err != nil {
+					log.Printf("Warning: failed to dismiss review %d: %v", r.GetID(), err)
+				}
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return nil
 }

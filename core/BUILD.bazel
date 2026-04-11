@@ -20,9 +20,11 @@ go_test(
     srcs = [
         "agent_test.go",
         "io_util_test.go",
+        "review_types_test.go",
     ],
     embed = [":core"],
     deps = [
         "//llm",
+        "@com_github_stretchr_testify//assert",
     ],
 )
