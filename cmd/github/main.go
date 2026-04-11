@@ -23,6 +23,7 @@ func main() {
 	var bodyFile string
 	var tag string
 	var outputFile string
+	var metadataFile string
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -31,6 +32,7 @@ func main() {
 	flag.StringVar(&bodyFile, "file", "", "Path to the comment body file")
 	flag.StringVar(&tag, "tag", "", "Tag to identify the comment for updates or self-identification")
 	flag.StringVar(&outputFile, "output", "", "Path to the output file (for get-metadata)")
+	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
 
 	flag.Parse()
 
@@ -91,6 +93,15 @@ func main() {
 		err := postComment(ctx, client, owner, repo, prNumber, bodyFile, tag)
 		if err != nil {
 			log.Fatalf("Failed to post comment: %v", err)
+		}
+
+	case "post-structured-review":
+		if bodyFile == "" {
+			log.Fatal("--file is required for post-structured-review")
+		}
+		err := postStructuredReview(ctx, client, owner, repo, prNumber, bodyFile, tag, metadataFile)
+		if err != nil {
+			log.Fatalf("Failed to post structured review: %v", err)
 		}
 
 	case "get-metadata":
@@ -274,4 +285,74 @@ func getCreatedAt(ts *github.Timestamp) time.Time {
 		return time.Time{}
 	}
 	return ts.Time
+}
+
+func postStructuredReview(ctx context.Context, client *github.Client, owner, repo string, prNumber int, bodyFile, tag, metadataFile string) error {
+	reviewBytes, err := os.ReadFile(bodyFile)
+	if err != nil {
+		return fmt.Errorf("failed to read structured review file: %w", err)
+	}
+
+	var sr core.StructuredReview
+	if err := json.Unmarshal(reviewBytes, &sr); err != nil {
+		return fmt.Errorf("failed to unmarshal structured review: %w", err)
+	}
+
+	var metadata core.PRMetadata
+	if metadataFile != "" {
+		metadataBytes, err := os.ReadFile(metadataFile)
+		if err == nil {
+			_ = json.Unmarshal(metadataBytes, &metadata)
+		}
+	}
+
+	comments := []*github.DraftReviewComment{}
+	for _, fr := range sr.FilesReview {
+		startLine, endLine, err := fr.ParseLines()
+		if err != nil {
+			log.Printf("Warning: failed to parse lines for %s: %v. Skipping inline comment.", fr.Path, err)
+			continue
+		}
+
+		// Check if we've already made this exact comment at this exact location
+		alreadyCommented := false
+		for _, c := range metadata.Comments {
+			if c.IsSelf && c.Path == fr.Path && c.Line == endLine && strings.Contains(c.Body, strings.TrimSpace(fr.Review)) {
+				alreadyCommented = true
+				break
+			}
+		}
+
+		if alreadyCommented {
+			continue
+		}
+
+		comment := &github.DraftReviewComment{
+			Path: github.Ptr(fr.Path),
+			Body: github.Ptr(fr.Review),
+			Line: github.Ptr(endLine),
+		}
+		if startLine != endLine {
+			comment.StartLine = github.Ptr(startLine)
+			comment.StartSide = github.Ptr("RIGHT")
+		}
+		comments = append(comments, comment)
+	}
+
+	reviewBody := sr.Approval.Rationale
+	if sr.NonSpecificReview != "" {
+		reviewBody = fmt.Sprintf("%s\n\n### General Feedback\n%s", reviewBody, sr.NonSpecificReview)
+	}
+	if tag != "" {
+		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
+	}
+
+	reviewRequest := &github.PullRequestReviewRequest{
+		Body:     github.Ptr(reviewBody),
+		Event:    github.Ptr(sr.Approval.Action),
+		Comments: comments,
+	}
+
+	_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	return err
 }

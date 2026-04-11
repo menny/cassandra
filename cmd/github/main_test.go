@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v69/github"
+	"github.com/menny/cassandra/core"
 	"github.com/migueleliasweb/go-github-mock/src/mock"
 	"github.com/stretchr/testify/assert"
 )
@@ -247,4 +249,120 @@ func TestGetMetadata(t *testing.T) {
 		assert.False(t, metadata.Comments[0].IsSelf)
 		assert.False(t, metadata.Comments[1].IsSelf)
 	})
+}
+
+func TestPostStructuredReview(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+	metadataFile := filepath.Join(tmpDir, "metadata.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "LGTM!",
+			Action:    "APPROVE",
+		},
+		NonSpecificReview: "General feedback",
+		FilesReview: []core.FileReview{
+			{
+				Path:   "file1.go",
+				Lines:  "10",
+				Review: "New comment",
+			},
+			{
+				Path:   "file2.go",
+				Lines:  "20-25",
+				Review: "Duplicate comment",
+			},
+		},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	metadata := core.PRMetadata{
+		Comments: []core.PRComment{
+			{
+				Author: "cassandra",
+				IsSelf: true,
+				Path:   "file2.go",
+				Line:   25,
+				Body:   "Duplicate comment <!-- tag -->",
+				Date:   time.Now(),
+			},
+		},
+	}
+	metadataBytes, _ := json.Marshal(metadata)
+	_ = os.WriteFile(metadataFile, metadataBytes, 0o644)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				assert.Equal(t, "APPROVE", *req.Event)
+				assert.Contains(t, *req.Body, "LGTM!")
+				assert.Contains(t, *req.Body, "General feedback")
+				assert.Contains(t, *req.Body, "<!-- tag -->")
+
+				// Only one comment should be present (the non-duplicate)
+				assert.Equal(t, 1, len(req.Comments))
+				assert.Equal(t, "file1.go", *req.Comments[0].Path)
+				assert.Equal(t, "New comment", *req.Comments[0].Body)
+				assert.Equal(t, 10, *req.Comments[0].Line)
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile)
+	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_NoMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  false,
+			Rationale: "Issues found",
+			Action:    "REQUEST_CHANGES",
+		},
+		FilesReview: []core.FileReview{
+			{
+				Path:   "file1.go",
+				Lines:  "5-10",
+				Review: "Range comment",
+			},
+		},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+
+				assert.Equal(t, "REQUEST_CHANGES", *req.Event)
+				assert.Equal(t, 1, len(req.Comments))
+				assert.Equal(t, 5, *req.Comments[0].StartLine)
+				assert.Equal(t, 10, *req.Comments[0].Line)
+
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "")
+	assert.NoError(t, err)
 }
