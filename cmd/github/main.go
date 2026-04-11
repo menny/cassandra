@@ -469,10 +469,13 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 				log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
 				reviewRequest.Comments = nil
 				var sb strings.Builder
-				sb.WriteString(reviewBody)
+				sb.WriteString(reviewRequest.GetBody())
 				sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
 				for _, fr := range sr.FilesReview {
-					sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
+					_, endLine, err := fr.ParseLines()
+					if err == nil && endLine > 0 {
+						sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
+					}
 				}
 				reviewRequest.Body = github.Ptr(sb.String())
 
