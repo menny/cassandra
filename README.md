@@ -53,6 +53,7 @@ To review changes between a base and a head commit/branch:
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
+| `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | | No |
 | `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--output-json` | Path to a file where the structured JSON review will be written | | No |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
@@ -69,6 +70,7 @@ To review changes between a base and a head commit/branch:
 | `head` | Head commit/branch for diff | `HEAD` | No |
 | `working_directory` | Working directory to review | `.` | No |
 | `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
+| `approval_evaluation_prompt_file` | Path to a file containing custom approval evaluation guidelines | | No |
 | `metadata_tag` | Tag to identify Cassandra comments (inner text only, will be wrapped in `<!-- ... -->`) | `cassandra-ai-review-${{ github.workflow }}` | No |
 | `reaction_icon` | The reaction icon to add to the PR description while the review is in progress (e.g., `eyes`, `rocket`, `heart`) | `eyes` | No |
 | `reviewer_github_token` | GitHub token for posting comments and reactions | `${{ github.token }}` | No |

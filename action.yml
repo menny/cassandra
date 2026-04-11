@@ -28,6 +28,10 @@ inputs:
     description: 'Path to a file or a named prompt from the library (general, asana-do-try-consider, google, conventional-comments, palantir, minimalist, security-first)'
     required: false
     default: 'general'
+  approval_evaluation_prompt_file:
+    description: 'Optional path to a file containing custom approval evaluation guidelines'
+    required: false
+    default: ''
   metadata_tag:
     description: 'Tag to identify Cassandra comments (inner text only, will be wrapped in <!-- ... -->)'
     required: false
@@ -119,6 +123,7 @@ runs:
         HEAD: ${{ inputs.head }}
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
         MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
+        APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
@@ -137,6 +142,16 @@ runs:
 
         if [[ -f "$METADATA_FILE" ]]; then
           ARGS+=(--metadata-json "$METADATA_FILE")
+        fi
+
+        if [[ -n "$APPROVAL_EVALUATION_PROMPT_FILE" ]]; then
+          EVAL_PROMPT="${{ github.workspace }}/$WORKING_DIRECTORY/$APPROVAL_EVALUATION_PROMPT_FILE"
+          if [[ -f "$EVAL_PROMPT" ]]; then
+            ARGS+=(--approval-evaluation-prompt-file "$EVAL_PROMPT")
+          else
+            # Try it as a relative path or literal if not found in the workspace
+            ARGS+=(--approval-evaluation-prompt-file "$APPROVAL_EVALUATION_PROMPT_FILE")
+          fi
         fi
 
         # Try to resolve main guidelines:
