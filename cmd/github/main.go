@@ -158,7 +158,8 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	return postCommentText(ctx, client, owner, repo, prNumber, string(body), tag)
+	mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
+	return postCommentText(ctx, client, owner, repo, prNumber, string(body), mainTag)
 }
 
 func postCommentText(ctx context.Context, client *github.Client, owner, repo string, prNumber int, content, tag string) error {
@@ -182,6 +183,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	}
 
 	var latestCommentID int64
+	var redundantCommentIDs []int64
 	for {
 		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
 		if err != nil {
@@ -192,6 +194,9 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 				// If we have a selfLogin, we use it to be sure.
 				// If not, we trust the unique tag.
 				if selfLogin == "" || c.GetUser().GetLogin() == selfLogin {
+					if latestCommentID != 0 {
+						redundantCommentIDs = append(redundantCommentIDs, latestCommentID)
+					}
 					// We found a matching comment. Since the API returns results in
 					// ascending chronological order, the last one we find is the latest.
 					latestCommentID = c.GetID()
@@ -202,6 +207,13 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 			break
 		}
 		opts.Page = resp.NextPage
+	}
+
+	// Delete redundant comments first
+	for _, id := range redundantCommentIDs {
+		if _, err := client.Issues.DeleteComment(ctx, owner, repo, id); err != nil {
+			log.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
+		}
 	}
 
 	if latestCommentID != 0 {
@@ -223,10 +235,8 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		return nil, fmt.Errorf("failed to get PR: %w", err)
 	}
 
-	commentTag := tag
-	if tag != "" {
-		commentTag = strings.Replace(tag, "<!-- ", "<!-- comment-", 1)
-	}
+	mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
+	inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
 
 	metadata := &core.PRMetadata{
 		PRNumber:      prNumber,
@@ -249,8 +259,9 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && strings.Contains(body, tag)
+			isSelf := tag != "" && (strings.Contains(body, tag) || strings.Contains(body, mainTag))
 			metadata.Comments = append(metadata.Comments, core.PRComment{
+				ID:     c.GetID(),
 				Author: c.GetUser().GetLogin(),
 				Body:   body,
 				IsSelf: isSelf,
@@ -276,16 +287,17 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			// Inline comments use the special commentTag
-			isSelf := commentTag != "" && strings.Contains(body, commentTag)
+			isSelf := tag != "" && (strings.Contains(body, tag) || strings.Contains(body, inlineTag))
 			metadata.Comments = append(metadata.Comments, core.PRComment{
-				Author:    c.GetUser().GetLogin(),
-				Body:      body,
-				IsSelf:    isSelf,
-				Date:      getCreatedAt(c.CreatedAt),
-				Path:      c.GetPath(),
-				Line:      c.GetLine(),
-				StartLine: c.GetStartLine(),
+				ID:         c.GetID(),
+				Author:     c.GetUser().GetLogin(),
+				Body:       body,
+				IsSelf:     isSelf,
+				Date:       getCreatedAt(c.CreatedAt),
+				Path:       c.GetPath(),
+				Line:       c.GetLine(),
+				StartLine:  c.GetStartLine(),
+				IsOutdated: c.Position == nil && c.OriginalPosition != nil,
 			})
 		}
 
@@ -335,20 +347,15 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	// 1. Post Non-Specific Review as a separate comment
 	if sr.NonSpecificReview != "" {
-		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, tag); err != nil {
+		mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
+		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
 			log.Printf("Warning: failed to post non-specific review comment: %v", err)
 		}
 	}
 
 	comments := []*github.DraftReviewComment{}
 	reviewRationale := sr.Approval.Rationale
-
-	commentTag := tag
-	if tag != "" {
-		// Distinguish between the main (non-specific) comment and the inline review comments
-		// by using a different prefix for the latter.
-		commentTag = strings.Replace(tag, "<!-- ", "<!-- comment-", 1)
-	}
+	inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
 
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
@@ -358,24 +365,34 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			continue
 		}
 
-		// Check if we've already made this exact comment at this exact location
-		alreadyCommented := false
+		commentBody := fr.Review
+		if inlineTag != "" {
+			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, inlineTag)
+		}
+
+		// Check if we've already made a comment at this exact location
+		var existingComment *core.PRComment
 		for _, c := range metadata.Comments {
-			if c.IsSelf && c.Path == fr.Path && c.Line == endLine && strings.Contains(c.Body, strings.TrimSpace(fr.Review)) {
-				alreadyCommented = true
+			if c.IsSelf && c.Path == fr.Path && c.Line == endLine && !c.IsOutdated && strings.Contains(c.Body, inlineTag) {
+				existingComment = &c
 				break
 			}
 		}
 
-		if alreadyCommented {
+		if existingComment != nil {
+			// Update existing comment if content changed
+			if strings.TrimSpace(existingComment.Body) != strings.TrimSpace(commentBody) {
+				_, _, err := client.PullRequests.EditComment(ctx, owner, repo, existingComment.ID, &github.PullRequestComment{
+					Body: github.Ptr(commentBody),
+				})
+				if err != nil {
+					log.Printf("Warning: failed to update inline comment %d: %v", existingComment.ID, err)
+				}
+			}
 			continue
 		}
 
-		commentBody := fr.Review
-		if commentTag != "" {
-			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, commentTag)
-		}
-
+		// New location: create new comment in the review
 		comment := &github.DraftReviewComment{
 			Path: github.Ptr(fr.Path),
 			Body: github.Ptr(commentBody),
@@ -389,8 +406,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			}
 			comments = append(comments, comment)
 		} else {
-			// File-level comment - go-github v69 doesn't support SubjectType: file on DraftReviewComment.
-			// Fallback: append to the main review rationale.
+			// Fallback for file-level
 			reviewRationale = fmt.Sprintf("%s\n\n- **%s** (file-level): %s", reviewRationale, fr.Path, fr.Review)
 		}
 	}
@@ -398,13 +414,6 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	reviewBody := reviewRationale
 	if tag != "" {
 		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
-	}
-
-	// Dismiss previous reviews with the same tag to keep the PR timeline clean.
-	if tag != "" {
-		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag); err != nil {
-			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
-		}
 	}
 
 	action := strings.ToUpper(strings.TrimSpace(sr.Approval.Action))
@@ -418,37 +427,28 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		Comments: comments,
 	}
 
-	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	newReview, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 	if err != nil {
-		// If we get a 422 error, it might be due to:
-		// 1. GITHUB_TOKEN not having permission to APPROVE (common in default settings).
-		// 2. Line hallucinations (line not in diff).
+		// 422 Fallback logic
 		if resp != nil && resp.StatusCode == 422 {
 			errStr := err.Error()
 			needsRetry := false
 
-			// Handle permission issue
 			if strings.Contains(errStr, "not permitted to approve") {
 				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
 				needsRetry = true
 			}
 
-			// If it still fails (or we suspect line issues), try without inline comments
 			if len(reviewRequest.Comments) > 0 {
-				// We'll try the first retry with comments if only the Event changed.
-				// But we need a second-level fallback if lines are the problem.
-				_, _, errRetry := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-				if errRetry != nil && needsRetry {
-					// First retry failed, maybe due to lines.
-					errStr = errRetry.Error()
+				var errRetry error
+				if needsRetry {
+					_, _, errRetry = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 				}
 
 				if errRetry != nil || !needsRetry {
 					log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
 					reviewRequest.Comments = nil
-
-					// Append the skipped comments to the body so they aren't lost
 					var sb strings.Builder
 					sb.WriteString(reviewRequest.GetBody())
 					sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
@@ -460,24 +460,32 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 						sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", c.GetPath(), loc, c.GetBody()))
 					}
 					reviewRequest.Body = github.Ptr(sb.String())
-
-					_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-					return err
+					newReview, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 				}
-				return nil
-			}
-
-			if needsRetry {
-				_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-				return err
+			} else if needsRetry {
+				newReview, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 			}
 		}
-		return err
+		if err != nil {
+			return err
+		}
 	}
+
+	// Dismiss previous reviews with the same tag
+	if tag != "" {
+		newReviewID := int64(0)
+		if newReview != nil {
+			newReviewID = newReview.GetID()
+		}
+		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag, newReviewID); err != nil {
+			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+		}
+	}
+
 	return nil
 }
 
-func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string) error {
+func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, repo string, prNumber int, tag string, skipReviewID int64) error {
 	opts := &github.ListOptions{PerPage: 100}
 	for {
 		reviews, resp, err := client.PullRequests.ListReviews(ctx, owner, repo, prNumber, opts)
@@ -486,6 +494,9 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 		}
 
 		for _, r := range reviews {
+			if r.GetID() == skipReviewID {
+				continue
+			}
 			if strings.Contains(r.GetBody(), tag) && r.GetState() != "DISMISSED" {
 				_, _, err := client.PullRequests.DismissReview(ctx, owner, repo, prNumber, r.GetID(), &github.PullRequestReviewDismissalRequest{
 					Message: github.Ptr("Superseded by a new AI review."),
