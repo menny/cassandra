@@ -309,7 +309,8 @@ func TestPostStructuredReview(t *testing.T) {
 				// Only one comment should be present (the non-duplicate)
 				assert.Equal(t, 1, len(req.Comments))
 				assert.Equal(t, "file1.go", *req.Comments[0].Path)
-				assert.Equal(t, "New comment", *req.Comments[0].Body)
+				assert.Contains(t, *req.Comments[0].Body, "New comment")
+				assert.Contains(t, *req.Comments[0].Body, "<!-- tag -->")
 				assert.Equal(t, 10, *req.Comments[0].Line)
 
 				w.WriteHeader(http.StatusCreated)

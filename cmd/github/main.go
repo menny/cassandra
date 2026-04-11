@@ -327,9 +327,14 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			continue
 		}
 
+		commentBody := fr.Review
+		if tag != "" {
+			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, tag)
+		}
+
 		comment := &github.DraftReviewComment{
 			Path: github.Ptr(fr.Path),
-			Body: github.Ptr(fr.Review),
+			Body: github.Ptr(commentBody),
 			Line: github.Ptr(endLine),
 		}
 		if startLine != endLine {
