@@ -420,27 +420,57 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
 	if err != nil {
-		// If we get a 422 error, it might be due to a line hallucination (line not in diff).
-		// Fallback: post the review without inline comments so we don't lose the summary feedback.
-		if resp != nil && resp.StatusCode == 422 && len(comments) > 0 {
-			log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", err)
-			reviewRequest.Comments = nil
+		// If we get a 422 error, it might be due to:
+		// 1. GITHUB_TOKEN not having permission to APPROVE (common in default settings).
+		// 2. Line hallucinations (line not in diff).
+		if resp != nil && resp.StatusCode == 422 {
+			errStr := err.Error()
+			needsRetry := false
 
-			// Append the skipped comments to the body so they aren't lost
-			var sb strings.Builder
-			sb.WriteString(reviewRequest.GetBody())
-			sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
-			for _, c := range comments {
-				loc := ""
-				if c.Line != nil {
-					loc = fmt.Sprintf(" at line %d", *c.Line)
-				}
-				sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", c.GetPath(), loc, c.GetBody()))
+			// Handle permission issue
+			if strings.Contains(errStr, "not permitted to approve") {
+				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
+				reviewRequest.Event = github.Ptr("COMMENT")
+				needsRetry = true
 			}
-			reviewRequest.Body = github.Ptr(sb.String())
 
-			_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
-			return err
+			// If it still fails (or we suspect line issues), try without inline comments
+			if len(reviewRequest.Comments) > 0 {
+				// We'll try the first retry with comments if only the Event changed.
+				// But we need a second-level fallback if lines are the problem.
+				_, _, errRetry := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				if errRetry != nil && needsRetry {
+					// First retry failed, maybe due to lines.
+					errStr = errRetry.Error()
+				}
+
+				if errRetry != nil || !needsRetry {
+					log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
+					reviewRequest.Comments = nil
+
+					// Append the skipped comments to the body so they aren't lost
+					var sb strings.Builder
+					sb.WriteString(reviewRequest.GetBody())
+					sb.WriteString("\n\n### Detailed Inline Feedback (Fallback)\n")
+					for _, c := range comments {
+						loc := ""
+						if c.Line != nil {
+							loc = fmt.Sprintf(" at line %d", *c.Line)
+						}
+						sb.WriteString(fmt.Sprintf("- **%s**%s: %s\n", c.GetPath(), loc, c.GetBody()))
+					}
+					reviewRequest.Body = github.Ptr(sb.String())
+
+					_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+					return err
+				}
+				return nil
+			}
+
+			if needsRetry {
+				_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				return err
+			}
 		}
 		return err
 	}

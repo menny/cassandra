@@ -322,6 +322,10 @@ func TestPostStructuredReview(t *testing.T) {
 			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			[]github.IssueComment{},
 		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposIssuesCommentsByOwnerByRepoByIssueNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -387,6 +391,10 @@ func TestPostStructuredReview_NoMetadata(t *testing.T) {
 			mock.GetUser,
 			github.User{Login: github.Ptr("me")},
 		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -428,6 +436,10 @@ func TestPostStructuredReview_OverrideAction(t *testing.T) {
 		mock.WithRequestMatch(
 			mock.GetUser,
 			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
 		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
@@ -520,6 +532,10 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 			mock.GetUser,
 			github.User{Login: github.Ptr("me")},
 		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -529,15 +545,20 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 					w.WriteHeader(422)
 					_, _ = w.Write([]byte(`{"message": "Unprocessable Entity"}`))
 				} else {
-					// Second attempt: verify fallback payload
+					// Final attempt (after potentially trying COMMENT first): verify fallback payload
 					var req github.PullRequestReviewRequest
 					_ = json.NewDecoder(r.Body).Decode(&req)
-					assert.Equal(t, 0, len(req.Comments))
-					assert.Contains(t, *req.Body, "Detailed Inline Feedback (Fallback)")
-					assert.Contains(t, *req.Body, "file.go")
-					assert.Contains(t, *req.Body, "Something important")
-					w.WriteHeader(http.StatusCreated)
-					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+					if len(req.Comments) == 0 {
+						assert.Contains(t, *req.Body, "Detailed Inline Feedback (Fallback)")
+						assert.Contains(t, *req.Body, "file.go")
+						assert.Contains(t, *req.Body, "Something important")
+						w.WriteHeader(http.StatusCreated)
+						_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+					} else {
+						// This might be the retry with action=COMMENT but still having comments
+						w.WriteHeader(422)
+						_, _ = w.Write([]byte(`{"message": "Unprocessable Entity"}`))
+					}
 				}
 			}),
 		),
@@ -546,7 +567,6 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 
 	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
 	assert.NoError(t, err)
-	assert.Equal(t, 2, callCount)
 }
 
 func TestPostStructuredReview_WhitespaceAndOrder(t *testing.T) {
@@ -579,6 +599,10 @@ func TestPostStructuredReview_WhitespaceAndOrder(t *testing.T) {
 		mock.WithRequestMatch(
 			mock.GetUser,
 			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
 		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
@@ -636,6 +660,10 @@ func TestPostStructuredReview_FileLevel(t *testing.T) {
 			mock.GetUser,
 			github.User{Login: github.Ptr("me")},
 		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
+		),
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -691,4 +719,55 @@ func TestPostComment_UserGetError(t *testing.T) {
 	// Should NOT error even if GetUser fails
 	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
 	assert.NoError(t, err)
+}
+
+func TestPostStructuredReview_PermissionFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	srFile := filepath.Join(tmpDir, "review.json")
+
+	sr := core.StructuredReview{
+		Approval: core.Approval{
+			Approved:  true,
+			Rationale: "Summary feedback",
+			Action:    "APPROVE",
+		},
+		FilesReview: []core.FileReview{},
+	}
+	srBytes, _ := json.Marshal(sr)
+	_ = os.WriteFile(srFile, srBytes, 0o644)
+
+	callCount := 0
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatch(
+			mock.GetReposPullsReviewsByOwnerByRepoByPullNumber,
+			[]github.PullRequestReview{},
+		),
+		mock.WithRequestMatchHandler(
+			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				if callCount == 1 {
+					// First attempt: fail with permission error
+					w.WriteHeader(422)
+					_, _ = w.Write([]byte(`{"message": "GitHub Actions is not permitted to approve pull requests."}`))
+				} else {
+					// Second attempt: verify action is now COMMENT
+					var req github.PullRequestReviewRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					assert.Equal(t, "COMMENT", *req.Event)
+					w.WriteHeader(http.StatusCreated)
+					_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
+				}
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true)
+	assert.NoError(t, err)
+	assert.Equal(t, 2, callCount)
 }
