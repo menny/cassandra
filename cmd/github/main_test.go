@@ -502,3 +502,44 @@ func TestPostComment_UserGetError(t *testing.T) {
 	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
 	assert.NoError(t, err)
 }
+
+func TestPostComment_Pagination(t *testing.T) {
+	tmpDir := t.TempDir()
+	bodyFile := filepath.Join(tmpDir, "body.md")
+	err := os.WriteFile(bodyFile, []byte("test body"), 0o644)
+	assert.NoError(t, err)
+
+	// Custom handler to simulate pagination
+	callCount := 0
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatch(
+			mock.GetUser,
+			github.User{Login: github.Ptr("me")},
+		),
+		mock.WithRequestMatchHandler(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callCount++
+				if callCount == 1 {
+					// Page 1: return non-matching, with Link header to page 2
+					w.Header().Set("Link", `<https://api.github.com/repositories/1/issues/1/comments?page=2>; rel="next"`)
+					comments := []github.IssueComment{{ID: github.Ptr(int64(1)), Body: github.Ptr("no tag"), User: &github.User{Login: github.Ptr("me")}}}
+					_, _ = w.Write(mock.MustMarshal(comments))
+				} else {
+					// Page 2: return matching
+					comments := []github.IssueComment{{ID: github.Ptr(int64(2)), Body: github.Ptr("found <!-- cassandra-main-tag -->"), User: &github.User{Login: github.Ptr("me")}}}
+					_, _ = w.Write(mock.MustMarshal(comments))
+				}
+			}),
+		),
+		mock.WithRequestMatch(
+			mock.PatchReposIssuesCommentsByOwnerByRepoByCommentId,
+			github.IssueComment{ID: github.Ptr(int64(2))},
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, callCount)
+}
