@@ -75,9 +75,10 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ## Security Standards
 
 ### 1. GitHub Action Input Safety
-To prevent command injection vulnerabilities, you MUST NOT interpolate GitHub Action inputs or context variables directly into shell scripts (e.g., `run: my-tool --arg "${{ inputs.val }}"`).
-- **Use Environment Variables**: Map all inputs to environment variables in the `env:` block of the step.
-- **Reference Safely**: Use the environment variable within the script (e.g., `run: my-tool --arg "$VAL"`). This ensures the shell treats the input as literal data rather than executable code.
+To prevent command injection vulnerabilities, you MUST NOT interpolate user-controlled GitHub Action inputs (e.g., `${{ inputs.val }}`) or potentially unsafe GitHub context variables (e.g., `${{ github.event.pull_request.title }}`) directly into shell scripts.
+- **Use Environment Variables**: Map user-controlled inputs to environment variables in the `env:` block of the step.
+- **Reference Safely**: Use the environment variable within the script (e.g., `run: my-tool --arg "$VAL"`). This ensures the shell treats the input as literal data.
+- **Exceptions**: System-provided variables that are not user-controlled and follow a strict format (e.g., `${{ github.repository }}`, `${{ github.action_path }}`, `${{ github.workspace }}`, `${{ runner.temp }}`) can be used directly if it improves readability and doesn't introduce risk.
 
 ## Git Commit Guidelines
 

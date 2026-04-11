@@ -36,6 +36,10 @@ inputs:
     description: 'GitHub token for posting comments and managing reactions'
     required: false
     default: ${{ github.token }}
+  reaction_icon:
+    description: 'The reaction icon to add to the PR description while the review is in progress (e.g., eyes, rocket, heart).'
+    required: false
+    default: 'eyes'
 runs:
   using: 'composite'
   steps:
@@ -67,17 +71,18 @@ runs:
         bazelisk-cache: true
         disk-cache: cassandra-ai-review
         repository-cache: true
-    - name: Add Eyes Reaction
+    - name: Add Status Reaction
       if: github.event.pull_request.number != ''
       shell: bash
       continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+        REACTION_ICON: ${{ inputs.reaction_icon }}
       run: |
         # Use the action's source directory for Bazel.
         # This binary replaces the 'gh' CLI for managing PR reactions.
         cd "${{ github.action_path }}"
-        REACTION_ID=$(bazel run //cmd/github:github -- add-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --content "eyes")
+        REACTION_ID=$(bazel run //cmd/github:github -- add-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --content "$REACTION_ICON")
         if [ -n "$REACTION_ID" ]; then
           echo "CASSANDRA_REACTION_ID=$REACTION_ID" >> $GITHUB_ENV
         fi
@@ -148,7 +153,7 @@ runs:
         # Execute via Bazel in the action's source directory
         cd "${{ github.action_path }}"
         bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "$METADATA_TAG"
-    - name: Remove Eyes Reaction
+    - name: Remove Status Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash
       continue-on-error: true
