@@ -15,6 +15,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestWrapTag(t *testing.T) {
+	tests := []struct {
+		slug   string
+		prefix string
+		want   string
+	}{
+		{"tag", "prefix-", "<!-- prefix-tag -->"},
+		{"tag with spaces", "", "<!-- tag with spaces -->"},
+		{"tag--with--hyphens", "p-", "<!-- p-tag__with__hyphens -->"},
+		{"tag <breakout>", "p-", "<!-- p-tag breakout -->"},
+		{"  trimmed  ", "p-", "<!-- p-trimmed -->"},
+	}
+
+	for _, tt := range tests {
+		got := wrapTag(tt.slug, tt.prefix)
+		assert.Equal(t, tt.want, got)
+	}
+}
+
 func TestParseRepo(t *testing.T) {
 	tests := []struct {
 		input     string
@@ -89,7 +108,7 @@ func TestPostComment_Create(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
 	assert.NoError(t, err)
 }
 
@@ -121,7 +140,7 @@ func TestPostComment_Update(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
 	assert.NoError(t, err)
 }
 
@@ -158,7 +177,7 @@ func TestPostComment_CleanupRedundant(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "<!-- tag -->")
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
 	assert.NoError(t, err)
 	assert.Equal(t, 1, deleteCalled)
 }
@@ -207,7 +226,7 @@ func TestGetMetadata(t *testing.T) {
 
 	t.Run("with tag-a", func(t *testing.T) {
 		client := setupMock()
-		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "<!-- tag-a -->")
+		metadata, err := getMetadata(context.Background(), client, "owner", "repo", 1, "tag-a")
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(metadata.Comments))
 		assert.False(t, metadata.Comments[0].IsSelf)
@@ -233,6 +252,9 @@ func TestPostStructuredReview(t *testing.T) {
 		mock.WithRequestMatchHandler(
 			mock.PostReposPullsReviewsByOwnerByRepoByPullNumber,
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req github.PullRequestReviewRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				assert.Contains(t, *req.Body, "<!-- tag -->")
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write(mock.MustMarshal(github.PullRequestReview{ID: github.Ptr(int64(789))}))
 			}),
@@ -240,7 +262,7 @@ func TestPostStructuredReview(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", "", true, true)
 	assert.NoError(t, err)
 }
 
@@ -286,7 +308,7 @@ func TestPostStructuredReview_DeleteOld(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", metadataFile, true, true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", metadataFile, true, true)
 	assert.NoError(t, err)
 	assert.True(t, deleteCalled)
 }
@@ -327,7 +349,7 @@ func TestPostStructuredReview_422Fallback(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", "", true, true)
 	assert.NoError(t, err)
 }
 
@@ -389,7 +411,42 @@ func TestPostStructuredReview_PermissionFallback(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "<!-- tag -->", "", true, true)
+	err := postStructuredReview(context.Background(), client, "owner", "repo", 1, srFile, "tag", "", true, true)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, callCount)
+}
+
+func TestPostComment_UserGetError(t *testing.T) {
+	tmpDir := t.TempDir()
+	bodyFile := filepath.Join(tmpDir, "body.md")
+	err := os.WriteFile(bodyFile, []byte("test body"), 0o644)
+	assert.NoError(t, err)
+
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.GetUser,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
+			}),
+		),
+		mock.WithRequestMatch(
+			mock.GetReposIssuesCommentsByOwnerByRepoByIssueNumber,
+			[]github.IssueComment{
+				{
+					ID:   github.Ptr(int64(456)),
+					Body: github.Ptr("old body <!-- cassandra-main-tag -->"),
+					User: &github.User{Login: github.Ptr("any-user")},
+				},
+			},
+		),
+		mock.WithRequestMatch(
+			mock.PatchReposIssuesCommentsByOwnerByRepoByCommentId,
+			github.IssueComment{ID: github.Ptr(int64(456))},
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
+	assert.NoError(t, err)
 }

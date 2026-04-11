@@ -52,12 +52,11 @@ func main() {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
 	}
 
-	// Process tag: only the inner text is provided, we wrap it in HTML comment tags.
+	// Process tag: only the inner text is provided.
 	// Default to 'cassandra-ai-review' if empty.
 	if tag == "" {
 		tag = "cassandra-ai-review"
 	}
-	tag = fmt.Sprintf("<!-- %s -->", tag)
 
 	action := flag.Arg(0)
 	ctx := context.Background()
@@ -141,6 +140,20 @@ func parseRepo(fullName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// wrapTag wraps a raw slug into a hidden HTML comment tag with an optional prefix.
+// It sanitizes the slug to ensure it cannot break out of the HTML comment.
+func wrapTag(slug, prefix string) string {
+	// Sanitize slug:
+	// 1. Replace '--' with '__' because HTML comments cannot contain '--'.
+	// 2. Remove '<' and '>' to prevent breakout.
+	s := strings.ReplaceAll(slug, "--", "__")
+	s = strings.ReplaceAll(s, "<", "")
+	s = strings.ReplaceAll(s, ">", "")
+	s = strings.TrimSpace(s)
+
+	return fmt.Sprintf("<!-- %s%s -->", prefix, s)
+}
+
 func addReaction(ctx context.Context, client *github.Client, owner, repo string, prNumber int, content string) (int64, error) {
 	reaction, _, err := client.Reactions.CreateIssueReaction(ctx, owner, repo, prNumber, content)
 	if err != nil {
@@ -160,7 +173,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
+	mainTag := wrapTag(tag, "cassandra-main-")
 	return postCommentText(ctx, client, owner, repo, prNumber, string(body), mainTag)
 }
 
@@ -237,8 +250,9 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		return nil, fmt.Errorf("failed to get PR: %w", err)
 	}
 
-	mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
-	inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
+	mainTag := wrapTag(tag, "cassandra-main-")
+	inlineTag := wrapTag(tag, "cassandra-inline-")
+	reviewTag := wrapTag(tag, "")
 
 	metadata := &core.PRMetadata{
 		PRNumber:      prNumber,
@@ -261,7 +275,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && (strings.Contains(body, tag) || strings.Contains(body, mainTag))
+			isSelf := tag != "" && (strings.Contains(body, mainTag) || strings.Contains(body, reviewTag))
 			metadata.Comments = append(metadata.Comments, core.PRComment{
 				ID:     c.GetID(),
 				Author: c.GetUser().GetLogin(),
@@ -289,7 +303,7 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 
 		for _, c := range comments {
 			body := c.GetBody()
-			isSelf := tag != "" && (strings.Contains(body, tag) || strings.Contains(body, inlineTag))
+			isSelf := tag != "" && strings.Contains(body, inlineTag)
 			metadata.Comments = append(metadata.Comments, core.PRComment{
 				ID:         c.GetID(),
 				Author:     c.GetUser().GetLogin(),
@@ -347,16 +361,19 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		}
 	}
 
+	reviewTag := wrapTag(tag, "")
+	inlineTag := wrapTag(tag, "cassandra-inline-")
+	mainTag := wrapTag(tag, "cassandra-main-")
+
 	// 1. Dismiss previous reviews BEFORE providing new review
 	if tag != "" {
-		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, tag, 0); err != nil {
+		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, reviewTag, 0); err != nil {
 			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
 		}
 	}
 
 	// 2. Delete old inline comments if requested
 	if tag != "" && deleteOldComments {
-		inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
 		for _, c := range metadata.Comments {
 			if c.IsSelf && strings.Contains(c.Body, inlineTag) {
 				if _, err := client.PullRequests.DeleteComment(ctx, owner, repo, c.ID); err != nil {
@@ -368,7 +385,6 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	// 3. Post Non-Specific Review as a separate comment
 	if sr.NonSpecificReview != "" {
-		mainTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-main-", 1)
 		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
 			log.Printf("Warning: failed to post non-specific review comment: %v", err)
 		}
@@ -376,7 +392,6 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	comments := []*github.DraftReviewComment{}
 	reviewRationale := sr.Approval.Rationale
-	inlineTag := strings.Replace(tag, "<!-- ", "<!-- cassandra-inline-", 1)
 
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
@@ -387,7 +402,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		}
 
 		commentBody := fr.Review
-		if inlineTag != "" {
+		if tag != "" {
 			commentBody = fmt.Sprintf("%s\n\n%s", commentBody, inlineTag)
 		}
 
@@ -412,7 +427,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 
 	reviewBody := reviewRationale
 	if tag != "" {
-		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, tag)
+		reviewBody = fmt.Sprintf("%s\n\n%s", reviewBody, reviewTag)
 	}
 
 	action := strings.ToUpper(strings.TrimSpace(sr.Approval.Action))
