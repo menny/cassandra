@@ -72,6 +72,13 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ### 5. Token Efficiency
 - **Mindful Generation**: When designing LLM interactions (prompts, schemas, or post-processing), prioritize strategies that minimize output tokens. Avoid asking the model to echo large amounts of existing text; instead, prefer manual assembly or reference-based extraction to reduce latency and API costs.
 
+## Security Standards
+
+### 1. GitHub Action Input Safety
+To prevent command injection vulnerabilities, you MUST NOT interpolate GitHub Action inputs or context variables directly into shell scripts (e.g., `run: my-tool --arg "${{ inputs.val }}"`).
+- **Use Environment Variables**: Map all inputs to environment variables in the `env:` block of the step.
+- **Reference Safely**: Use the environment variable within the script (e.g., `run: my-tool --arg "$VAL"`). This ensures the shell treats the input as literal data rather than executable code.
+
 ## Git Commit Guidelines
 
 When committing changes on behalf of the user, strictly follow these commit message rules based on Conventional Commits:

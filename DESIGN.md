@@ -19,7 +19,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Actions**:
   - `add-reaction`: Adds a visual status indicator (e.g., 'eyes') to the PR body.
   - `remove-reaction`: Cleans up reactions after the review completes.
-  - `post-comment`: Manages a "persistent" comment by searching for a unique tag (e.g., `<!-- cassandra-ai-review -->`) and either creating a new comment or updating an existing one.
+  - `post-comment`: Manages a "persistent" comment by searching for a unique tag (e.g., `<!-- cassandra-ai-review-Workflow-Name -->`) and either creating a new comment or updating an existing one. This allows multiple review workflows to operate independently on the same PR.
 - Built as a separate binary to minimize the footprint and dependencies required for basic GitHub interactions.
 
 ### 3. Core AI Engine (`core/agent.go`)
