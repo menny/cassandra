@@ -146,3 +146,45 @@ func TestFetchGitDiff(t *testing.T) {
 		}
 	})
 }
+
+func TestFetchGitCommits(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
+
+	t.Run("Commits between main and feature", func(t *testing.T) {
+		commits, err := FetchGitCommits(tmpDir, "main", "feature")
+		if err != nil {
+			t.Fatalf("FetchGitCommits failed: %v", err)
+		}
+
+		if !strings.Contains(commits, "- feature commit") {
+			t.Errorf("expected commit message 'feature commit', got:\n%s", commits)
+		}
+		if strings.Contains(commits, "main new commit") {
+			t.Errorf("did NOT expect commit message 'main new commit', got:\n%s", commits)
+		}
+	})
+
+	t.Run("Commits with HEAD", func(t *testing.T) {
+		// Add an uncommitted change and commit it
+		runGitCmd(t, tmpDir, "checkout", "feature")
+		err := os.WriteFile(filepath.Join(tmpDir, "extra.txt"), []byte("extra"), 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, tmpDir, "add", "extra.txt")
+		runGitCmd(t, tmpDir, "commit", "-m", "extra commit")
+
+		commits, err := FetchGitCommits(tmpDir, "main", "HEAD")
+		if err != nil {
+			t.Fatalf("FetchGitCommits failed: %v", err)
+		}
+
+		if !strings.Contains(commits, "- feature commit") {
+			t.Errorf("expected commit message 'feature commit', got:\n%s", commits)
+		}
+		if !strings.Contains(commits, "- extra commit") {
+			t.Errorf("expected commit message 'extra commit', got:\n%s", commits)
+		}
+	})
+}

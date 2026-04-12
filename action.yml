@@ -113,6 +113,24 @@ runs:
         cd "${{ github.action_path }}"
         bazel run //cmd/github:github -- get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "$METADATA_TAG" --output "$METADATA_FILE"
         echo "METADATA_FILE=$METADATA_FILE" >> $GITHUB_ENV
+    - name: Fetch PR Context
+      if: github.event.pull_request.number != ''
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+      run: |
+        DIFF_FILE="${{ runner.temp }}/cassandra_diff.diff"
+        FILES_LIST_FILE="${{ runner.temp }}/cassandra_files.txt"
+        COMMITS_FILE="${{ runner.temp }}/cassandra_commits.txt"
+
+        cd "${{ github.action_path }}"
+        bazel run //cmd/github:github -- get-diff --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$DIFF_FILE"
+        bazel run //cmd/github:github -- get-files --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$FILES_LIST_FILE"
+        bazel run //cmd/github:github -- get-commits --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$COMMITS_FILE"
+
+        echo "DIFF_FILE=$DIFF_FILE" >> $GITHUB_ENV
+        echo "FILES_LIST_FILE=$FILES_LIST_FILE" >> $GITHUB_ENV
+        echo "COMMITS_FILE=$COMMITS_FILE" >> $GITHUB_ENV
     - name: Run AI Review
       shell: bash
       env:
@@ -142,6 +160,18 @@ runs:
 
         if [[ -f "$METADATA_FILE" ]]; then
           ARGS+=(--metadata-json "$METADATA_FILE")
+        fi
+
+        if [[ -f "$DIFF_FILE" ]]; then
+          ARGS+=(--diff-file "$DIFF_FILE")
+        fi
+
+        if [[ -f "$FILES_LIST_FILE" ]]; then
+          ARGS+=(--files-list-file "$FILES_LIST_FILE")
+        fi
+
+        if [[ -f "$COMMITS_FILE" ]]; then
+          ARGS+=(--commits-file "$COMMITS_FILE")
         fi
 
         if [[ -n "$APPROVAL_EVALUATION_PROMPT_FILE" ]]; then

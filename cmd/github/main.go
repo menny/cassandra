@@ -49,7 +49,7 @@ func main() {
 	}
 
 	if len(flag.Args()) < 1 {
-		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
+		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, post-structured-review, get-metadata, get-diff, get-files, get-commits)")
 	}
 
 	// Process tag: only the inner text is provided.
@@ -125,6 +125,47 @@ func main() {
 			}
 		} else {
 			fmt.Println(string(bytes))
+		}
+
+	case "get-diff":
+		diff, err := getDiff(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get diff: %v", err)
+		}
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(diff), 0o644); err != nil {
+				log.Fatalf("Failed to write diff to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(diff)
+		}
+
+	case "get-files":
+		files, err := getFiles(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get files: %v", err)
+		}
+		content := strings.Join(files, "\n")
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
+				log.Fatalf("Failed to write files to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(content)
+		}
+
+	case "get-commits":
+		commits, err := getCommits(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get commits: %v", err)
+		}
+		content := strings.Join(commits, "\n")
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
+				log.Fatalf("Failed to write commits to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(content)
 		}
 
 	default:
@@ -517,4 +558,63 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 		opts.Page = resp.NextPage
 	}
 	return nil
+}
+
+func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (string, error) {
+	diff, _, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
+	return diff, err
+}
+
+func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
+	opts := &github.ListOptions{
+		PerPage: 100,
+	}
+	var allFiles []string
+	lockFiles := []string{"go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "poetry.lock", "Gemfile.lock"}
+
+	for {
+		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			path := f.GetFilename()
+			isLockFile := false
+			for _, lf := range lockFiles {
+				if strings.Contains(path, lf) {
+					isLockFile = true
+					break
+				}
+			}
+			if !isLockFile {
+				allFiles = append(allFiles, path)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allFiles, nil
+}
+
+func getCommits(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
+	opts := &github.ListOptions{
+		PerPage: 100,
+	}
+	var allCommits []string
+	for {
+		commits, resp, err := client.PullRequests.ListCommits(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range commits {
+			allCommits = append(allCommits, "- "+c.GetCommit().GetMessage())
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allCommits, nil
 }

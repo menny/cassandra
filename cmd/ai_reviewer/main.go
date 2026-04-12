@@ -35,6 +35,9 @@ func main() {
 	var extractionModel string
 	var metadataJSONFile string
 	var approvalEvaluationPromptFile string
+	var diffFile string
+	var filesListFile string
+	var commitsFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
@@ -46,6 +49,9 @@ func main() {
 	flag.StringVar(&outputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
 	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
 	flag.StringVar(&metadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
+	flag.StringVar(&diffFile, "diff-file", "", "Path to a file containing the git diff")
+	flag.StringVar(&filesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
+	flag.StringVar(&commitsFile, "commits-file", "", "Path to a file containing the commit messages")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -140,20 +146,68 @@ func main() {
 
 	agent := core.NewAgent(client, registry)
 
-	var requestText string
+	var diffOutput string
 	var changedFiles []string
-	diffOutput, files, err := tools.FetchGitDiff(targetDir, base, head)
-	if err != nil {
-		log.Fatalf("Failed to extract git diff: %v", err)
+	var commitsOutput string
+
+	if diffFile != "" && filesListFile != "" {
+		diffBytes, err := os.ReadFile(diffFile)
+		if err != nil {
+			log.Fatalf("Failed to read diff file %s: %v", diffFile, err)
+		}
+		diffOutput = string(diffBytes)
+
+		filesBytes, err := os.ReadFile(filesListFile)
+		if err != nil {
+			log.Fatalf("Failed to read files list file %s: %v", filesListFile, err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(filesBytes)), "\n")
+		for _, line := range lines {
+			if f := strings.TrimSpace(line); f != "" {
+				changedFiles = append(changedFiles, f)
+			}
+		}
+	} else {
+		stderr.Println("Fetching git diff locally...")
+		var err error
+		diffOutput, changedFiles, err = tools.FetchGitDiff(targetDir, base, head)
+		if err != nil {
+			log.Fatalf("Failed to extract git diff: %v", err)
+		}
 	}
 
-	if len(files) == 0 {
+	if commitsFile != "" {
+		commitsBytes, err := os.ReadFile(commitsFile)
+		if err != nil {
+			log.Fatalf("Failed to read commits file %s: %v", commitsFile, err)
+		}
+		commitsOutput = string(commitsBytes)
+	} else {
+		stderr.Println("Fetching git commits locally...")
+		commits, err := tools.FetchGitCommits(targetDir, base, head)
+		if err != nil {
+			// Don't fail if commits fetching fails (e.g. shallow clone), just log it
+			stderr.Printf("Warning: failed to fetch git commits: %v\n", err)
+		} else {
+			commitsOutput = commits
+		}
+	}
+
+	if len(changedFiles) == 0 {
 		stderr.Println("No changes found to review.")
 		os.Exit(0)
 	}
 
-	requestText = fmt.Sprintf("Review the following git diff for issues:\n\n%s", diffOutput)
-	changedFiles = files
+	var requestTextBuilder strings.Builder
+	if commitsOutput != "" {
+		requestTextBuilder.WriteString("### Commit Messages\n")
+		requestTextBuilder.WriteString(commitsOutput)
+		requestTextBuilder.WriteString("\n\n")
+	}
+	requestTextBuilder.WriteString("Review the following git diff for issues:\n\n")
+	requestTextBuilder.WriteString(diffOutput)
+
+	requestText := requestTextBuilder.String()
 
 	if metadataJSONFile != "" {
 		metadataBytes, err := os.ReadFile(metadataJSONFile)
