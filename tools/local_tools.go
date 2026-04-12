@@ -154,7 +154,7 @@ func registerLocalGrepFiles(r *Registry) {
 		}
 
 		// Filter out lock files as they are usually not relevant and can be huge.
-		for _, lf := range lockFiles {
+		for _, lf := range LockFiles {
 			cmdArgs = append(cmdArgs, fmt.Sprintf(":(exclude)*%s", lf))
 		}
 

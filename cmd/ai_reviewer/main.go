@@ -150,7 +150,11 @@ func main() {
 	var changedFiles []string
 	var commitsOutput string
 
-	if diffFile != "" && filesListFile != "" {
+	if diffFile != "" || filesListFile != "" {
+		if diffFile == "" || filesListFile == "" {
+			log.Fatal("Both --diff-file and --files-list-file must be provided together.")
+		}
+
 		diffBytes, err := os.ReadFile(diffFile)
 		if err != nil {
 			log.Fatalf("Failed to read diff file %s: %v", diffFile, err)

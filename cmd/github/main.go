@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/tools"
 	flag "github.com/spf13/pflag"
 )
 
@@ -562,7 +563,40 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 
 func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (string, error) {
 	diff, _, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
-	return diff, err
+	if err != nil {
+		return "", err
+	}
+
+	// Filter out lockfiles from the raw diff text.
+	// Unified diff format separates file chunks with "diff --git a/... b/..."
+	lines := strings.Split(diff, "\n")
+	var filteredLines []string
+	skipping := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			// Extract file paths from "diff --git a/path/to/file b/path/to/file"
+			parts := strings.Fields(line)
+			isLockFile := false
+			if len(parts) >= 4 {
+				// parts[2] is a/file, parts[3] is b/file
+				pathB := strings.TrimPrefix(parts[3], "b/")
+				for _, lf := range tools.LockFiles {
+					if pathB == lf || strings.HasSuffix(pathB, "/"+lf) {
+						isLockFile = true
+						break
+					}
+				}
+			}
+			skipping = isLockFile
+		}
+
+		if !skipping {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	return strings.Join(filteredLines, "\n"), nil
 }
 
 func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
@@ -570,7 +604,6 @@ func getFiles(ctx context.Context, client *github.Client, owner, repo string, pr
 		PerPage: 100,
 	}
 	var allFiles []string
-	lockFiles := []string{"go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "poetry.lock", "Gemfile.lock"}
 
 	for {
 		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
@@ -580,8 +613,8 @@ func getFiles(ctx context.Context, client *github.Client, owner, repo string, pr
 		for _, f := range files {
 			path := f.GetFilename()
 			isLockFile := false
-			for _, lf := range lockFiles {
-				if strings.Contains(path, lf) {
+			for _, lf := range tools.LockFiles {
+				if path == lf || strings.HasSuffix(path, "/"+lf) {
 					isLockFile = true
 					break
 				}
@@ -609,7 +642,10 @@ func getCommits(ctx context.Context, client *github.Client, owner, repo string, 
 			return nil, err
 		}
 		for _, c := range commits {
-			allCommits = append(allCommits, "- "+c.GetCommit().GetMessage())
+			msg := c.GetCommit().GetMessage()
+			// Extract only the first line (subject)
+			subject := strings.SplitN(msg, "\n", 2)[0]
+			allCommits = append(allCommits, "- "+subject)
 		}
 		if resp.NextPage == 0 {
 			break
