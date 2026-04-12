@@ -1,5 +1,8 @@
 name: 'Cassandra AI Review'
 description: 'AI-powered code review for your pull requests using Cassandra.'
+branding:
+  icon: 'eye'
+  color: 'purple'
 inputs:
   provider:
     description: 'LLM provider to use (google, anthropic)'
@@ -56,6 +59,19 @@ inputs:
     description: 'Whether to delete previous bot-authored inline comments before posting a new review to keep the PR clean.'
     required: false
     default: 'true'
+outputs:
+  review_file:
+    description: 'Path to the generated markdown review file.'
+    value: ${{ steps.set_outputs.outputs.review_file }}
+  json_file:
+    description: 'Path to the structured JSON review file (only set when the JSON file was successfully created).'
+    value: ${{ steps.set_outputs.outputs.json_file }}
+  approved:
+    description: 'The approval action from the review: APPROVE, REQUEST_CHANGES, or COMMENT.'
+    value: ${{ steps.set_outputs.outputs.approved }}
+  review_rationale:
+    description: 'The high-level rationale for the approval decision.'
+    value: ${{ steps.set_outputs.outputs.review_rationale }}
 runs:
   using: 'composite'
   steps:
@@ -82,7 +98,7 @@ runs:
         echo "::add-mask::$FINAL_TOKEN"
         echo "token=$FINAL_TOKEN" >> $GITHUB_OUTPUT
     - name: Setup Bazel
-      uses: bazel-contrib/setup-bazel@0.18.0
+      uses: bazel-contrib/setup-bazel@083175551ceeceebc757ebee2127fde78840ca77 # 0.18.0
       with:
         bazelisk-cache: true
         disk-cache: cassandra-ai-review
@@ -173,6 +189,23 @@ runs:
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
         echo "JSON_FILE=$JSON_FILE" >> $GITHUB_ENV
+    - name: Set Action Outputs
+      id: set_outputs
+      shell: bash
+      run: |
+        echo "review_file=$REVIEW_FILE" >> $GITHUB_OUTPUT
+        if [[ -f "$JSON_FILE" ]]; then
+          echo "json_file=$JSON_FILE" >> $GITHUB_OUTPUT
+          APPROVED=$(jq -r '.approval.action // "COMMENT"' "$JSON_FILE")
+          echo "approved=$APPROVED" >> $GITHUB_OUTPUT
+          # Use a unique delimiter to safely handle multi-line rationale text
+          DELIMITER="cassandra_${{ github.run_id }}_${{ github.run_attempt }}"
+          {
+            echo "review_rationale<<$DELIMITER"
+            jq -r '.approval.rationale // ""' "$JSON_FILE"
+            echo "$DELIMITER"
+          } >> $GITHUB_OUTPUT
+        fi
     - name: Post AI Review Comment
       if: github.event.pull_request.number != '' && inputs.use_inline_comments != 'true'
       shell: bash
