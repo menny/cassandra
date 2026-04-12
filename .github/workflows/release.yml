@@ -14,12 +14,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
       - name: Build binaries
         run: |
           mkdir -p dist
@@ -49,7 +47,6 @@ jobs:
               ./cmd/github
           done
           ls -lh dist/
-
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
