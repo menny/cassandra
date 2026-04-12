@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/tools"
 	flag "github.com/spf13/pflag"
 )
 
@@ -49,7 +50,7 @@ func main() {
 	}
 
 	if len(flag.Args()) < 1 {
-		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, get-metadata)")
+		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, post-structured-review, get-metadata, get-diff, get-files, get-commits)")
 	}
 
 	// Process tag: only the inner text is provided.
@@ -125,6 +126,47 @@ func main() {
 			}
 		} else {
 			fmt.Println(string(bytes))
+		}
+
+	case "get-diff":
+		diff, err := getDiff(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get diff: %v", err)
+		}
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(diff), 0o644); err != nil {
+				log.Fatalf("Failed to write diff to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(diff)
+		}
+
+	case "get-files":
+		files, err := getFiles(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get files: %v", err)
+		}
+		content := strings.Join(files, "\n")
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
+				log.Fatalf("Failed to write files to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(content)
+		}
+
+	case "get-commits":
+		commits, err := getCommits(ctx, client, owner, repo, prNumber)
+		if err != nil {
+			log.Fatalf("Failed to get commits: %v", err)
+		}
+		content := strings.Join(commits, "\n")
+		if outputFile != "" {
+			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
+				log.Fatalf("Failed to write commits to %s: %v", outputFile, err)
+			}
+		} else {
+			fmt.Println(content)
 		}
 
 	default:
@@ -517,4 +559,104 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 		opts.Page = resp.NextPage
 	}
 	return nil
+}
+
+func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (string, error) {
+	diff, _, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
+	if err != nil {
+		return "", err
+	}
+
+	// Filter out lockfiles from the raw diff text.
+	// Unified diff format separates file chunks with "diff --git a/... b/..."
+	lines := strings.Split(diff, "\n")
+	var filteredLines []string
+	skipping := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "diff --git ") {
+			// Extract file paths from "diff --git a/path/to/file b/path/to/file"
+			parts := strings.Fields(line)
+			isLockFile := false
+			if len(parts) >= 4 {
+				// parts[2] is a/file, parts[3] is b/file
+				pathB := strings.TrimPrefix(parts[3], "b/")
+				for _, lf := range tools.LockFiles {
+					if pathB == lf || strings.HasSuffix(pathB, "/"+lf) {
+						isLockFile = true
+						break
+					}
+				}
+			}
+			skipping = isLockFile
+		}
+
+		if !skipping {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	return strings.Join(filteredLines, "\n"), nil
+}
+
+func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
+	opts := &github.ListOptions{
+		PerPage: 100,
+	}
+	var allFiles []string
+
+	for {
+		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			path := f.GetFilename()
+			isLockFile := false
+			for _, lf := range tools.LockFiles {
+				if path == lf || strings.HasSuffix(path, "/"+lf) {
+					isLockFile = true
+					break
+				}
+			}
+			if !isLockFile {
+				allFiles = append(allFiles, path)
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allFiles, nil
+}
+
+func getCommits(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
+	opts := &github.ListOptions{
+		PerPage: 100,
+	}
+	var allCommits []string
+	for {
+		commits, resp, err := client.PullRequests.ListCommits(ctx, owner, repo, prNumber, opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range commits {
+			// Skip merge commits to maintain consistency with --no-merges
+			if len(c.Parents) > 1 {
+				continue
+			}
+
+			msg := c.GetCommit().GetMessage()
+			// Normalize newlines and extract only the first line (subject)
+			normalized := strings.ReplaceAll(msg, "\r\n", "\n")
+			subject := strings.SplitN(normalized, "\n", 2)[0]
+			allCommits = append(allCommits, "- "+subject)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return allCommits, nil
 }
