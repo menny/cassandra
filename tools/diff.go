@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var lockFiles = []string{
+var LockFiles = []string{
 	"go.sum",
 	"package-lock.json",
 	"yarn.lock",
@@ -28,7 +28,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
-	for _, lf := range lockFiles {
+	for _, lf := range LockFiles {
 		cmdArgs = append(cmdArgs, fmt.Sprintf(":(exclude)*%s", lf))
 	}
 
@@ -46,7 +46,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 
 	// Get file list
 	nameOnlyArgs := []string{"diff", "--name-only", diffRange, "--", "."}
-	for _, lf := range lockFiles {
+	for _, lf := range LockFiles {
 		nameOnlyArgs = append(nameOnlyArgs, fmt.Sprintf(":(exclude)*%s", lf))
 	}
 	nameOnlyCmd := exec.Command("git", nameOnlyArgs...)
