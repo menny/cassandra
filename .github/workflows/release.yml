@@ -19,6 +19,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build binaries
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        # go build is used here instead of Bazel for cross-compilation simplicity,
+        # since go.mod is kept in sync and no Bazel-specific stamping is needed.
         run: |
           mkdir -p dist
           PLATFORMS=(
@@ -36,13 +40,13 @@ jobs:
 
             echo "Building cassandra for $GOOS/$GOARCH..."
             GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+              -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
               -o "dist/cassandra-${GOOS}-${GOARCH}${SUFFIX}" \
               ./cmd/ai_reviewer
 
             echo "Building cassandra-github for $GOOS/$GOARCH..."
             GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
+              -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
               -o "dist/cassandra-github-${GOOS}-${GOARCH}${SUFFIX}" \
               ./cmd/github
           done
@@ -50,8 +54,9 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
-          gh release create "${{ github.ref_name }}" \
+          gh release create "$RELEASE_VERSION" \
             --generate-notes \
-            --title "Cassandra ${{ github.ref_name }}" \
+            --title "Cassandra $RELEASE_VERSION" \
             dist/cassandra-*

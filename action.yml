@@ -228,8 +228,8 @@ runs:
           echo "json_file=$JSON_FILE" >> $GITHUB_OUTPUT
           APPROVED=$(jq -r '.approval.action // "COMMENT"' "$JSON_FILE")
           echo "approved=$APPROVED" >> $GITHUB_OUTPUT
-          # Use a unique delimiter to safely handle multi-line rationale text
-          DELIMITER="cassandra_${{ github.run_id }}_${{ github.run_attempt }}"
+          # Use a cryptographically random delimiter to safely handle multi-line rationale text
+          DELIMITER=$(openssl rand -hex 16)
           {
             echo "review_rationale<<$DELIMITER"
             jq -r '.approval.rationale // ""' "$JSON_FILE"

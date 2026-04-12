@@ -103,8 +103,10 @@ After the review completes, the action exposes the following outputs that downst
 
       - name: Fail if changes requested
         if: steps.cassandra.outputs.approved == 'REQUEST_CHANGES'
+        env:
+          REVIEW_RATIONALE: ${{ steps.cassandra.outputs.review_rationale }}
         run: |
-          echo "Cassandra requested changes: ${{ steps.cassandra.outputs.review_rationale }}"
+          echo "Cassandra requested changes: $REVIEW_RATIONALE"
           exit 1
 ```
 
