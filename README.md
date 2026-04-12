@@ -161,8 +161,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Required: fetch full history for accurate diffing
 
       - name: Run Cassandra AI Review
         uses: menny/cassandra@v1
@@ -170,33 +168,32 @@ jobs:
           provider: 'google'
           model_id: 'gemini-2.5-flash'
           provider_api_key: ${{ secrets.GEMINI_API_KEY }}
-          # The exact base and head SHAs give the most accurate diff
-          base: ${{ github.event.pull_request.base.sha }}
-          head: ${{ github.event.pull_request.head.sha }}
 ```
 
-### REVIEWERS.md — Per-Directory Review Guidelines
+### Per-Directory Review Guidelines — `REVIEWERS.md` and `AGENTS.md`
 
-Cassandra automatically discovers `REVIEWERS.md` files in your repository and incorporates their contents into the review prompt. This lets teams provide **targeted, directory-specific guidance** to the AI reviewer.
+Cassandra automatically discovers `REVIEWERS.md` **and** `AGENTS.md` files in your repository and incorporates their contents into the review prompt. Both file types use the same discovery logic, letting teams provide **targeted, directory-specific guidance** to the AI reviewer and to AI coding assistants alike.
 
 **How it works:**
 
-For each file that changed in the PR, Cassandra walks up the directory tree from that file's location to the repository root, collecting every `REVIEWERS.md` file it finds. All discovered files are injected into the system prompt, scoped by directory.
+For each file that changed in the PR, Cassandra walks up the directory tree from that file's location to the repository root, collecting every `REVIEWERS.md` and `AGENTS.md` file it finds. All discovered files are injected into the system prompt, scoped by directory.
 
 **Example:**
 
 ```
 my-repo/
-├── REVIEWERS.md              # Root-level guidelines (apply to all files)
+├── REVIEWERS.md              # Root-level review guidelines (apply to all files)
+├── AGENTS.md                 # Root-level instructions for AI coding assistants
 ├── backend/
-│   ├── REVIEWERS.md          # Backend-specific guidelines
+│   ├── REVIEWERS.md          # Backend-specific review guidelines
+│   ├── AGENTS.md             # Backend-specific assistant instructions
 │   └── api/
-│       └── handlers.go       # If this file changes, both backend/ and root REVIEWERS.md are loaded
+│       └── handlers.go       # If this file changes, both backend/ and root files are loaded
 └── frontend/
-    └── REVIEWERS.md          # Frontend-specific guidelines
+    └── REVIEWERS.md          # Frontend-specific review guidelines
 ```
 
-A `REVIEWERS.md` file can contain anything relevant to that area of the codebase:
+**`REVIEWERS.md`** — guidance aimed at the AI reviewer:
 
 ```markdown
 # Backend Review Guidelines
@@ -207,23 +204,19 @@ A `REVIEWERS.md` file can contain anything relevant to that area of the codebase
 - New HTTP endpoints must have a corresponding integration test.
 ```
 
-> **Tip:** `AGENTS.md` files work the same way and are also discovered automatically, allowing you to provide instructions to AI coding assistants alongside review guidelines.
+**`AGENTS.md`** — instructions shared with AI coding assistants (e.g. GitHub Copilot, Claude):
+
+```markdown
+# Backend Agent Instructions
+
+- Follow the repository style guide in docs/style.md.
+- Prefer table-driven tests over individual test functions.
+- Do not modify generated files under gen/.
+```
+
+Both file types can coexist in the same directory and are loaded independently.
 
 ### Troubleshooting
-
-#### The review is empty or shows "No changes found"
-
-**Cause:** The git history is shallow — GitHub Actions checks out only the last commit by default.
-
-**Fix:** Add `fetch-depth: 0` to your checkout step:
-```yaml
-- uses: actions/checkout@v4
-  with:
-    fetch-depth: 0
-```
-Also make sure `base` and `head` point to the correct commits (use `github.event.pull_request.base.sha` and `github.event.pull_request.head.sha`).
-
----
 
 #### Cassandra posts a comment but no inline annotations appear
 

@@ -12,43 +12,39 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@v0
         with:
-          fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+          bazelisk-cache: true
+          disk-cache: cassandra-release
+          repository-cache: true
       - name: Build binaries
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        # go build is used here instead of Bazel for cross-compilation simplicity,
-        # since go.mod is kept in sync and no Bazel-specific stamping is needed.
         run: |
           mkdir -p dist
-          PLATFORMS=(
-            "linux/amd64"
-            "linux/arm64"
-            "darwin/amd64"
-            "darwin/arm64"
-            "windows/amd64"
+          declare -A PLATFORMS=(
+            ["linux_amd64"]="linux/amd64"
+            ["linux_arm64"]="linux/arm64"
+            ["darwin_amd64"]="darwin/amd64"
+            ["darwin_arm64"]="darwin/arm64"
+            ["windows_amd64"]="windows/amd64"
           )
-          for PLATFORM in "${PLATFORMS[@]}"; do
-            GOOS="${PLATFORM%%/*}"
-            GOARCH="${PLATFORM##*/}"
+          for BAZEL_PLATFORM in "${!PLATFORMS[@]}"; do
+            OS_ARCH="${PLATFORMS[$BAZEL_PLATFORM]}"
+            GOOS="${OS_ARCH%%/*}"
+            GOARCH="${OS_ARCH##*/}"
             SUFFIX=""
             if [[ "$GOOS" == "windows" ]]; then SUFFIX=".exe"; fi
 
-            echo "Building cassandra for $GOOS/$GOARCH..."
-            GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
-              -o "dist/cassandra-${GOOS}-${GOARCH}${SUFFIX}" \
-              ./cmd/ai_reviewer
+            echo "Building for $GOOS/$GOARCH using Bazel..."
+            bazel build \
+              --platforms="@rules_go//go/toolchain:${BAZEL_PLATFORM}" \
+              //cmd/ai_reviewer:ai_reviewer \
+              //cmd/github:github
 
-            echo "Building cassandra-github for $GOOS/$GOARCH..."
-            GOOS="$GOOS" GOARCH="$GOARCH" go build \
-              -ldflags="-s -w -X main.version=$RELEASE_VERSION" \
-              -o "dist/cassandra-github-${GOOS}-${GOARCH}${SUFFIX}" \
-              ./cmd/github
+            cp "$(bazel cquery --output=files --platforms=@rules_go//go/toolchain:${BAZEL_PLATFORM} //cmd/ai_reviewer:ai_reviewer)" \
+              "dist/cassandra-${GOOS}-${GOARCH}${SUFFIX}"
+            cp "$(bazel cquery --output=files --platforms=@rules_go//go/toolchain:${BAZEL_PLATFORM} //cmd/github:github)" \
+              "dist/cassandra-github-${GOOS}-${GOARCH}${SUFFIX}"
           done
           ls -lh dist/
       - name: Create GitHub Release
