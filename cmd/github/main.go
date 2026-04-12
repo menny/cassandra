@@ -642,9 +642,15 @@ func getCommits(ctx context.Context, client *github.Client, owner, repo string, 
 			return nil, err
 		}
 		for _, c := range commits {
+			// Skip merge commits to maintain consistency with --no-merges
+			if len(c.Parents) > 1 {
+				continue
+			}
+
 			msg := c.GetCommit().GetMessage()
-			// Extract only the first line (subject)
-			subject := strings.SplitN(msg, "\n", 2)[0]
+			// Normalize newlines and extract only the first line (subject)
+			normalized := strings.ReplaceAll(msg, "\r\n", "\n")
+			subject := strings.SplitN(normalized, "\n", 2)[0]
 			allCommits = append(allCommits, "- "+subject)
 		}
 		if resp.NextPage == 0 {
