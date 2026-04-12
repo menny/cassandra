@@ -65,3 +65,26 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 
 	return diffText, filteredFiles, nil
 }
+
+// FetchGitCommits retrieves a list of commit messages between base and head.
+func FetchGitCommits(workingDir, base, head string) (string, error) {
+	var commitRange string
+	if head == "HEAD" {
+		commitRange = base + "..HEAD"
+	} else {
+		commitRange = fmt.Sprintf("%s..%s", base, head)
+	}
+
+	// Use a clean format for commit messages
+	cmdArgs := []string{"log", "--pretty=format:- %s", "--no-merges", commitRange}
+	cmd := exec.Command("git", cmdArgs...)
+	cmd.Dir = workingDir
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// If git log fails (e.g., shallow clone), we return an error to be handled by the caller.
+		return "", fmt.Errorf("git log %s failed: %v. Output: %s", commitRange, err, string(out))
+	}
+
+	return string(out), nil
+}
