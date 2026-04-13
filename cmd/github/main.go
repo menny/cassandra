@@ -575,12 +575,12 @@ func getDiff(ctx context.Context, client *github.Client, owner, repo string, prN
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
-			// Extract file paths from "diff --git a/path/to/file b/path/to/file"
-			parts := strings.Fields(line)
+			// Extract the b/ path from "diff --git a/path/to/file b/path/to/file".
+			// Using strings.Fields would break for paths containing spaces, so we
+			// split on " b/" from the right to correctly isolate the destination path.
 			isLockFile := false
-			if len(parts) >= 4 {
-				// parts[2] is a/file, parts[3] is b/file
-				pathB := strings.TrimPrefix(parts[3], "b/")
+			if idx := strings.LastIndex(line, " b/"); idx != -1 {
+				pathB := line[idx+3:]
 				for _, lf := range tools.LockFiles {
 					if pathB == lf || strings.HasSuffix(pathB, "/"+lf) {
 						isLockFile = true

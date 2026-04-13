@@ -1,0 +1,58 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@v0
+        with:
+          bazelisk-cache: true
+          disk-cache: cassandra-release
+          repository-cache: true
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          declare -A PLATFORMS=(
+            ["linux_amd64"]="linux/amd64"
+            ["linux_arm64"]="linux/arm64"
+            ["darwin_amd64"]="darwin/amd64"
+            ["darwin_arm64"]="darwin/arm64"
+            ["windows_amd64"]="windows/amd64"
+          )
+          for BAZEL_PLATFORM in "${!PLATFORMS[@]}"; do
+            OS_ARCH="${PLATFORMS[$BAZEL_PLATFORM]}"
+            GOOS="${OS_ARCH%%/*}"
+            GOARCH="${OS_ARCH##*/}"
+            SUFFIX=""
+            if [[ "$GOOS" == "windows" ]]; then SUFFIX=".exe"; fi
+
+            echo "Building for $GOOS/$GOARCH using Bazel..."
+            bazel build \
+              --platforms="@rules_go//go/toolchain:${BAZEL_PLATFORM}" \
+              //cmd/ai_reviewer:ai_reviewer \
+              //cmd/github:github
+
+            cp "$(bazel cquery --output=files --platforms=@rules_go//go/toolchain:${BAZEL_PLATFORM} //cmd/ai_reviewer:ai_reviewer)" \
+              "dist/cassandra-${GOOS}-${GOARCH}${SUFFIX}"
+            cp "$(bazel cquery --output=files --platforms=@rules_go//go/toolchain:${BAZEL_PLATFORM} //cmd/github:github)" \
+              "dist/cassandra-github-${GOOS}-${GOARCH}${SUFFIX}"
+          done
+          ls -lh dist/
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_VERSION" \
+            --generate-notes \
+            --title "Cassandra $RELEASE_VERSION" \
+            dist/cassandra-*

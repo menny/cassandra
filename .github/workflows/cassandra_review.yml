@@ -9,6 +9,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # 'issues: write' is required to post general PR comments via the Issues API.
+      issues: write
     steps:
       - name: Check out code
         uses: actions/checkout@v4
