@@ -131,7 +131,7 @@ func TestAgent_Reporter(t *testing.T) {
 		d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "ok", nil }
 
 		agent := NewAgent(lm, d, WithReporter(spy))
-		_, err := agent.RunReview(context.Background(), "sys", "req", 5, 1024)
+		_, err := agent.RunReview(context.Background(), "sys", "", "req", 5, 1024)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestAgent_Reporter(t *testing.T) {
 			textResponse("direct answer"),
 		}}
 		agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
-		_, err := agent.RunReview(context.Background(), "sys", "req", 5, 1024)
+		_, err := agent.RunReview(context.Background(), "sys", "", "req", 5, 1024)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,7 +221,7 @@ func TestRunReview_DirectResponse(t *testing.T) {
 	lm := &mockLLM{responses: []*llm.Response{
 		textResponse("looks good"),
 	}}
-	got, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "sys", "request", 5, 1024)
+	got, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return wantResult, nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestRunReview_CapReached(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 2, 1024)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 2, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestRunReview_ToolError(t *testing.T) {
 	// bad_tool is not registered → HandleCall will return an error.
 	d := newMockDispatcher()
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 5, 1024)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestRunReview_PreserveAssistantText(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
 
-	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "req", 5, 1024)
+	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "req", 5, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestRunReview_PreserveReasoningAndMetadata(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
 
-	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "req", 5, 1024)
+	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "req", 5, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +470,7 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 	d := newMockDispatcher()
 	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
 
-	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "request", 1, 1024)
+	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 1, 1024)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -482,6 +482,56 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 	if len(lm.calls) != 2 {
 		t.Errorf("expected 2 LLM calls, got %d", len(lm.calls))
 	}
+}
+
+// TestRunReview_CacheBreakpoint verifies that when dynamicSystem is non-empty,
+// the initial history contains two RoleSystem messages with CacheBreakpoint:true
+// on the first, and a single system message without CacheBreakpoint when dynamic
+// is empty.
+func TestRunReview_CacheBreakpoint(t *testing.T) {
+	t.Run("with dynamic content — two system messages, first has CacheBreakpoint", func(t *testing.T) {
+		lm := &mockLLM{responses: []*llm.Response{textResponse("done")}}
+		_, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "stable", "dynamic", "req", 5, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		msgs := lm.calls[0]
+		if len(msgs) < 3 {
+			t.Fatalf("expected at least 3 messages (2 system + 1 user), got %d", len(msgs))
+		}
+		if msgs[0].Role != llm.RoleSystem || msgs[0].Text != "stable" {
+			t.Errorf("msgs[0]: got role=%v text=%q, want RoleSystem text=%q", msgs[0].Role, msgs[0].Text, "stable")
+		}
+		if !msgs[0].CacheBreakpoint {
+			t.Error("msgs[0].CacheBreakpoint should be true for the stable prefix")
+		}
+		if msgs[1].Role != llm.RoleSystem || msgs[1].Text != "dynamic" {
+			t.Errorf("msgs[1]: got role=%v text=%q, want RoleSystem text=%q", msgs[1].Role, msgs[1].Text, "dynamic")
+		}
+		if msgs[1].CacheBreakpoint {
+			t.Error("msgs[1].CacheBreakpoint should be false for the dynamic suffix")
+		}
+	})
+
+	t.Run("without dynamic content — single system message, no CacheBreakpoint", func(t *testing.T) {
+		lm := &mockLLM{responses: []*llm.Response{textResponse("done")}}
+		_, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "stable", "", "req", 5, 1024)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		msgs := lm.calls[0]
+		if len(msgs) != 2 {
+			t.Fatalf("expected 2 messages (1 system + 1 user), got %d", len(msgs))
+		}
+		if msgs[0].Role != llm.RoleSystem || msgs[0].Text != "stable" {
+			t.Errorf("msgs[0]: got role=%v text=%q, want RoleSystem text=%q", msgs[0].Role, msgs[0].Text, "stable")
+		}
+		if msgs[0].CacheBreakpoint {
+			t.Error("msgs[0].CacheBreakpoint should be false when there is no dynamic content")
+		}
+	})
 }
 
 func TestAgent_ExtractStructuredReview(t *testing.T) {

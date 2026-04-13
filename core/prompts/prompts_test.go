@@ -53,8 +53,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	prompt, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
+	stable, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
 	require.NoError(t, err)
+
+	// Combine for checks that don't care about the split point.
+	prompt := stable + dynamic
 
 	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
 	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
@@ -78,18 +81,26 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	// Check folder paths print:
 	require.True(t, strings.Contains(prompt, "Directory: /"))
+
+	// Dynamic content must be non-empty and stable must not contain Zone 3 sections.
+	require.NotEmpty(t, dynamic, "dynamic should contain AGENTS.md and REVIEWERS.md sections")
+	require.False(t, strings.Contains(stable, "SOME REVIEWERS"), "stable should not contain dynamic REVIEWERS.md content")
+	require.False(t, strings.Contains(stable, "SOME AGENTS"), "stable should not contain dynamic AGENTS.md content")
 }
 
 func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	prompt, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
+	stable, dynamic, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
 	require.NoError(t, err)
 
-	require.True(t, strings.Contains(prompt, "You are a code review bot - named Cassandra - for the provided codebase."))
-	require.True(t, strings.Contains(prompt, "<code_review_guidelines>"))
-	require.True(t, strings.Contains(prompt, "CUSTOM GUIDELINES HERE"))
-	require.True(t, strings.Contains(prompt, "<approval_evaluation_guidelines>"))
-	require.True(t, strings.Contains(prompt, "CUSTOM APPROVAL HERE"))
+	require.True(t, strings.Contains(stable, "You are a code review bot - named Cassandra - for the provided codebase."))
+	require.True(t, strings.Contains(stable, "<code_review_guidelines>"))
+	require.True(t, strings.Contains(stable, "CUSTOM GUIDELINES HERE"))
+	require.True(t, strings.Contains(stable, "<approval_evaluation_guidelines>"))
+	require.True(t, strings.Contains(stable, "CUSTOM APPROVAL HERE"))
+
+	// No AGENTS.md or REVIEWERS.md → dynamic should be empty.
+	require.Empty(t, dynamic, "dynamic should be empty when no Zone 3 files exist")
 }

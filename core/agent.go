@@ -131,10 +131,15 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 }
 
 // RunReview executes the ReAct loop.
+// stableSystem is the stable prompt prefix (Zones 1+2); dynamicSystem is the
+// per-PR dynamic suffix (Zone 3, e.g. AGENTS.md / REVIEWERS.md content).
+// When dynamicSystem is non-empty, providers that support prompt caching
+// (e.g. Anthropic) will cache the stable prefix. Pass an empty string for
+// dynamicSystem when there is no per-PR dynamic content.
 // maxIterations controls how many tool-call rounds are permitted before the
 // loop is forcibly terminated. Pass 0 to use the default cap.
 // maxTokens limits the length of the LLM response.
-func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string, maxIterations, maxTokens int) (string, error) {
+func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requestText string, maxIterations, maxTokens int) (string, error) {
 	if maxIterations <= 0 {
 		maxIterations = AbsoluteMaxIter
 	}
@@ -142,9 +147,18 @@ func (a *Agent) RunReview(ctx context.Context, systemPrompt, requestText string,
 		maxTokens = 8192
 	}
 
-	messages := []llm.Message{
-		{Role: llm.RoleSystem, Text: systemPrompt},
-		{Role: llm.RoleUser, Text: requestText},
+	var messages []llm.Message
+	if dynamicSystem != "" {
+		messages = []llm.Message{
+			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
+			{Role: llm.RoleSystem, Text: dynamicSystem},
+			{Role: llm.RoleUser, Text: requestText},
+		}
+	} else {
+		messages = []llm.Message{
+			{Role: llm.RoleSystem, Text: stableSystem},
+			{Role: llm.RoleUser, Text: requestText},
+		}
 	}
 
 	tools := a.registry.ToTools()

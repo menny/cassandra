@@ -31,6 +31,11 @@ type Message struct {
 	ToolResults      []ToolResult
 	Reasoning        string         // Internal reasoning/thought process from the model
 	ProviderMetadata map[string]any // Opaque provider-specific data (e.g. thought signatures)
+	// CacheBreakpoint, when true on a RoleSystem message, marks the end of the
+	// stable cacheable prefix. Providers that support prompt caching (e.g.
+	// Anthropic) use this to inject a cache-control marker; all other providers
+	// ignore it.
+	CacheBreakpoint bool
 }
 
 // ToolCall is a tool invocation requested by the model in an assistant turn.
