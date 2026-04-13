@@ -156,7 +156,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		}
 	} else {
 		messages = []llm.Message{
-			{Role: llm.RoleSystem, Text: stableSystem},
+			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
 			{Role: llm.RoleUser, Text: requestText},
 		}
 	}

@@ -484,10 +484,10 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 	}
 }
 
-// TestRunReview_CacheBreakpoint verifies that when dynamicSystem is non-empty,
-// the initial history contains two RoleSystem messages with CacheBreakpoint:true
-// on the first, and a single system message without CacheBreakpoint when dynamic
-// is empty.
+// TestRunReview_CacheBreakpoint verifies that the stable system message always
+// carries CacheBreakpoint:true so that providers supporting prefix caching
+// (e.g. Anthropic) can cache it unconditionally. When dynamicSystem is
+// non-empty, a second RoleSystem message is emitted without the flag.
 func TestRunReview_CacheBreakpoint(t *testing.T) {
 	t.Run("with dynamic content — two system messages, first has CacheBreakpoint", func(t *testing.T) {
 		lm := &mockLLM{responses: []*llm.Response{textResponse("done")}}
@@ -514,7 +514,7 @@ func TestRunReview_CacheBreakpoint(t *testing.T) {
 		}
 	})
 
-	t.Run("without dynamic content — single system message, no CacheBreakpoint", func(t *testing.T) {
+	t.Run("without dynamic content — single system message, CacheBreakpoint always true", func(t *testing.T) {
 		lm := &mockLLM{responses: []*llm.Response{textResponse("done")}}
 		_, err := newTestAgent(lm, newMockDispatcher()).RunReview(context.Background(), "stable", "", "req", 5, 1024)
 		if err != nil {
@@ -528,8 +528,8 @@ func TestRunReview_CacheBreakpoint(t *testing.T) {
 		if msgs[0].Role != llm.RoleSystem || msgs[0].Text != "stable" {
 			t.Errorf("msgs[0]: got role=%v text=%q, want RoleSystem text=%q", msgs[0].Role, msgs[0].Text, "stable")
 		}
-		if msgs[0].CacheBreakpoint {
-			t.Error("msgs[0].CacheBreakpoint should be false when there is no dynamic content")
+		if !msgs[0].CacheBreakpoint {
+			t.Error("msgs[0].CacheBreakpoint should be true: stable prefix is always cacheable")
 		}
 	})
 }
