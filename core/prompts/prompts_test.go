@@ -65,11 +65,12 @@ func TestBuildSystemPrompt(t *testing.T) {
 	require.True(t, strings.Contains(prompt, "Reject"))
 	require.True(t, strings.Contains(prompt, "Comment"))
 
-	// Check that reviewers is inside code_review_guidelines:
-	guidelinesIndex := strings.Index(prompt, "<code_review_guidelines>")
+	// REVIEWERS.md content must appear in <reviewer_context>, which comes AFTER </code_review_guidelines>.
 	endGuidelinesIndex := strings.Index(prompt, "</code_review_guidelines>")
 	reviewersIndex := strings.Index(prompt, "SOME REVIEWERS")
-	require.True(t, reviewersIndex > guidelinesIndex && reviewersIndex < endGuidelinesIndex, "REVIEWERS.md content should be inside code_review_guidelines")
+	require.True(t, reviewersIndex > endGuidelinesIndex, "REVIEWERS.md content should be outside (after) code_review_guidelines")
+	require.True(t, strings.Contains(prompt, "<reviewer_context>"))
+	require.True(t, strings.Contains(prompt, "</reviewer_context>"))
 
 	// Check AGENTS.md
 	require.True(t, strings.Contains(prompt, "SOME AGENTS"))

@@ -38,6 +38,14 @@ func GetLibraryPrompt(name string) (string, error) {
 // the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
 // in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
 // personal.ai_code_review_guidelines.md located in the workspace root.
+//
+// Sections are ordered from most- to least-stable to maximise prefix-cache hits:
+//  1. reviewerPrompt            — static, embedded at build time
+//  2. <code_review_guidelines>  — semi-static, one value per deployment config
+//  3. <approval_evaluation_guidelines> — semi-static
+//  4. <personal_review_guidelines>     — semi-static, optional
+//  5. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  6. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
 func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent, approvalEvaluationContent string) (string, error) {
 	if mainGuidelinesContent == "" {
 		return "", fmt.Errorf("main guidelines content is required")
@@ -47,16 +55,8 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		approvalEvaluationContent = approvalEvaluationPrompt
 	}
 
-	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent
-
-	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
-	if len(reviewersMDs) > 0 {
-		prompt += "\n\n# Reviewers Guidelines\n"
-		for path, content := range reviewersMDs {
-			prompt += fmt.Sprintf("\nDirectory: %s\n%s\n", path, content)
-		}
-	}
-	prompt += "\n</code_review_guidelines>\n"
+	// Zone 1 (static) + Zone 2 (semi-static) — identical across all PRs on the same config.
+	prompt := reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent + "\n</code_review_guidelines>\n"
 
 	prompt += "\n<approval_evaluation_guidelines>\n" + approvalEvaluationContent + "\n</approval_evaluation_guidelines>\n"
 
@@ -65,6 +65,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		prompt += fmt.Sprintf("\n<personal_review_guidelines>\n%s\n</personal_review_guidelines>\n", string(personalBytes))
 	}
 
+	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.
 	agentsMDs := findRepoFiles(workspaceRoot, changedFiles, "AGENTS.md")
 	if len(agentsMDs) > 0 {
 		prompt += "\n<agents_guidelines>\n"
@@ -72,6 +73,15 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			prompt += fmt.Sprintf("Directory: %s\n%s\n\n", path, content)
 		}
 		prompt += "</agents_guidelines>\n"
+	}
+
+	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
+	if len(reviewersMDs) > 0 {
+		prompt += "\n<reviewer_context>\n"
+		for path, content := range reviewersMDs {
+			prompt += fmt.Sprintf("Directory: %s\n%s\n\n", path, content)
+		}
+		prompt += "</reviewer_context>\n"
 	}
 
 	return prompt, nil
