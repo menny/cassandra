@@ -2,7 +2,7 @@
 
 > *The truth about your code. Seeing bugs before the fall of production. Ignore at your own peril.*
 
-An autonomous code review tool built in Go. This tool provides structured, actionable code reviews using a `Do / Try / Consider` feedback framework.
+An autonomous code review tool built in Go. This tool provides structured, actionable code reviews using a configurable and adjustable feedback framework.
 
 ## Features
 
