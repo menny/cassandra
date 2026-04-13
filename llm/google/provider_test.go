@@ -12,6 +12,29 @@ import (
 
 // ── toContents ────────────────────────────────────────────────────────────────
 
+func TestToContents_MultipleSystemMessages(t *testing.T) {
+	// When two RoleSystem messages are provided (stable + dynamic), their text
+	// must be merged into a single SystemInstruction with two Parts rather than
+	// the second overwriting the first.
+	msgs := []llm.Message{
+		{Role: llm.RoleSystem, Text: "stable instructions", CacheBreakpoint: true},
+		{Role: llm.RoleSystem, Text: "dynamic context"},
+		{Role: llm.RoleUser, Text: "review this diff"},
+	}
+	contents, system, err := toContents(msgs)
+	require.NoError(t, err)
+
+	// System instruction must contain both parts.
+	require.NotNil(t, system)
+	require.Len(t, system.Parts, 2, "both system messages should be merged into SystemInstruction")
+	assert.Equal(t, "stable instructions", system.Parts[0].Text)
+	assert.Equal(t, "dynamic context", system.Parts[1].Text)
+
+	// User message goes into the conversation turn slice as normal.
+	require.Len(t, contents, 1)
+	assert.Equal(t, "user", contents[0].Role)
+}
+
 func TestToContents_System(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: llm.RoleSystem, Text: "you are a reviewer"},
