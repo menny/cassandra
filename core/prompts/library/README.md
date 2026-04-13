@@ -106,8 +106,8 @@ Content that varies per PR: `AGENTS.md` and `REVIEWERS.md` files discovered by w
 
 | Provider | Minimum cacheable prefix | Notes |
 |---|---|---|
-| **Gemini 2.5** (implicit) | ~1,024–4,096 tokens | Cache is managed automatically; no explicit API calls needed. |
-| **Anthropic** (`cache_control`) | ~1,024 tokens | Insert `cache_control` breakpoints at Zone 1/2 boundaries. |
+| **Gemini 2.5** (implicit) | 1,024 tokens (Flash) / 2,048 tokens (Pro) | Cache is managed automatically; no explicit API calls needed. Verify current thresholds in the [Gemini documentation](https://ai.google.dev/gemini-api/docs/caching). |
+| **Anthropic** (`cache_control`) | 1,024 tokens | Insert `cache_control` breakpoints at Zone 1/2 boundaries. |
 
 Zones 1+2 together easily exceed these thresholds for any non-trivial guideline file, making every repeated review of the same repository eligible for a cache hit.
 
