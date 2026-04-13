@@ -19,13 +19,11 @@ jobs:
     permissions:
       contents: read
 
-    # You can define any steps you want, and they will run before the agent starts.
-    # If you do not check out your code, Copilot will do this for you.
     steps:
+      - uses: actions/checkout@v4
       - name: Setup Bazel environment
-        uses: bazel-contrib/setup-bazel@0.8.1
+        uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
-          disk-cache: true
-          external-cache: true
+          disk-cache: copilot-cache
           repository-cache: true
