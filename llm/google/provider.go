@@ -96,8 +96,12 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 	for _, m := range messages {
 		switch m.Role {
 		case llm.RoleSystem:
-			system = &genai.Content{
-				Parts: []*genai.Part{{Text: m.Text}},
+			if system == nil {
+				system = &genai.Content{
+					Parts: []*genai.Part{{Text: m.Text}},
+				}
+			} else {
+				system.Parts = append(system.Parts, &genai.Part{Text: m.Text})
 			}
 
 		case llm.RoleUser:

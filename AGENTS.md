@@ -72,6 +72,11 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ### 5. Token Efficiency
 - **Mindful Generation**: When designing LLM interactions (prompts, schemas, or post-processing), prioritize strategies that minimize output tokens. Avoid asking the model to echo large amounts of existing text; instead, prefer manual assembly or reference-based extraction to reduce latency and API costs.
 
+### 6. Prompt Engineering & Prefix Caching
+- **Zone ordering**: The system prompt is divided into three zones ordered from most- to least-stable (see `core/prompts/library/README.md` for the full Prompt Developer Guide). When editing `BuildSystemPrompt` or any prompt file, **never inject dynamic or per-request data (file paths, PR metadata, commit SHAs) into Zone 1 or Zone 2**. All such content belongs in Zone 3 (the dynamic suffix).
+- **Byte-for-byte stability**: Any change to `reviewer_prompt.md`, a library guideline file, or the `approval_evaluation_prompt.md` will invalidate the prefix cache for every subsequent review using that configuration. Review such changes carefully and keep them minimal.
+- **New sections**: If you add a new semi-static section to `BuildSystemPrompt`, insert it between the existing Zone 2 entries and before the Zone 3 block (AGENTS.md / REVIEWERS.md), maintaining the stable-prefix ordering described in the design.
+
 ## Security Standards
 
 ### 1. GitHub Action Input Safety

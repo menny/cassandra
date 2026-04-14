@@ -130,7 +130,11 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 	for _, m := range messages {
 		switch m.Role {
 		case llm.RoleSystem:
-			system = append(system, anthropicsdk.TextBlockParam{Text: m.Text})
+			block := anthropicsdk.TextBlockParam{Text: m.Text}
+			if m.CacheBreakpoint {
+				block.CacheControl = anthropicsdk.NewCacheControlEphemeralParam()
+			}
+			system = append(system, block)
 
 		case llm.RoleUser:
 			params = append(params, anthropicsdk.NewUserMessage(

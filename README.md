@@ -256,3 +256,7 @@ Alternatively, set `submit_review_action: 'false'` to use comment-only mode.
 
 The project features a lean, custom native Go ReAct loop. Provider-specific interactions are handled via native SDKs (not `langchaingo`). Tools for codebase context gathering are injected securely through model-native Function Calling capabilities.
 
+## Token Efficiency
+
+Cassandra structures every system prompt with static content first and dynamic, per-PR content last. This "stable-prefix" ordering means the large, unchanging portion of the prompt — reviewer instructions, the chosen review guideline, and approval rules — is byte-for-byte identical across all reviews of the same repository. Both Anthropic (via `cache_control` breakpoints) and Google Gemini 2.5 (via implicit prefix caching) can reuse cached intermediate states for this prefix, reducing input token costs by up to 75–90% and cutting the time-to-first-token on repeated reviews of the same repository.
+

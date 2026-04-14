@@ -230,12 +230,12 @@ func main() {
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
-	systemPrompt, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, approvalEvaluationContent)
+	systemStable, systemDynamic, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, approvalEvaluationContent)
 	if err != nil {
 		log.Fatalf("Failed to build system prompt: %v", err)
 	}
 
-	result, err := agent.RunReview(ctx, systemPrompt, requestText, maxIterations, maxTokens)
+	result, err := agent.RunReview(ctx, systemStable, systemDynamic, requestText, maxIterations, maxTokens)
 	if err != nil {
 		log.Fatalf("Review failed: %v", err)
 	}

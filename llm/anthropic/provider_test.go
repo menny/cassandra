@@ -21,6 +21,26 @@ func TestToAnthropicMessages_System(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, system, 1)
 	assert.Empty(t, params)
+	// No CacheBreakpoint → CacheControl must be zero-value (not sent).
+	assert.Equal(t, "", string(system[0].CacheControl.Type), "CacheControl.Type should be empty when CacheBreakpoint is false")
+}
+
+func TestToAnthropicMessages_SystemWithCacheBreakpoint(t *testing.T) {
+	msgs := []llm.Message{
+		{Role: llm.RoleSystem, Text: "stable prefix", CacheBreakpoint: true},
+		{Role: llm.RoleSystem, Text: "dynamic suffix"},
+	}
+	system, _, err := toAnthropicMessages(msgs)
+	require.NoError(t, err)
+	require.Len(t, system, 2)
+
+	// First block: cache_control must be set to "ephemeral".
+	assert.Equal(t, "ephemeral", string(system[0].CacheControl.Type),
+		"stable block should carry ephemeral cache_control")
+
+	// Second block: no cache_control.
+	assert.Equal(t, "", string(system[1].CacheControl.Type),
+		"dynamic block should not carry a cache_control marker")
 }
 
 func TestToAnthropicMessages_UserAndAssistant(t *testing.T) {
