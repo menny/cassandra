@@ -88,6 +88,67 @@ func TestBuildSystemPrompt(t *testing.T) {
 	require.False(t, strings.Contains(stable, "SOME AGENTS"), "stable should not contain dynamic AGENTS.md content")
 }
 
+// TestBuildSystemPrompt_DeterministicZone3Ordering verifies that when multiple
+// AGENTS.md or REVIEWERS.md files are discovered the dynamic suffix always lists
+// them in sorted (ascending) path order, regardless of Go's randomized map
+// iteration order.
+func TestBuildSystemPrompt_DeterministicZone3Ordering(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Create three sub-directories each containing an AGENTS.md and a REVIEWERS.md.
+	// Use names that would easily surface ordering bugs: gamma < beta < alpha is
+	// reverse-alphabetical, so any test relying on insertion order would catch it.
+	dirs := []string{"alpha", "beta", "gamma"}
+	for _, d := range dirs {
+		require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, d), 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmpDir, d, "AGENTS.md"),
+			[]byte(d+" agents content"),
+			0o644,
+		))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(tmpDir, d, "REVIEWERS.md"),
+			[]byte(d+" reviewers content"),
+			0o644,
+		))
+	}
+
+	changedFiles := []string{"alpha/a.go", "beta/b.go", "gamma/c.go"}
+
+	// Run BuildSystemPrompt multiple times to catch non-determinism that only
+	// appears probabilistically due to random map iteration.
+	const runs = 20
+	var firstDynamic string
+	for i := range runs {
+		_, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", "")
+		require.NoError(t, err)
+		if i == 0 {
+			firstDynamic = dynamic
+		} else {
+			require.Equal(t, firstDynamic, dynamic,
+				"dynamic Zone 3 output differs between run 0 and run %d — non-deterministic ordering detected", i)
+		}
+	}
+
+	// Also assert the concrete sorted order: alpha → beta → gamma.
+	alphaAgentsIdx := strings.Index(firstDynamic, "alpha agents content")
+	betaAgentsIdx := strings.Index(firstDynamic, "beta agents content")
+	gammaAgentsIdx := strings.Index(firstDynamic, "gamma agents content")
+	require.True(t, alphaAgentsIdx < betaAgentsIdx,
+		"alpha/AGENTS.md should appear before beta/AGENTS.md in dynamic output")
+	require.True(t, betaAgentsIdx < gammaAgentsIdx,
+		"beta/AGENTS.md should appear before gamma/AGENTS.md in dynamic output")
+
+	alphaReviewersIdx := strings.Index(firstDynamic, "alpha reviewers content")
+	betaReviewersIdx := strings.Index(firstDynamic, "beta reviewers content")
+	gammaReviewersIdx := strings.Index(firstDynamic, "gamma reviewers content")
+	require.True(t, alphaReviewersIdx < betaReviewersIdx,
+		"alpha/REVIEWERS.md should appear before beta/REVIEWERS.md in dynamic output")
+	require.True(t, betaReviewersIdx < gammaReviewersIdx,
+		"beta/REVIEWERS.md should appear before gamma/REVIEWERS.md in dynamic output")
+}
+
 func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
