@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 //go:embed reviewer_prompt.md
@@ -111,7 +112,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(agentPaths)
 		for _, p := range agentPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, agentsMDs[p])
-			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: filepath.Join(p, "AGENTS.md"), Type: "agents"})
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: strings.TrimLeft(filepath.Join(p, "AGENTS.md"), "/"), Type: "agents"})
 		}
 		dynamic += "</agents_guidelines>\n"
 	}
@@ -126,7 +127,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(reviewerPaths)
 		for _, p := range reviewerPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, reviewersMDs[p])
-			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: filepath.Join(p, "REVIEWERS.md"), Type: "reviewers"})
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: strings.TrimLeft(filepath.Join(p, "REVIEWERS.md"), "/"), Type: "reviewers"})
 		}
 		dynamic += "</reviewer_context>\n"
 	}
