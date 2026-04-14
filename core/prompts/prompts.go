@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 )
 
 //go:embed reviewer_prompt.md
@@ -79,8 +80,13 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	agentsMDs := findRepoFiles(workspaceRoot, changedFiles, "AGENTS.md")
 	if len(agentsMDs) > 0 {
 		dynamic += "\n<agents_guidelines>\n"
-		for path, content := range agentsMDs {
-			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", path, content)
+		agentPaths := make([]string, 0, len(agentsMDs))
+		for p := range agentsMDs {
+			agentPaths = append(agentPaths, p)
+		}
+		sort.Strings(agentPaths)
+		for _, p := range agentPaths {
+			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, agentsMDs[p])
 		}
 		dynamic += "</agents_guidelines>\n"
 	}
@@ -88,8 +94,13 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	reviewersMDs := findRepoFiles(workspaceRoot, changedFiles, "REVIEWERS.md")
 	if len(reviewersMDs) > 0 {
 		dynamic += "\n<reviewer_context>\n"
-		for path, content := range reviewersMDs {
-			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", path, content)
+		reviewerPaths := make([]string, 0, len(reviewersMDs))
+		for p := range reviewersMDs {
+			reviewerPaths = append(reviewerPaths, p)
+		}
+		sort.Strings(reviewerPaths)
+		for _, p := range reviewerPaths {
+			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, reviewersMDs[p])
 		}
 		dynamic += "</reviewer_context>\n"
 	}
