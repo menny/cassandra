@@ -53,7 +53,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	stable, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
 	require.NoError(t, err)
 
 	// Combine for checks that don't care about the split point.
@@ -121,7 +121,7 @@ func TestBuildSystemPrompt_DeterministicZone3Ordering(t *testing.T) {
 	const runs = 20
 	var firstDynamic string
 	for i := range runs {
-		_, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", "")
+		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", "")
 		require.NoError(t, err)
 		if i == 0 {
 			firstDynamic = dynamic
@@ -153,7 +153,7 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	stable, dynamic, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "You are a code review bot - named Cassandra - for the provided codebase."))
