@@ -35,12 +35,31 @@ func GetLibraryPrompt(name string) (string, error) {
 	return string(content), nil
 }
 
+// FileSource describes a file that was loaded into the system prompt.
+type FileSource struct {
+	// Path is the repo-relative path of the loaded file.
+	Path string
+	// Type describes the role of the file: "personal", "agents", or "reviewers".
+	Type string
+}
+
+// PromptSummary contains metadata about a built system prompt.
+type PromptSummary struct {
+	// StableLen is the character length of the stable Zone 1+2 prefix.
+	StableLen int
+	// DynamicLen is the character length of the dynamic Zone 3 suffix.
+	DynamicLen int
+	// LoadedFiles lists every file that was read and incorporated into the prompt.
+	LoadedFiles []FileSource
+}
+
 // BuildSystemPrompt constructs the full system prompt by combining base prompts,
 // the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
 // in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
 // personal.ai_code_review_guidelines.md located in the workspace root.
 //
-// It returns two strings: the stable prefix (Zones 1+2) and the dynamic suffix (Zone 3).
+// It returns two strings: the stable prefix (Zones 1+2) and the dynamic suffix (Zone 3),
+// plus a [PromptSummary] describing the lengths and loaded files.
 // The stable prefix is identical across all PRs sharing the same deployment config; the
 // dynamic suffix varies per PR. Callers may concatenate them for providers that need a
 // single prompt, or pass them separately to enable prompt-caching on providers that
@@ -57,9 +76,9 @@ func GetLibraryPrompt(name string) (string, error) {
 // Dynamic (Zone 3):
 //  5. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
 //  6. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent, approvalEvaluationContent string) (stable, dynamic string, err error) {
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent, approvalEvaluationContent string) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
-		return "", "", fmt.Errorf("main guidelines content is required")
+		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
 
 	if approvalEvaluationContent == "" {
@@ -74,6 +93,11 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	personalPath := filepath.Join(workspaceRoot, "personal.ai_code_review_guidelines.md")
 	if personalBytes, err := os.ReadFile(personalPath); err == nil {
 		stable += fmt.Sprintf("\n<personal_review_guidelines>\n%s\n</personal_review_guidelines>\n", string(personalBytes))
+		relPersonal, relErr := filepath.Rel(workspaceRoot, personalPath)
+		if relErr != nil {
+			relPersonal = personalPath
+		}
+		summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: relPersonal, Type: "personal"})
 	}
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.
@@ -87,6 +111,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(agentPaths)
 		for _, p := range agentPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, agentsMDs[p])
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: repoRelativeFilePath(p, "AGENTS.md"), Type: "agents"})
 		}
 		dynamic += "</agents_guidelines>\n"
 	}
@@ -101,11 +126,26 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(reviewerPaths)
 		for _, p := range reviewerPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, reviewersMDs[p])
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: repoRelativeFilePath(p, "REVIEWERS.md"), Type: "reviewers"})
 		}
 		dynamic += "</reviewer_context>\n"
 	}
 
-	return stable, dynamic, nil
+	summary.StableLen = len(stable)
+	summary.DynamicLen = len(dynamic)
+
+	return stable, dynamic, summary, nil
+}
+
+// repoRelativeFilePath returns the repo-relative path for a file inside the
+// directory returned by findRepoFiles. findRepoFiles uses "/" to represent the
+// workspace root, so we must not join that sentinel value with filepath.Join —
+// doing so would produce an absolute path like "/AGENTS.md".
+func repoRelativeFilePath(dir, filename string) string {
+	if dir == "/" {
+		return filename
+	}
+	return filepath.Join(dir, filename)
 }
 
 // findRepoFiles walks up the directory tree for each changed file from the file's dir

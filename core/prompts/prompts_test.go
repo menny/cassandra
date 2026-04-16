@@ -53,7 +53,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	stable, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", "")
 	require.NoError(t, err)
 
 	// Combine for checks that don't care about the split point.
@@ -121,7 +121,7 @@ func TestBuildSystemPrompt_DeterministicZone3Ordering(t *testing.T) {
 	const runs = 20
 	var firstDynamic string
 	for i := range runs {
-		_, dynamic, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", "")
+		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", "")
 		require.NoError(t, err)
 		if i == 0 {
 			firstDynamic = dynamic
@@ -153,7 +153,7 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	stable, dynamic, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", "CUSTOM APPROVAL HERE")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "You are a code review bot - named Cassandra - for the provided codebase."))
@@ -164,4 +164,57 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 
 	// No AGENTS.md or REVIEWERS.md → dynamic should be empty.
 	require.Empty(t, dynamic, "dynamic should be empty when no Zone 3 files exist")
+}
+
+// TestBuildSystemPrompt_Summary verifies that the returned PromptSummary is
+// correctly populated: lengths match the actual strings, and LoadedFiles has the
+// right entries with proper repo-relative paths (no leading slash even for
+// root-level files).
+func TestBuildSystemPrompt_Summary(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Root-level context files – their paths in LoadedFiles must not start with "/".
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("root agents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "REVIEWERS.md"), []byte("root reviewers"), 0o644))
+
+	// Nested REVIEWERS.md so we also exercise sub-directory path construction.
+	nestedDir := filepath.Join(tmpDir, "pkg", "sub")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "REVIEWERS.md"), []byte("nested reviewers"), 0o644))
+
+	// Personal guidelines file – also stable zone.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "personal.ai_code_review_guidelines.md"),
+		[]byte("personal prefs"),
+		0o644,
+	))
+
+	changedFiles := []string{"main.go", "pkg/sub/helper.go"}
+	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", "")
+	require.NoError(t, err)
+
+	// Lengths must match the actual strings.
+	require.Equal(t, len(stable), summary.StableLen)
+	require.Equal(t, len(dynamic), summary.DynamicLen)
+	require.Greater(t, summary.StableLen, 0)
+	require.Greater(t, summary.DynamicLen, 0)
+
+	// Build an index of loaded files for easy lookup.
+	type fileKey struct{ path, typ string }
+	loaded := make(map[fileKey]bool, len(summary.LoadedFiles))
+	for _, f := range summary.LoadedFiles {
+		loaded[fileKey{f.Path, f.Type}] = true
+		// No file path should be rooted.
+		require.False(t, filepath.IsAbs(f.Path), "LoadedFiles path must not be absolute: %q", f.Path)
+	}
+
+	require.True(t, loaded[fileKey{"personal.ai_code_review_guidelines.md", "personal"}],
+		"personal guidelines file should be in LoadedFiles")
+	require.True(t, loaded[fileKey{"AGENTS.md", "agents"}],
+		"root AGENTS.md should appear as 'AGENTS.md' (no leading slash)")
+	require.True(t, loaded[fileKey{"REVIEWERS.md", "reviewers"}],
+		"root REVIEWERS.md should appear as 'REVIEWERS.md' (no leading slash)")
+	require.True(t, loaded[fileKey{filepath.Join("pkg", "sub", "REVIEWERS.md"), "reviewers"}],
+		"nested REVIEWERS.md should appear with its relative path")
 }
