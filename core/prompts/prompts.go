@@ -7,7 +7,6 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 //go:embed reviewer_prompt.md
@@ -112,7 +111,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(agentPaths)
 		for _, p := range agentPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, agentsMDs[p])
-			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: strings.TrimLeft(filepath.Join(p, "AGENTS.md"), "/"), Type: "agents"})
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: repoRelativeFilePath(p, "AGENTS.md"), Type: "agents"})
 		}
 		dynamic += "</agents_guidelines>\n"
 	}
@@ -127,7 +126,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		sort.Strings(reviewerPaths)
 		for _, p := range reviewerPaths {
 			dynamic += fmt.Sprintf("Directory: %s\n%s\n\n", p, reviewersMDs[p])
-			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: strings.TrimLeft(filepath.Join(p, "REVIEWERS.md"), "/"), Type: "reviewers"})
+			summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: repoRelativeFilePath(p, "REVIEWERS.md"), Type: "reviewers"})
 		}
 		dynamic += "</reviewer_context>\n"
 	}
@@ -136,6 +135,17 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	summary.DynamicLen = len(dynamic)
 
 	return stable, dynamic, summary, nil
+}
+
+// repoRelativeFilePath returns the repo-relative path for a file inside the
+// directory returned by findRepoFiles. findRepoFiles uses "/" to represent the
+// workspace root, so we must not join that sentinel value with filepath.Join —
+// doing so would produce an absolute path like "/AGENTS.md".
+func repoRelativeFilePath(dir, filename string) string {
+	if dir == "/" {
+		return filename
+	}
+	return filepath.Join(dir, filename)
 }
 
 // findRepoFiles walks up the directory tree for each changed file from the file's dir

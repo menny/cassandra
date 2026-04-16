@@ -165,3 +165,56 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	// No AGENTS.md or REVIEWERS.md → dynamic should be empty.
 	require.Empty(t, dynamic, "dynamic should be empty when no Zone 3 files exist")
 }
+
+// TestBuildSystemPrompt_Summary verifies that the returned PromptSummary is
+// correctly populated: lengths match the actual strings, and LoadedFiles has the
+// right entries with proper repo-relative paths (no leading slash even for
+// root-level files).
+func TestBuildSystemPrompt_Summary(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Root-level context files – their paths in LoadedFiles must not start with "/".
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("root agents"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "REVIEWERS.md"), []byte("root reviewers"), 0o644))
+
+	// Nested REVIEWERS.md so we also exercise sub-directory path construction.
+	nestedDir := filepath.Join(tmpDir, "pkg", "sub")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "REVIEWERS.md"), []byte("nested reviewers"), 0o644))
+
+	// Personal guidelines file – also stable zone.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tmpDir, "personal.ai_code_review_guidelines.md"),
+		[]byte("personal prefs"),
+		0o644,
+	))
+
+	changedFiles := []string{"main.go", "pkg/sub/helper.go"}
+	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", "")
+	require.NoError(t, err)
+
+	// Lengths must match the actual strings.
+	require.Equal(t, len(stable), summary.StableLen)
+	require.Equal(t, len(dynamic), summary.DynamicLen)
+	require.Greater(t, summary.StableLen, 0)
+	require.Greater(t, summary.DynamicLen, 0)
+
+	// Build an index of loaded files for easy lookup.
+	type fileKey struct{ path, typ string }
+	loaded := make(map[fileKey]bool, len(summary.LoadedFiles))
+	for _, f := range summary.LoadedFiles {
+		loaded[fileKey{f.Path, f.Type}] = true
+		// No file path should be rooted.
+		require.False(t, filepath.IsAbs(f.Path), "LoadedFiles path must not be absolute: %q", f.Path)
+	}
+
+	require.True(t, loaded[fileKey{"personal.ai_code_review_guidelines.md", "personal"}],
+		"personal guidelines file should be in LoadedFiles")
+	require.True(t, loaded[fileKey{"AGENTS.md", "agents"}],
+		"root AGENTS.md should appear as 'AGENTS.md' (no leading slash)")
+	require.True(t, loaded[fileKey{"REVIEWERS.md", "reviewers"}],
+		"root REVIEWERS.md should appear as 'REVIEWERS.md' (no leading slash)")
+	require.True(t, loaded[fileKey{filepath.Join("pkg", "sub", "REVIEWERS.md"), "reviewers"}],
+		"nested REVIEWERS.md should appear with its relative path")
+}
