@@ -42,6 +42,7 @@ type Reporter interface {
 	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
 	ReportExtraction()
+	ReportExtractionRetry(attempt int)
 	ReportCapReached(maxIterations int)
 }
 
@@ -87,6 +88,10 @@ func (r *defaultReporter) ReportFinalReview() {
 
 func (r *defaultReporter) ReportExtraction() {
 	fmt.Fprintln(r.w, "Cassandra is extracting structured JSON findings...")
+}
+
+func (r *defaultReporter) ReportExtractionRetry(attempt int) {
+	fmt.Fprintf(r.w, "Extraction attempt %d failed; retrying...\n", attempt)
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
@@ -207,8 +212,14 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
 }
 
+// extractionMaxAttempts is the number of total attempts for structured extraction
+// (LLM call + JSON parse), including the initial attempt.
+const extractionMaxAttempts = 3
+
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.
+// If the LLM returns malformed JSON, the call is retried up to extractionMaxAttempts
+// times total so that non-determinism in the LLM output can be overcome.
 func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt, rawReview string, config llm.StructuredConfig) (*StructuredReview, error) {
 	a.reporter.ReportExtraction()
 
@@ -217,24 +228,36 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		{Role: llm.RoleUser, Text: rawReview},
 	}
 
-	resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
-	if err != nil {
-		return nil, fmt.Errorf("extraction failed: %w", err)
+	var lastErr error
+	for attempt := range extractionMaxAttempts {
+		if attempt > 0 {
+			a.reporter.ReportExtractionRetry(attempt + 1)
+		}
+
+		resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
+		if err != nil {
+			lastErr = fmt.Errorf("extraction failed: %w", err)
+			continue
+		}
+
+		a.reporter.ReportUsage(resp.Usage)
+		a.trackUsage(resp.Usage)
+
+		if resp.Text == "" {
+			lastErr = fmt.Errorf("extraction returned empty content")
+			continue
+		}
+
+		var review StructuredReview
+		if err := json.Unmarshal([]byte(resp.Text), &review); err != nil {
+			lastErr = fmt.Errorf("failed to parse structured review: %w\nRaw output: %s", err, resp.Text)
+			continue
+		}
+
+		return &review, nil
 	}
 
-	a.reporter.ReportUsage(resp.Usage)
-	a.trackUsage(resp.Usage)
-
-	if resp.Text == "" {
-		return nil, fmt.Errorf("extraction returned empty content")
-	}
-
-	var review StructuredReview
-	if err := json.Unmarshal([]byte(resp.Text), &review); err != nil {
-		return nil, fmt.Errorf("failed to parse structured review: %w\nRaw output: %s", err, resp.Text)
-	}
-
-	return &review, nil
+	return nil, lastErr
 }
 
 func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {

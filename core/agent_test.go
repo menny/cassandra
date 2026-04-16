@@ -98,22 +98,28 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 
 // spyReporter records method calls for verification.
 type spyReporter struct {
-	iterations   []int
-	toolCalls    []llm.ToolCall
-	usage        []llm.Usage
-	finalReviews int
-	extractions  int
-	capsReached  []int
+	iterations        []int
+	toolCalls         []llm.ToolCall
+	usage             []llm.Usage
+	finalReviews      int
+	extractions       int
+	extractionRetries []int
+	capsReached       []int
 }
 
-func (s *spyReporter) ReportIteration(iter int)       { s.iterations = append(s.iterations, iter) }
-func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
-func (s *spyReporter) ReportUsage(usage llm.Usage)    { s.usage = append(s.usage, usage) }
-func (s *spyReporter) ReportUsageSummary(usage llm.Usage) {
-	// recording for completeness if needed
+func (s *spyReporter) ReportIteration(iter int) {
+	s.iterations = append(s.iterations, iter)
 }
-func (s *spyReporter) ReportFinalReview()       { s.finalReviews++ }
-func (s *spyReporter) ReportExtraction()        { s.extractions++ }
+func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
+func (s *spyReporter) ReportUsage(usage llm.Usage) {
+	s.usage = append(s.usage, usage)
+}
+func (s *spyReporter) ReportUsageSummary(_ llm.Usage) {}
+func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
+func (s *spyReporter) ReportExtraction()              { s.extractions++ }
+func (s *spyReporter) ReportExtractionRetry(attempt int) {
+	s.extractionRetries = append(s.extractionRetries, attempt)
+}
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -609,5 +615,66 @@ func TestCalculateMaxIterations(t *testing.T) {
 				t.Errorf("CalculateMaxIterations(%d) = %d, want %d", tt.changedFiles, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestExtractStructuredReview_RetryOnBadJSON verifies that ExtractStructuredReview
+// retries when the LLM returns malformed JSON, and succeeds on the second attempt.
+func TestExtractStructuredReview_RetryOnBadJSON(t *testing.T) {
+	validJSON := `{"approval":{"approved":true,"rationale":"ok","action":"APPROVE"},"files_review":[]}`
+
+	// First response: bad JSON. Second response: valid JSON.
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse("not-json"),
+		textResponse(validJSON),
+	}}
+
+	spy := &spyReporter{}
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+
+	got, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Approval.Approved {
+		t.Errorf("expected approved=true")
+	}
+
+	// Should have made 2 LLM calls.
+	if lm.callIdx != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", lm.callIdx)
+	}
+
+	// The retry should have been reported once (for the 2nd attempt).
+	if len(spy.extractionRetries) != 1 || spy.extractionRetries[0] != 2 {
+		t.Errorf("expected extractionRetries=[2], got %v", spy.extractionRetries)
+	}
+
+	// ReportExtraction should have been called exactly once at the start.
+	if spy.extractions != 1 {
+		t.Errorf("expected 1 extraction report, got %d", spy.extractions)
+	}
+}
+
+// TestExtractStructuredReview_ExhaustsRetries verifies that ExtractStructuredReview
+// returns an error after exhausting all attempts.
+func TestExtractStructuredReview_ExhaustsRetries(t *testing.T) {
+	// All responses are bad JSON.
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse("bad1"),
+		textResponse("bad2"),
+		textResponse("bad3"),
+	}}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+
+	// Should have made exactly extractionMaxAttempts calls.
+	if lm.callIdx != extractionMaxAttempts {
+		t.Errorf("expected %d LLM calls, got %d", extractionMaxAttempts, lm.callIdx)
 	}
 }

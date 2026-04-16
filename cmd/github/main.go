@@ -182,6 +182,53 @@ func parseRepo(fullName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// retryableStatusCodes are HTTP status codes that indicate a transient failure
+// on the GitHub API side and are safe to retry.
+var retryableStatusCodes = map[int]bool{
+	429: true, // Too Many Requests
+	500: true, // Internal Server Error
+	502: true, // Bad Gateway
+	503: true, // Service Unavailable
+	504: true, // Gateway Timeout
+}
+
+// retryGitHubWrite retries fn up to maxAttempts times (total) when the GitHub
+// API returns a transient status code, using exponential back-off starting at
+// 1 second. It returns the last HTTP response and error so that callers can
+// still inspect the status code for non-transient failures (e.g. 422).
+// The 422 status code is NOT retried because it indicates a structural/semantic
+// error that requires caller-side fallback logic.
+// Context cancellation is respected: if ctx is done during a back-off sleep,
+// the function returns immediately with ctx.Err().
+func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), maxAttempts int) (*github.Response, error) {
+	baseDelay := time.Second
+	var (
+		lastResp *github.Response
+		lastErr  error
+	)
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return lastResp, ctx.Err()
+			case <-time.After(baseDelay):
+				baseDelay *= 2
+			}
+		}
+		resp, err := fn()
+		if err == nil {
+			return resp, nil
+		}
+		lastResp = resp
+		lastErr = err
+		if resp != nil && !retryableStatusCodes[resp.StatusCode] {
+			// Non-transient error — surface immediately without further retries.
+			return resp, err
+		}
+	}
+	return lastResp, lastErr
+}
+
 // wrapTag wraps a raw slug into a hidden HTML comment tag with an optional prefix.
 // It sanitizes the slug to ensure it cannot break out of the HTML comment.
 func wrapTag(slug, prefix string) string {
@@ -274,15 +321,21 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	}
 
 	if latestCommentID != 0 {
-		_, _, err := client.Issues.EditComment(ctx, owner, repo, latestCommentID, &github.IssueComment{
-			Body: github.Ptr(content),
-		})
+		_, err := retryGitHubWrite(ctx, func() (*github.Response, error) {
+			_, resp, err := client.Issues.EditComment(ctx, owner, repo, latestCommentID, &github.IssueComment{
+				Body: github.Ptr(content),
+			})
+			return resp, err
+		}, 3)
 		return err
 	}
 
-	_, _, err = client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
-		Body: github.Ptr(content),
-	})
+	_, err = retryGitHubWrite(ctx, func() (*github.Response, error) {
+		_, resp, err := client.Issues.CreateComment(ctx, owner, repo, prNumber, &github.IssueComment{
+			Body: github.Ptr(content),
+		})
+		return resp, err
+	}, 3)
 	return err
 }
 
@@ -483,7 +536,10 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		Comments: comments,
 	}
 
-	_, resp, err := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+	resp, err := retryGitHubWrite(ctx, func() (*github.Response, error) {
+		_, r, e := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+		return r, e
+	}, 3)
 	if err != nil {
 		// 422 Fallback logic
 		if resp != nil && resp.StatusCode == 422 {
@@ -496,7 +552,10 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 				reviewRequest.Event = github.Ptr("COMMENT")
 
 				// Try again with COMMENT action, keeping inline comments
-				_, resp, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				resp, err = retryGitHubWrite(ctx, func() (*github.Response, error) {
+					_, r, e := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+					return r, e
+				}, 3)
 				if err == nil {
 					return nil
 				}
@@ -521,7 +580,10 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 				}
 				reviewRequest.Body = github.Ptr(sb.String())
 
-				_, _, err = client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+				_, err = retryGitHubWrite(ctx, func() (*github.Response, error) {
+					_, r, e := client.PullRequests.CreateReview(ctx, owner, repo, prNumber, reviewRequest)
+					return r, e
+				}, 3)
 				return err
 			}
 		}
@@ -544,11 +606,14 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 				continue
 			}
 			if strings.Contains(r.GetBody(), tag) && r.GetState() != "DISMISSED" {
-				_, _, err := client.PullRequests.DismissReview(ctx, owner, repo, prNumber, r.GetID(), &github.PullRequestReviewDismissalRequest{
-					Message: github.Ptr("Superseded by a new AI review."),
-				})
-				if err != nil {
-					log.Printf("Warning: failed to dismiss review %d: %v", r.GetID(), err)
+				reviewID := r.GetID()
+				if _, err := retryGitHubWrite(ctx, func() (*github.Response, error) {
+					_, resp, err := client.PullRequests.DismissReview(ctx, owner, repo, prNumber, reviewID, &github.PullRequestReviewDismissalRequest{
+						Message: github.Ptr("Superseded by a new AI review."),
+					})
+					return resp, err
+				}, 3); err != nil {
+					log.Printf("Warning: failed to dismiss review %d: %v", reviewID, err)
 				}
 			}
 		}
