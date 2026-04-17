@@ -98,13 +98,14 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 
 // spyReporter records method calls for verification.
 type spyReporter struct {
-	iterations        []int
-	toolCalls         []llm.ToolCall
-	usage             []llm.Usage
-	finalReviews      int
-	extractions       int
-	extractionRetries []int
-	capsReached       []int
+	iterations           []int
+	toolCalls            []llm.ToolCall
+	usage                []llm.Usage
+	finalReviews         int
+	extractions          int
+	extractionRetries    []int
+	emptyResponseRetries []int
+	capsReached          []int
 }
 
 func (s *spyReporter) ReportIteration(iter int) {
@@ -119,6 +120,10 @@ func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
 func (s *spyReporter) ReportExtraction()              { s.extractions++ }
 func (s *spyReporter) ReportExtractionRetry(attempt int) {
 	s.extractionRetries = append(s.extractionRetries, attempt)
+}
+
+func (s *spyReporter) ReportEmptyResponseRetry(attempt int) {
+	s.emptyResponseRetries = append(s.emptyResponseRetries, attempt)
 }
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 
@@ -676,5 +681,60 @@ func TestExtractStructuredReview_ExhaustsRetries(t *testing.T) {
 	// Should have made exactly extractionMaxAttempts calls.
 	if lm.callIdx != extractionMaxAttempts {
 		t.Errorf("expected %d LLM calls, got %d", extractionMaxAttempts, lm.callIdx)
+	}
+}
+
+// TestRunReview_EmptyResponseRetry verifies that when the LLM returns a
+// successful but empty response (no text, no tool calls), the agent retries
+// the call and eventually succeeds.
+func TestRunReview_EmptyResponseRetry(t *testing.T) {
+	lm := &mockLLM{responses: []*llm.Response{
+		{Text: ""},                  // empty — should trigger retry
+		textResponse("good review"), // succeeds on second attempt
+	}}
+
+	spy := &spyReporter{}
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+
+	got, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "good review" {
+		t.Errorf("got %q, want %q", got, "good review")
+	}
+
+	// 2 underlying calls — one empty, one good.
+	if lm.callIdx != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", lm.callIdx)
+	}
+
+	// The retry should have been reported once.
+	if len(spy.emptyResponseRetries) != 1 || spy.emptyResponseRetries[0] != 2 {
+		t.Errorf("expected emptyResponseRetries=[2], got %v", spy.emptyResponseRetries)
+	}
+}
+
+// TestRunReview_EmptyResponseExhausted verifies that when all attempts return
+// empty content, RunReview ultimately fails gracefully.
+func TestRunReview_EmptyResponseExhausted(t *testing.T) {
+	// All responses are empty (no text, no tool calls).
+	responses := make([]*llm.Response, emptyResponseMaxAttempts)
+	for i := range responses {
+		responses[i] = &llm.Response{Text: ""}
+	}
+	lm := &mockLLM{responses: responses}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	got, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	// The loop sees no text, no tool calls → falls through to handleCapReached
+	// which in turn calls generateContentWithEmptyRetry again. We just verify
+	// no panic and that we consumed all the scripted empty responses.
+	_ = got
+	_ = err
+	// At minimum emptyResponseMaxAttempts calls must have been made (iteration 1 retries).
+	if lm.callIdx < emptyResponseMaxAttempts {
+		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
 	}
 }

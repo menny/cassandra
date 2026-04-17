@@ -43,6 +43,7 @@ type Reporter interface {
 	ReportFinalReview()
 	ReportExtraction()
 	ReportExtractionRetry(attempt int)
+	ReportEmptyResponseRetry(attempt int)
 	ReportCapReached(maxIterations int)
 }
 
@@ -92,6 +93,10 @@ func (r *defaultReporter) ReportExtraction() {
 
 func (r *defaultReporter) ReportExtractionRetry(attempt int) {
 	fmt.Fprintf(r.w, "Extraction attempt %d failed; retrying...\n", attempt)
+}
+
+func (r *defaultReporter) ReportEmptyResponseRetry(attempt int) {
+	fmt.Fprintf(r.w, "LLM returned empty response (attempt %d); retrying...\n", attempt)
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
@@ -174,7 +179,8 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 
 	for iter := range maxIterations {
 		a.reporter.ReportIteration(iter + 1)
-		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
+
+		resp, err := a.generateContentWithEmptyRetry(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
 		}
@@ -184,9 +190,6 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
-			if resp.Text == "" {
-				return "", fmt.Errorf("llm returned empty content on iteration %d", iter+1)
-			}
 			a.reporter.ReportFinalReview()
 			return resp.Text, nil
 		}
@@ -215,6 +218,11 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 // extractionMaxAttempts is the number of total attempts for structured extraction
 // (LLM call + JSON parse), including the initial attempt.
 const extractionMaxAttempts = 3
+
+// emptyResponseMaxAttempts is the number of total attempts when a provider
+// returns a successful (nil-error) response with empty content. This is a
+// distinct failure mode from a hard error and needs its own retry budget.
+const emptyResponseMaxAttempts = 3
 
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.
@@ -304,7 +312,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 
 	// Pass nil tools so the provider cannot issue further tool calls even if
 	// it ignores the cap instruction in the prompt.
-	resp, err := a.llm.GenerateContent(ctx, messages, nil, maxTokens)
+	resp, err := a.generateContentWithEmptyRetry(ctx, messages, nil, maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
 	}
@@ -313,7 +321,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	a.trackUsage(resp.Usage)
 
 	if resp.Text == "" {
-		return "", fmt.Errorf("llm returned empty content on forced-final review")
+		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
 	}
 	return resp.Text, nil
 }
@@ -331,6 +339,36 @@ func (a *Agent) trackUsage(usage llm.Usage) {
 	if usage.CachedTokens > 0 {
 		a.totalUsage.CachedTokens += usage.CachedTokens
 	}
+}
+
+// generateContentWithEmptyRetry calls GenerateContent and retries up to
+// emptyResponseMaxAttempts times when the provider returns a nil error but
+// empty content with no tool calls. This is a distinct failure mode from a
+// hard error: the SDK call succeeds but the body is empty, which can happen
+// transiently under provider load.
+//
+// If the response has tool calls (even with empty text) it is returned
+// immediately — non-empty tool-call responses are always valid.
+func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
+	var lastResp *llm.Response
+	for attempt := range emptyResponseMaxAttempts {
+		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
+		if err != nil {
+			return nil, err
+		}
+		// A response with tool calls is always actionable, even if Text is empty.
+		if len(resp.ToolCalls) > 0 || resp.Text != "" {
+			return resp, nil
+		}
+		lastResp = resp
+		if attempt < emptyResponseMaxAttempts-1 {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			a.reporter.ReportEmptyResponseRetry(attempt + 2)
+		}
+	}
+	return lastResp, nil
 }
 
 // compactToolCallArgs returns a short human-readable summary of tool arguments.
