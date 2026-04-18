@@ -716,7 +716,8 @@ func TestRunReview_EmptyResponseRetry(t *testing.T) {
 }
 
 // TestRunReview_EmptyResponseExhausted verifies that when all attempts return
-// empty content, RunReview ultimately fails gracefully.
+// empty content, RunReview fails with a descriptive error rather than silently
+// returning an empty string.
 func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 	// All responses are empty (no text, no tool calls).
 	responses := make([]*llm.Response, emptyResponseMaxAttempts)
@@ -727,13 +728,12 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 
 	agent := newTestAgent(lm, newMockDispatcher())
 
-	got, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
-	// The loop sees no text, no tool calls → falls through to handleCapReached
-	// which in turn calls generateContentWithEmptyRetry again. We just verify
-	// no panic and that we consumed all the scripted empty responses.
-	_ = got
-	_ = err
-	// At minimum emptyResponseMaxAttempts calls must have been made (iteration 1 retries).
+	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err == nil {
+		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+	}
+
+	// At least emptyResponseMaxAttempts calls must have been made.
 	if lm.callIdx < emptyResponseMaxAttempts {
 		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
 	}

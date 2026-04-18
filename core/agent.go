@@ -190,6 +190,9 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
+			if resp.Text == "" {
+				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
+			}
 			a.reporter.ReportFinalReview()
 			return resp.Text, nil
 		}
@@ -245,6 +248,9 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
 		if err != nil {
 			lastErr = fmt.Errorf("extraction failed: %w", err)
+			if ctx.Err() != nil {
+				return nil, lastErr
+			}
 			continue
 		}
 
