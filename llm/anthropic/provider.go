@@ -69,11 +69,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 	tool := anthropicsdk.ToolParam{
 		Name:        toolName,
 		Description: param.NewOpt("Returns the structured code review."),
-		InputSchema: anthropicsdk.ToolInputSchemaParam{
-			Type:       "object",
-			Properties: schema["properties"],
-			Required:   util.ParseRequired(schema["required"]),
-		},
+		InputSchema: schemaParamFromJSONSchema(schema),
 	}
 
 	sdkParams := anthropicsdk.MessageNewParams{
@@ -174,24 +170,27 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 	out := make([]anthropicsdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
-		// The Anthropic API requires the top-level tool schema to be an
-		// "object". If a tool defines a different top-level type (e.g.
-		// "array"), this conversion will produce a malformed schema.
-		schema := anthropicsdk.ToolInputSchemaParam{
-			Type:       "object",
-			Properties: t.Parameters["properties"],
-		}
-		// Forward required field so the model knows which parameters are mandatory.
-		schema.Required = util.ParseRequired(t.Parameters["required"])
-
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,
 			Description: param.NewOpt(t.Description),
-			InputSchema: schema,
+			InputSchema: schemaParamFromJSONSchema(t.Parameters),
 		}
 		out = append(out, anthropicsdk.ToolUnionParam{OfTool: &tp})
 	}
 	return out
+}
+
+// schemaParamFromJSONSchema converts a JSON Schema object (as stored in
+// llm.ToolDef.Parameters) into an Anthropic ToolInputSchemaParam. The
+// Anthropic API requires the top-level schema to be an "object"; if a tool
+// defines a different top-level type (e.g. "array") the resulting schema
+// will be malformed.
+func schemaParamFromJSONSchema(schema map[string]any) anthropicsdk.ToolInputSchemaParam {
+	return anthropicsdk.ToolInputSchemaParam{
+		Type:       "object",
+		Properties: schema["properties"],
+		Required:   util.ParseRequired(schema["required"]),
+	}
 }
 
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
