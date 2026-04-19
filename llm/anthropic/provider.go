@@ -14,6 +14,12 @@ import (
 	"github.com/menny/cassandra/llm/internal/util"
 )
 
+// submitReviewToolName is the synthetic tool the Anthropic provider forces
+// the model to call to deliver structured output. The name is a documented
+// contract — see DESIGN.md §Technical Decisions 4 ("Structured Feedback
+// Extraction"). Keep it stable; downstream consumers may match on it.
+const submitReviewToolName = "submit_review"
+
 // Provider implements llm.Model backed by the Anthropic Messages API.
 type Provider struct {
 	client    anthropicsdk.Client
@@ -65,9 +71,8 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 	modelName, maxTokens := config.Resolve(p.modelName)
 
 	// Define a synthetic tool to enforce the structured response.
-	toolName := "submit_review"
 	tool := anthropicsdk.ToolParam{
-		Name:        toolName,
+		Name:        submitReviewToolName,
 		Description: param.NewOpt("Returns the structured code review."),
 		InputSchema: schemaParamFromJSONSchema(schema),
 	}
@@ -81,7 +86,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		ToolChoice: anthropicsdk.ToolChoiceUnionParam{
 			OfTool: &anthropicsdk.ToolChoiceToolParam{
 				Type: "tool",
-				Name: toolName,
+				Name: submitReviewToolName,
 			},
 		},
 	}
