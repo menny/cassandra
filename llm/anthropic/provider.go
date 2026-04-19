@@ -197,14 +197,7 @@ func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
-	resp := &llm.Response{
-		Usage: llm.Usage{
-			PromptTokens:   -1,
-			OutputTokens:   -1,
-			ThinkingTokens: 0,
-			CachedTokens:   0,
-		},
-	}
+	resp := &llm.Response{Usage: llm.UnknownUsage()}
 
 	// The SDK usage struct is not a pointer, but we check if we have values.
 	// Cache-only responses report tokens exclusively through the cache counters,

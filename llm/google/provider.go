@@ -246,12 +246,7 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 		return nil, fmt.Errorf("google: candidate has no content")
 	}
 
-	result := &llm.Response{
-		Usage: llm.Usage{
-			PromptTokens: -1,
-			OutputTokens: -1,
-		},
-	}
+	result := &llm.Response{Usage: llm.UnknownUsage()}
 
 	if resp.UsageMetadata != nil {
 		result.Usage.PromptTokens = int(resp.UsageMetadata.PromptTokenCount - resp.UsageMetadata.CachedContentTokenCount)

@@ -82,6 +82,14 @@ type Usage struct {
 	CachedTokens   int // tokens served from a cache
 }
 
+// UnknownUsage returns a Usage with PromptTokens and OutputTokens set to -1,
+// indicating the provider did not report any token counts. ThinkingTokens
+// and CachedTokens remain 0 (the zero value) which providers overwrite when
+// they do have data.
+func UnknownUsage() Usage {
+	return Usage{PromptTokens: -1, OutputTokens: -1}
+}
+
 // TotalInput returns the total number of input-side tokens (prompt + cached).
 func (u Usage) TotalInput() int {
 	if u.PromptTokens < 0 {
