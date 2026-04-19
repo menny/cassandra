@@ -230,8 +230,10 @@ const emptyResponseMaxAttempts = 3
 
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.
-// If the LLM returns malformed JSON, the call is retried up to extractionMaxAttempts
-// times total so that non-determinism in the LLM output can be overcome.
+// Hard LLM errors are returned immediately (the underlying RetryingModel has
+// already exhausted its own retry budget for them). Only soft application-level
+// failures — empty content and malformed JSON — are retried here, up to
+// extractionMaxAttempts times total, to overcome non-determinism in LLM output.
 func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt, rawReview string, config llm.StructuredConfig) (*StructuredReview, error) {
 	a.reporter.ReportExtraction()
 
@@ -248,18 +250,14 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return nil, lastErr
+				return nil, ctx.Err()
 			case <-timer.C:
 			}
 		}
 
 		resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
 		if err != nil {
-			lastErr = fmt.Errorf("extraction failed: %w", err)
-			if ctx.Err() != nil {
-				return nil, lastErr
-			}
-			continue
+			return nil, fmt.Errorf("extraction failed: %w", err)
 		}
 
 		a.reporter.ReportUsage(resp.Usage)

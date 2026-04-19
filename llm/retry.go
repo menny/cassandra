@@ -12,8 +12,9 @@ const (
 	DefaultRetryBaseDelay = time.Second
 )
 
-// RetryingModel wraps any Model and transparently retries transient errors
-// using exponential back-off. It implements the Model interface.
+// RetryingModel wraps any Model and transparently retries on any error
+// (network failures, rate limits, server errors, etc.) using exponential
+// back-off. It implements the Model interface.
 type RetryingModel struct {
 	inner       Model
 	maxAttempts int

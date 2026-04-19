@@ -15,8 +15,10 @@ import (
 // ──────────────────────────────────────────────────────────────────────────────
 
 // mockLLM records every GenerateContent call and returns scripted responses in order.
+// If errs[i] is non-nil, that call returns the error instead of a response.
 type mockLLM struct {
 	responses []*llm.Response
+	errs      []error          // optional per-call errors; nil entries mean "use responses"
 	calls     [][]llm.Message  // captured message history per call, in order
 	schemas   []map[string]any // captured schemas for structured calls
 	callIdx   int
@@ -43,12 +45,15 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	}
 	m.calls = append(m.calls, snapshot)
 
-	if m.callIdx >= len(m.responses) {
-		return nil, fmt.Errorf("mockLLM: no scripted response for call %d", m.callIdx+1)
-	}
-	resp := m.responses[m.callIdx]
+	idx := m.callIdx
 	m.callIdx++
-	return resp, nil
+	if idx < len(m.errs) && m.errs[idx] != nil {
+		return nil, m.errs[idx]
+	}
+	if idx >= len(m.responses) {
+		return nil, fmt.Errorf("mockLLM: no scripted response for call %d", idx+1)
+	}
+	return m.responses[idx], nil
 }
 
 func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
@@ -681,6 +686,30 @@ func TestExtractStructuredReview_ExhaustsRetries(t *testing.T) {
 	// Should have made exactly extractionMaxAttempts calls.
 	if lm.callIdx != extractionMaxAttempts {
 		t.Errorf("expected %d LLM calls, got %d", extractionMaxAttempts, lm.callIdx)
+	}
+}
+
+// TestExtractStructuredReview_LLMErrorReturnsImmediately verifies that a hard
+// LLM error (non-nil err from GenerateStructuredContent) is returned immediately
+// without any outer retry — the RetryingModel layer has already exhausted its
+// own budget.
+func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
+	hardErr := fmt.Errorf("401 Unauthorized")
+
+	lm := &mockLLM{
+		errs: []error{hardErr},
+	}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// Must stop after exactly one call — no outer retry on hard errors.
+	if lm.callIdx != 1 {
+		t.Errorf("expected 1 LLM call, got %d", lm.callIdx)
 	}
 }
 
