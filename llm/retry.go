@@ -49,8 +49,8 @@ func (r *RetryingModel) GenerateContent(ctx context.Context, messages []Message,
 				timer.Stop()
 				return nil, ctx.Err()
 			case <-timer.C:
-				delay *= 2
 			}
+			delay *= 2
 		}
 		resp, err := r.inner.GenerateContent(ctx, messages, tools, maxTokens)
 		if err == nil {
@@ -76,8 +76,8 @@ func (r *RetryingModel) GenerateStructuredContent(ctx context.Context, messages 
 				timer.Stop()
 				return nil, ctx.Err()
 			case <-timer.C:
-				delay *= 2
 			}
+			delay *= 2
 		}
 		resp, err := r.inner.GenerateStructuredContent(ctx, messages, schema, config)
 		if err == nil {
