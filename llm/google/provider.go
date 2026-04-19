@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 
 	"google.golang.org/genai"
@@ -206,6 +207,8 @@ func convertSchema(m map[string]any) *genai.Schema {
 			s.Type = genai.TypeBoolean
 		case "array":
 			s.Type = genai.TypeArray
+		default:
+			log.Printf("google: convertSchema: unknown JSON Schema type %q; resulting schema will be malformed", t)
 		}
 	}
 	if desc, ok := m["description"].(string); ok {
