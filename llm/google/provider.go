@@ -14,6 +14,18 @@ import (
 	"github.com/menny/cassandra/llm/internal/util"
 )
 
+// thoughtSignatureKey is the ProviderMetadata key under which the Gemini
+// thought signature (opaque []byte) is stored on llm.Message.
+const thoughtSignatureKey = "google_thought_signature"
+
+// thoughtSignature extracts the Gemini thought signature from a Message's
+// ProviderMetadata. Returns nil if the key is absent or the stored value is
+// not a []byte — both of which are valid states for non-thinking models.
+func thoughtSignature(m llm.Message) []byte {
+	sig, _ := m.ProviderMetadata[thoughtSignatureKey].([]byte)
+	return sig
+}
+
 // clampInt32 saturates n into the int32 range. The Gemini SDK's
 // MaxOutputTokens is an int32 while our llm.Model API uses int, so every
 // call site needs this conversion; centralizing it removes duplicated
@@ -127,10 +139,7 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 
 		case llm.RoleAssistant:
 			var parts []*genai.Part
-			var sig []byte
-			if s, ok := m.ProviderMetadata["google_thought_signature"].([]byte); ok {
-				sig = s
-			}
+			sig := thoughtSignature(m)
 
 			if m.Reasoning != "" {
 				parts = append(parts, &genai.Part{
@@ -265,7 +274,7 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 			if result.ProviderMetadata == nil {
 				result.ProviderMetadata = make(map[string]any)
 			}
-			result.ProviderMetadata["google_thought_signature"] = part.ThoughtSignature
+			result.ProviderMetadata[thoughtSignatureKey] = part.ThoughtSignature
 		}
 
 		// Both fields are checked independently: the Gemini API can return a
