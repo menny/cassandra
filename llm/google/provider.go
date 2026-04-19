@@ -14,6 +14,17 @@ import (
 	"github.com/menny/cassandra/llm/internal/util"
 )
 
+// jsonSchemaTypes maps JSON Schema type names (lowercase) to their
+// genai.Type counterparts (uppercase enum). Used by convertSchema.
+var jsonSchemaTypes = map[string]genai.Type{
+	"object":  genai.TypeObject,
+	"string":  genai.TypeString,
+	"number":  genai.TypeNumber,
+	"integer": genai.TypeInteger,
+	"boolean": genai.TypeBoolean,
+	"array":   genai.TypeArray,
+}
+
 // Provider implements llm.Model backed by the Google Generative AI API.
 type Provider struct {
 	client    *genai.Client
@@ -194,20 +205,9 @@ func convertSchema(m map[string]any) *genai.Schema {
 	s := &genai.Schema{}
 
 	if t, ok := m["type"].(string); ok {
-		switch t {
-		case "object":
-			s.Type = genai.TypeObject
-		case "string":
-			s.Type = genai.TypeString
-		case "number":
-			s.Type = genai.TypeNumber
-		case "integer":
-			s.Type = genai.TypeInteger
-		case "boolean":
-			s.Type = genai.TypeBoolean
-		case "array":
-			s.Type = genai.TypeArray
-		default:
+		if mapped, known := jsonSchemaTypes[t]; known {
+			s.Type = mapped
+		} else {
 			log.Printf("google: convertSchema: unknown JSON Schema type %q; resulting schema will be malformed", t)
 		}
 	}
