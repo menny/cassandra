@@ -217,7 +217,10 @@ func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 	}
 
 	// The SDK usage struct is not a pointer, but we check if we have values.
-	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
+	// Cache-only responses report tokens exclusively through the cache counters,
+	// so the gate must include those or CachedTokens would stay at its -1 sentinel.
+	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 ||
+		msg.Usage.CacheReadInputTokens > 0 || msg.Usage.CacheCreationInputTokens > 0 {
 		resp.Usage.PromptTokens = int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens)
 		resp.Usage.OutputTokens = int(msg.Usage.OutputTokens)
 		resp.Usage.CachedTokens = int(msg.Usage.CacheReadInputTokens)
