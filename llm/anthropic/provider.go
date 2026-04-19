@@ -62,15 +62,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		return nil, fmt.Errorf("anthropic: building messages: %w", err)
 	}
 
-	modelName := p.modelName
-	if config.ModelOverride != "" {
-		modelName = config.ModelOverride
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 8192
-	}
+	modelName, maxTokens := config.Resolve(p.modelName)
 
 	// Define a synthetic tool to enforce the structured response.
 	toolName := "submit_review"

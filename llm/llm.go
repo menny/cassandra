@@ -109,12 +109,33 @@ type Response struct {
 	Usage            Usage          // token usage for this interaction
 }
 
+// DefaultStructuredMaxTokens is the fallback max-tokens budget used by
+// providers when StructuredConfig.MaxTokens is unset. Kept in sync with the
+// CLI's --max-tokens default (see cmd/ai_reviewer) so the structured
+// extraction pass has a consistent headroom across provider implementations.
+const DefaultStructuredMaxTokens = 8192
+
 // StructuredConfig provides options for structured output generation.
 type StructuredConfig struct {
 	// ModelOverride allows using a different model for the structured pass.
 	ModelOverride string
 	// MaxTokens limits the length of the LLM response.
 	MaxTokens int
+}
+
+// Resolve returns the effective model and max-tokens values, applying the
+// provider's default model when no override is set and
+// DefaultStructuredMaxTokens when MaxTokens is non-positive.
+func (c StructuredConfig) Resolve(defaultModel string) (string, int) {
+	model := defaultModel
+	if c.ModelOverride != "" {
+		model = c.ModelOverride
+	}
+	maxTokens := c.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = DefaultStructuredMaxTokens
+	}
+	return model, maxTokens
 }
 
 // Model is the only interface core.Agent depends on.

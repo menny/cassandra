@@ -87,15 +87,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		return nil, fmt.Errorf("google: building contents: %w", err)
 	}
 
-	modelName := p.modelName
-	if config.ModelOverride != "" {
-		modelName = config.ModelOverride
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 8192
-	}
+	modelName, maxTokens := config.Resolve(p.modelName)
 
 	genaiConfig := &genai.GenerateContentConfig{
 		MaxOutputTokens:  clampInt32(maxTokens),
