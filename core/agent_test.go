@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -694,7 +695,7 @@ func TestExtractStructuredReview_ExhaustsRetries(t *testing.T) {
 // without any outer retry — the RetryingModel layer has already exhausted its
 // own budget.
 func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
-	hardErr := fmt.Errorf("401 Unauthorized")
+	hardErr := errors.New("401 Unauthorized")
 
 	lm := &mockLLM{
 		errs: []error{hardErr},

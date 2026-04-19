@@ -246,12 +246,8 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 	for attempt := range extractionMaxAttempts {
 		if attempt > 0 {
 			a.reporter.ReportExtractionRetry(attempt + 1)
-			timer := time.NewTimer(llm.DefaultRetryBaseDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, ctx.Err()
-			case <-timer.C:
+			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+				return nil, err
 			}
 		}
 
@@ -378,16 +374,25 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 				return nil, ctx.Err()
 			}
 			a.reporter.ReportEmptyResponseRetry(attempt + 2)
-			timer := time.NewTimer(llm.DefaultRetryBaseDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, ctx.Err()
-			case <-timer.C:
+			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+				return nil, err
 			}
 		}
 	}
 	return lastResp, nil
+}
+
+// sleepWithContext blocks for d or until ctx is cancelled, whichever comes
+// first. It returns ctx.Err() on cancellation and nil after the full sleep.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // compactToolCallArgs returns a short human-readable summary of tool arguments.
