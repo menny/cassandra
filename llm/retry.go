@@ -37,56 +37,45 @@ func NewRetryingModel(inner Model, maxAttempts int, baseDelay time.Duration) *Re
 	return &RetryingModel{inner: inner, maxAttempts: maxAttempts, baseDelay: baseDelay}
 }
 
-// GenerateContent calls the underlying model, retrying on any error.
-func (r *RetryingModel) GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error) {
+// retry invokes fn up to maxAttempts times, doubling the delay between
+// attempts starting from baseDelay. It returns early if ctx is cancelled.
+func retry[T any](ctx context.Context, maxAttempts int, baseDelay time.Duration, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
 	var lastErr error
-	delay := r.baseDelay
-	for attempt := range r.maxAttempts {
+	delay := baseDelay
+	for attempt := range maxAttempts {
 		if attempt > 0 {
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return nil, ctx.Err()
+				return zero, ctx.Err()
 			case <-timer.C:
 			}
 			delay *= 2
 		}
-		resp, err := r.inner.GenerateContent(ctx, messages, tools, maxTokens)
+		resp, err := fn(ctx)
 		if err == nil {
 			return resp, nil
 		}
 		lastErr = err
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return zero, ctx.Err()
 		}
 	}
-	return nil, lastErr
+	return zero, lastErr
+}
+
+// GenerateContent calls the underlying model, retrying on any error.
+func (r *RetryingModel) GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error) {
+	return retry(ctx, r.maxAttempts, r.baseDelay, func(ctx context.Context) (*Response, error) {
+		return r.inner.GenerateContent(ctx, messages, tools, maxTokens)
+	})
 }
 
 // GenerateStructuredContent calls the underlying model, retrying on any error.
 func (r *RetryingModel) GenerateStructuredContent(ctx context.Context, messages []Message, schema map[string]any, config StructuredConfig) (*Response, error) {
-	var lastErr error
-	delay := r.baseDelay
-	for attempt := range r.maxAttempts {
-		if attempt > 0 {
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return nil, ctx.Err()
-			case <-timer.C:
-			}
-			delay *= 2
-		}
-		resp, err := r.inner.GenerateStructuredContent(ctx, messages, schema, config)
-		if err == nil {
-			return resp, nil
-		}
-		lastErr = err
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-	}
-	return nil, lastErr
+	return retry(ctx, r.maxAttempts, r.baseDelay, func(ctx context.Context) (*Response, error) {
+		return r.inner.GenerateStructuredContent(ctx, messages, schema, config)
+	})
 }
