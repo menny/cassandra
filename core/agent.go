@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -42,6 +43,8 @@ type Reporter interface {
 	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
 	ReportExtraction()
+	ReportExtractionRetry(attempt int)
+	ReportEmptyResponseRetry(attempt int)
 	ReportCapReached(maxIterations int)
 }
 
@@ -87,6 +90,14 @@ func (r *defaultReporter) ReportFinalReview() {
 
 func (r *defaultReporter) ReportExtraction() {
 	fmt.Fprintln(r.w, "Cassandra is extracting structured JSON findings...")
+}
+
+func (r *defaultReporter) ReportExtractionRetry(attempt int) {
+	fmt.Fprintf(r.w, "Extraction attempt %d failed; retrying...\n", attempt)
+}
+
+func (r *defaultReporter) ReportEmptyResponseRetry(attempt int) {
+	fmt.Fprintf(r.w, "LLM returned empty response (attempt %d); retrying...\n", attempt)
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
@@ -169,7 +180,8 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 
 	for iter := range maxIterations {
 		a.reporter.ReportIteration(iter + 1)
-		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
+
+		resp, err := a.generateContentWithEmptyRetry(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return "", fmt.Errorf("llm call failed on iteration %d: %w", iter+1, err)
 		}
@@ -180,7 +192,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
 			if resp.Text == "" {
-				return "", fmt.Errorf("llm returned empty content on iteration %d", iter+1)
+				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
 			}
 			a.reporter.ReportFinalReview()
 			return resp.Text, nil
@@ -207,8 +219,21 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
 }
 
+// extractionMaxAttempts is the number of total attempts for structured extraction
+// (LLM call + JSON parse), including the initial attempt.
+const extractionMaxAttempts = 3
+
+// emptyResponseMaxAttempts is the number of total attempts when a provider
+// returns a successful (nil-error) response with empty content. This is a
+// distinct failure mode from a hard error and needs its own retry budget.
+const emptyResponseMaxAttempts = 3
+
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.
+// Hard LLM errors are returned immediately (the underlying RetryingModel has
+// already exhausted its own retry budget for them). Only soft application-level
+// failures — empty content and malformed JSON — are retried here, up to
+// extractionMaxAttempts times total, to overcome non-determinism in LLM output.
 func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPrompt, rawReview string, config llm.StructuredConfig) (*StructuredReview, error) {
 	a.reporter.ReportExtraction()
 
@@ -217,24 +242,38 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		{Role: llm.RoleUser, Text: rawReview},
 	}
 
-	resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
-	if err != nil {
-		return nil, fmt.Errorf("extraction failed: %w", err)
+	var lastErr error
+	for attempt := range extractionMaxAttempts {
+		if attempt > 0 {
+			a.reporter.ReportExtractionRetry(attempt + 1)
+			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+				return nil, err
+			}
+		}
+
+		resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
+		if err != nil {
+			return nil, fmt.Errorf("extraction failed: %w", err)
+		}
+
+		a.reporter.ReportUsage(resp.Usage)
+		a.trackUsage(resp.Usage)
+
+		if resp.Text == "" {
+			lastErr = fmt.Errorf("extraction returned empty content")
+			continue
+		}
+
+		var review StructuredReview
+		if err := json.Unmarshal([]byte(resp.Text), &review); err != nil {
+			lastErr = fmt.Errorf("failed to parse structured review: %w\nRaw output: %s", err, resp.Text)
+			continue
+		}
+
+		return &review, nil
 	}
 
-	a.reporter.ReportUsage(resp.Usage)
-	a.trackUsage(resp.Usage)
-
-	if resp.Text == "" {
-		return nil, fmt.Errorf("extraction returned empty content")
-	}
-
-	var review StructuredReview
-	if err := json.Unmarshal([]byte(resp.Text), &review); err != nil {
-		return nil, fmt.Errorf("failed to parse structured review: %w\nRaw output: %s", err, resp.Text)
-	}
-
-	return &review, nil
+	return nil, lastErr
 }
 
 func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {
@@ -281,7 +320,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 
 	// Pass nil tools so the provider cannot issue further tool calls even if
 	// it ignores the cap instruction in the prompt.
-	resp, err := a.llm.GenerateContent(ctx, messages, nil, maxTokens)
+	resp, err := a.generateContentWithEmptyRetry(ctx, messages, nil, maxTokens)
 	if err != nil {
 		return "", fmt.Errorf("llm call failed on forced-final review: %w", err)
 	}
@@ -290,7 +329,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	a.trackUsage(resp.Usage)
 
 	if resp.Text == "" {
-		return "", fmt.Errorf("llm returned empty content on forced-final review")
+		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
 	}
 	return resp.Text, nil
 }
@@ -307,6 +346,52 @@ func (a *Agent) trackUsage(usage llm.Usage) {
 	}
 	if usage.CachedTokens > 0 {
 		a.totalUsage.CachedTokens += usage.CachedTokens
+	}
+}
+
+// generateContentWithEmptyRetry calls GenerateContent and retries up to
+// emptyResponseMaxAttempts times when the provider returns a nil error but
+// empty content with no tool calls. This is a distinct failure mode from a
+// hard error: the SDK call succeeds but the body is empty, which can happen
+// transiently under provider load.
+//
+// If the response has tool calls (even with empty text) it is returned
+// immediately — non-empty tool-call responses are always valid.
+func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
+	var lastResp *llm.Response
+	for attempt := range emptyResponseMaxAttempts {
+		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
+		if err != nil {
+			return nil, err
+		}
+		// A response with tool calls is always actionable, even if Text is empty.
+		if len(resp.ToolCalls) > 0 || resp.Text != "" {
+			return resp, nil
+		}
+		lastResp = resp
+		if attempt < emptyResponseMaxAttempts-1 {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			a.reporter.ReportEmptyResponseRetry(attempt + 2)
+			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return lastResp, nil
+}
+
+// sleepWithContext blocks for d or until ctx is cancelled, whichever comes
+// first. It returns ctx.Err() on cancellation and nil after the full sleep.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

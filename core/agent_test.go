@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -15,8 +16,10 @@ import (
 // ──────────────────────────────────────────────────────────────────────────────
 
 // mockLLM records every GenerateContent call and returns scripted responses in order.
+// If errs[i] is non-nil, that call returns the error instead of a response.
 type mockLLM struct {
 	responses []*llm.Response
+	errs      []error          // optional per-call errors; nil entries mean "use responses"
 	calls     [][]llm.Message  // captured message history per call, in order
 	schemas   []map[string]any // captured schemas for structured calls
 	callIdx   int
@@ -43,12 +46,15 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	}
 	m.calls = append(m.calls, snapshot)
 
-	if m.callIdx >= len(m.responses) {
-		return nil, fmt.Errorf("mockLLM: no scripted response for call %d", m.callIdx+1)
-	}
-	resp := m.responses[m.callIdx]
+	idx := m.callIdx
 	m.callIdx++
-	return resp, nil
+	if idx < len(m.errs) && m.errs[idx] != nil {
+		return nil, m.errs[idx]
+	}
+	if idx >= len(m.responses) {
+		return nil, fmt.Errorf("mockLLM: no scripted response for call %d", idx+1)
+	}
+	return m.responses[idx], nil
 }
 
 func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
@@ -98,22 +104,33 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 
 // spyReporter records method calls for verification.
 type spyReporter struct {
-	iterations   []int
-	toolCalls    []llm.ToolCall
-	usage        []llm.Usage
-	finalReviews int
-	extractions  int
-	capsReached  []int
+	iterations           []int
+	toolCalls            []llm.ToolCall
+	usage                []llm.Usage
+	finalReviews         int
+	extractions          int
+	extractionRetries    []int
+	emptyResponseRetries []int
+	capsReached          []int
 }
 
-func (s *spyReporter) ReportIteration(iter int)       { s.iterations = append(s.iterations, iter) }
-func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
-func (s *spyReporter) ReportUsage(usage llm.Usage)    { s.usage = append(s.usage, usage) }
-func (s *spyReporter) ReportUsageSummary(usage llm.Usage) {
-	// recording for completeness if needed
+func (s *spyReporter) ReportIteration(iter int) {
+	s.iterations = append(s.iterations, iter)
 }
-func (s *spyReporter) ReportFinalReview()       { s.finalReviews++ }
-func (s *spyReporter) ReportExtraction()        { s.extractions++ }
+func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
+func (s *spyReporter) ReportUsage(usage llm.Usage) {
+	s.usage = append(s.usage, usage)
+}
+func (s *spyReporter) ReportUsageSummary(_ llm.Usage) {}
+func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
+func (s *spyReporter) ReportExtraction()              { s.extractions++ }
+func (s *spyReporter) ReportExtractionRetry(attempt int) {
+	s.extractionRetries = append(s.extractionRetries, attempt)
+}
+
+func (s *spyReporter) ReportEmptyResponseRetry(attempt int) {
+	s.emptyResponseRetries = append(s.emptyResponseRetries, attempt)
+}
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -609,5 +626,145 @@ func TestCalculateMaxIterations(t *testing.T) {
 				t.Errorf("CalculateMaxIterations(%d) = %d, want %d", tt.changedFiles, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestExtractStructuredReview_RetryOnBadJSON verifies that ExtractStructuredReview
+// retries when the LLM returns malformed JSON, and succeeds on the second attempt.
+func TestExtractStructuredReview_RetryOnBadJSON(t *testing.T) {
+	validJSON := `{"approval":{"approved":true,"rationale":"ok","action":"APPROVE"},"files_review":[]}`
+
+	// First response: bad JSON. Second response: valid JSON.
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse("not-json"),
+		textResponse(validJSON),
+	}}
+
+	spy := &spyReporter{}
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+
+	got, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Approval.Approved {
+		t.Errorf("expected approved=true")
+	}
+
+	// Should have made 2 LLM calls.
+	if lm.callIdx != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", lm.callIdx)
+	}
+
+	// The retry should have been reported once (for the 2nd attempt).
+	if len(spy.extractionRetries) != 1 || spy.extractionRetries[0] != 2 {
+		t.Errorf("expected extractionRetries=[2], got %v", spy.extractionRetries)
+	}
+
+	// ReportExtraction should have been called exactly once at the start.
+	if spy.extractions != 1 {
+		t.Errorf("expected 1 extraction report, got %d", spy.extractions)
+	}
+}
+
+// TestExtractStructuredReview_ExhaustsRetries verifies that ExtractStructuredReview
+// returns an error after exhausting all attempts.
+func TestExtractStructuredReview_ExhaustsRetries(t *testing.T) {
+	// All responses are bad JSON.
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse("bad1"),
+		textResponse("bad2"),
+		textResponse("bad3"),
+	}}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error after exhausting retries, got nil")
+	}
+
+	// Should have made exactly extractionMaxAttempts calls.
+	if lm.callIdx != extractionMaxAttempts {
+		t.Errorf("expected %d LLM calls, got %d", extractionMaxAttempts, lm.callIdx)
+	}
+}
+
+// TestExtractStructuredReview_LLMErrorReturnsImmediately verifies that a hard
+// LLM error (non-nil err from GenerateStructuredContent) is returned immediately
+// without any outer retry — the RetryingModel layer has already exhausted its
+// own budget.
+func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
+	hardErr := errors.New("401 Unauthorized")
+
+	lm := &mockLLM{
+		errs: []error{hardErr},
+	}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// Must stop after exactly one call — no outer retry on hard errors.
+	if lm.callIdx != 1 {
+		t.Errorf("expected 1 LLM call, got %d", lm.callIdx)
+	}
+}
+
+// TestRunReview_EmptyResponseRetry verifies that when the LLM returns a
+// successful but empty response (no text, no tool calls), the agent retries
+// the call and eventually succeeds.
+func TestRunReview_EmptyResponseRetry(t *testing.T) {
+	lm := &mockLLM{responses: []*llm.Response{
+		{Text: ""},                  // empty — should trigger retry
+		textResponse("good review"), // succeeds on second attempt
+	}}
+
+	spy := &spyReporter{}
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+
+	got, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "good review" {
+		t.Errorf("got %q, want %q", got, "good review")
+	}
+
+	// 2 underlying calls — one empty, one good.
+	if lm.callIdx != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", lm.callIdx)
+	}
+
+	// The retry should have been reported once.
+	if len(spy.emptyResponseRetries) != 1 || spy.emptyResponseRetries[0] != 2 {
+		t.Errorf("expected emptyResponseRetries=[2], got %v", spy.emptyResponseRetries)
+	}
+}
+
+// TestRunReview_EmptyResponseExhausted verifies that when all attempts return
+// empty content, RunReview fails with a descriptive error rather than silently
+// returning an empty string.
+func TestRunReview_EmptyResponseExhausted(t *testing.T) {
+	// All responses are empty (no text, no tool calls).
+	responses := make([]*llm.Response, emptyResponseMaxAttempts)
+	for i := range responses {
+		responses[i] = &llm.Response{Text: ""}
+	}
+	lm := &mockLLM{responses: responses}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err == nil {
+		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+	}
+
+	// At least emptyResponseMaxAttempts calls must have been made.
+	if lm.callIdx < emptyResponseMaxAttempts {
+		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
 	}
 }
