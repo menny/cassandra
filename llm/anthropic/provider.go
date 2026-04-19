@@ -23,9 +23,7 @@ type Provider struct {
 // New creates a Provider for the given model. Extra SDK options (e.g.
 // option.WithBaseURL) can be passed for testing or proxying.
 func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
-	allOpts := make([]option.RequestOption, 0, 1+len(opts))
-	allOpts = append(allOpts, option.WithAPIKey(apiKey))
-	allOpts = append(allOpts, opts...)
+	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
 	return &Provider{client: anthropicsdk.NewClient(allOpts...), modelName: modelName}
 }
 
