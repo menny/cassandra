@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -243,6 +244,13 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 	for attempt := range extractionMaxAttempts {
 		if attempt > 0 {
 			a.reporter.ReportExtractionRetry(attempt + 1)
+			timer := time.NewTimer(llm.DefaultRetryBaseDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, lastErr
+			case <-timer.C:
+			}
 		}
 
 		resp, err := a.llm.GenerateStructuredContent(ctx, messages, StructuredReviewSchema, config)
@@ -372,6 +380,13 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 				return nil, ctx.Err()
 			}
 			a.reporter.ReportEmptyResponseRetry(attempt + 2)
+			timer := time.NewTimer(llm.DefaultRetryBaseDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
 		}
 	}
 	return lastResp, nil
