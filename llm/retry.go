@@ -42,10 +42,12 @@ func (r *RetryingModel) GenerateContent(ctx context.Context, messages []Message,
 	delay := r.baseDelay
 	for attempt := range r.maxAttempts {
 		if attempt > 0 {
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return nil, ctx.Err()
-			case <-time.After(delay):
+			case <-timer.C:
 				delay *= 2
 			}
 		}
@@ -67,10 +69,12 @@ func (r *RetryingModel) GenerateStructuredContent(ctx context.Context, messages 
 	delay := r.baseDelay
 	for attempt := range r.maxAttempts {
 		if attempt > 0 {
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return nil, ctx.Err()
-			case <-time.After(delay):
+			case <-timer.C:
 				delay *= 2
 			}
 		}

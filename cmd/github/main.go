@@ -208,10 +208,12 @@ func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), 
 	)
 	for attempt := range maxAttempts {
 		if attempt > 0 {
+			timer := time.NewTimer(baseDelay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return lastResp, ctx.Err()
-			case <-time.After(baseDelay):
+			case <-timer.C:
 				baseDelay *= 2
 			}
 		}
