@@ -14,6 +14,20 @@ import (
 	"github.com/menny/cassandra/llm/internal/util"
 )
 
+// clampInt32 saturates n into the int32 range. The Gemini SDK's
+// MaxOutputTokens is an int32 while our llm.Model API uses int, so every
+// call site needs this conversion; centralizing it removes duplicated
+// //nolint:gosec pragmas.
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n) //nolint:gosec // bounds-checked above
+}
+
 // jsonSchemaTypes maps JSON Schema type names (lowercase) to their
 // genai.Type counterparts (uppercase enum). Used by convertSchema.
 var jsonSchemaTypes = map[string]genai.Type{
@@ -49,7 +63,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	}
 
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
+		MaxOutputTokens: clampInt32(maxTokens),
 	}
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
@@ -84,7 +98,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 	}
 
 	genaiConfig := &genai.GenerateContentConfig{
-		MaxOutputTokens:  int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
+		MaxOutputTokens:  clampInt32(maxTokens),
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   convertSchema(schema),
 	}
