@@ -158,19 +158,13 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		maxTokens = 8192
 	}
 
-	var messages []llm.Message
-	if dynamicSystem != "" {
-		messages = []llm.Message{
-			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
-			{Role: llm.RoleSystem, Text: dynamicSystem},
-			{Role: llm.RoleUser, Text: requestText},
-		}
-	} else {
-		messages = []llm.Message{
-			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
-			{Role: llm.RoleUser, Text: requestText},
-		}
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
 	}
+	if dynamicSystem != "" {
+		messages = append(messages, llm.Message{Role: llm.RoleSystem, Text: dynamicSystem})
+	}
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: requestText})
 
 	tools := a.registry.ToTools()
 
