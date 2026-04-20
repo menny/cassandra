@@ -107,6 +107,19 @@ func TestRetryingModel_GenerateStructuredContent_RespectsContextCancellation(t *
 	assert.Equal(t, 1, stub.callCount)
 }
 
+func TestRetryingModel_GenerateStructuredContent_ExhaustsAllAttempts(t *testing.T) {
+	sentinel := errors.New("permanent failure")
+	stub := &stubModel{
+		errs: []error{sentinel, sentinel, sentinel},
+	}
+	m := newInstantRetryModel(stub, 3)
+
+	_, err := m.GenerateStructuredContent(context.Background(), nil, nil, StructuredConfig{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 3, stub.callCount)
+}
+
 func TestRetryingModel_GenerateStructuredContent_Retries(t *testing.T) {
 	want := &Response{Text: `{"ok":true}`}
 	stub := &stubModel{
