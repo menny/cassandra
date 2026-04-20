@@ -120,13 +120,13 @@ runs:
           Linux) GOOS="linux" ;;
           macOS) GOOS="darwin" ;;
           Windows) GOOS="windows" ;;
-          *) echo "Unsupported OS: ${{ runner.os }}"; exit 1 ;;
+          *) GOOS="unsupported" ;;
         esac
 
         case "${{ runner.arch }}" in
           X64) GOARCH="amd64" ;;
           ARM64) GOARCH="arm64" ;;
-          *) echo "Unsupported Arch: ${{ runner.arch }}"; exit 1 ;;
+          *) GOARCH="unsupported" ;;
         esac
 
         SUFFIX=""
@@ -139,18 +139,23 @@ runs:
 
         DOWNLOAD_SUCCESS="false"
         # Only attempt to download if it looks like a version tag (vX.Y.Z) and gh CLI is available
-        if [[ "$ACTION_REF" =~ ^v[0-9] ]] && command -v gh >/dev/null 2>&1; then
+        if [[ "$GOOS" != "unsupported" ]] && [[ "$GOARCH" != "unsupported" ]] && [[ "$ACTION_REF" =~ ^v[0-9] ]] && command -v gh >/dev/null 2>&1; then
           echo "Attempting to download pre-built binaries for release: $ACTION_REF from repo: $ACTION_REPO..."
           if gh release download "$ACTION_REF" -p "$BIN_CASSANDRA" -p "$BIN_GITHUB" -D "${{ runner.temp }}/bin" -R "$ACTION_REPO" ; then
-            echo "Successfully downloaded pre-built binaries."
-            chmod +x "${{ runner.temp }}/bin/$BIN_CASSANDRA"
-            chmod +x "${{ runner.temp }}/bin/$BIN_GITHUB"
-            DOWNLOAD_SUCCESS="true"
+            # Verify both files actually exist before marking as success
+            if [[ -f "${{ runner.temp }}/bin/$BIN_CASSANDRA" ]] && [[ -f "${{ runner.temp }}/bin/$BIN_GITHUB" ]]; then
+              echo "Successfully downloaded pre-built binaries."
+              chmod +x "${{ runner.temp }}/bin/$BIN_CASSANDRA"
+              chmod +x "${{ runner.temp }}/bin/$BIN_GITHUB"
+              DOWNLOAD_SUCCESS="true"
+            else
+              echo "One or more binaries were missing after download. Will fallback to Bazel."
+            fi
           else
             echo "Failed to download binaries for $ACTION_REF. Will fallback to Bazel."
           fi
         else
-          echo "Not running from a specific tag/release ($ACTION_REF) or gh CLI not available. Will use Bazel."
+          echo "Platform not supported for pre-built binaries, not running from a specific tag/release ($ACTION_REF), or gh CLI not available. Will use Bazel."
         fi
 
         echo "download_success=$DOWNLOAD_SUCCESS" >> $GITHUB_OUTPUT
