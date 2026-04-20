@@ -26,7 +26,14 @@ type mockLLM struct {
 	callIdx   int
 }
 
-func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
+func (m *mockLLM) GenerateContent(ctx context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
+	// Honor ctx at entry so a cancelled context surfaces as ctx.Err() before
+	// any scripted response is returned. This is what real provider SDKs do,
+	// and it is the only way a ctx-forwarding test at the double's boundary
+	// can observe the cancellation path.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	snapshot := make([]llm.Message, len(msgs))
 	for i, msg := range msgs {
 		snapshot[i] = msg
@@ -706,18 +713,40 @@ func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
 	}
 }
 
+// TestMockLLM_GenerateStructuredContent_ForwardsCanceledContext verifies
+// that the test double forwards ctx to GenerateContent rather than silently
+// substituting context.Background() — the exact bug fixed in 7acedcd. This
+// is the only test that anchors cancellation at the double's boundary;
+// without it, ExtractStructuredReview's cancellation coverage would pass
+// even after a regression in GenerateStructuredContent's ctx forwarding.
+func TestMockLLM_GenerateStructuredContent_ForwardsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	lm := &mockLLM{responses: []*llm.Response{textResponse("never returned")}}
+
+	_, err := lm.GenerateStructuredContent(ctx, nil, nil, llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if lm.callIdx != 0 {
+		t.Errorf("expected 0 calls (mock should short-circuit on cancelled ctx), got %d", lm.callIdx)
+	}
+}
+
 // TestExtractStructuredReview_RespectsContextCancellation verifies that a
-// cancelled ctx halts the soft-retry loop: mockLLM returns empty content on
-// the first attempt (triggering a retry) and sleepWithContext at the top of
-// the next iteration detects the cancellation and returns ctx.Err() instead
-// of making a second LLM call.
+// cancelled ctx flows through ExtractStructuredReview's soft-retry loop and
+// surfaces as a wrapped context.Canceled. With mockLLM now honoring ctx at
+// entry, the cancellation is observed on the first call and the loop never
+// enters its second attempt.
 func TestExtractStructuredReview_RespectsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	lm := &mockLLM{responses: []*llm.Response{
-		{Text: ""}, // empty triggers soft retry; sleepWithContext will then propagate ctx.Err()
-	}}
+	lm := &mockLLM{responses: []*llm.Response{textResponse("never returned")}}
 
 	agent := newTestAgent(lm, newMockDispatcher())
 
@@ -728,8 +757,9 @@ func TestExtractStructuredReview_RespectsContextCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
-	if lm.callIdx != 1 {
-		t.Errorf("expected 1 LLM call before cancellation halted retry, got %d", lm.callIdx)
+	// mockLLM short-circuits on cancelled ctx; the first call never records.
+	if lm.callIdx != 0 {
+		t.Errorf("expected 0 LLM calls (mock short-circuit on cancelled ctx), got %d", lm.callIdx)
 	}
 }
 
