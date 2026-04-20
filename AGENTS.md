@@ -38,6 +38,12 @@ Before introducing major changes or restructuring the review loop, please read t
 - The decision to use a native Go ReAct loop rather than complex Python graphs.
 - The rationale behind the custom Tool Registry.
 
+## Code Style Reference
+
+**[CODE_STYLE.md](CODE_STYLE.md)** captures recurring coding patterns with rule + example + rationale for each: error handling idioms (`errors.New`, `%w`, `errors.As`), helper extraction, sentinel handling, registries over switches, typed accessors for untyped maps, centralized `//nolint`, stdout/stderr discipline, test-double `ctx` forwarding, paired-edit documentation, and stdlib-idiom preferences.
+
+Consult it when writing new code or when a review comment cites an idiom you don't recognize. AGENTS.md states *what MUST be done*; CODE_STYLE.md shows *how to write it so it matches the rest of the codebase*.
+
 ## Output Contract
 
 All **diagnostic and progress output** (configuration summary, ReAct iteration progress, tool invocations, warnings) MUST be written to **stderr**. Only the **final review text** goes to **stdout**. This allows callers to capture the review cleanly via redirection (e.g., `cassandra --diff main > review.md`) without interleaving noise.
