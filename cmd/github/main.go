@@ -126,57 +126,45 @@ func main() {
 			log.Fatalf("Failed to marshal metadata: %v", err)
 		}
 
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, bytes, 0o644); err != nil {
-				log.Fatalf("Failed to write metadata to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(string(bytes))
-		}
+		writeOutputOrStdout(outputFile, "metadata", bytes)
 
 	case "get-diff":
 		diff, err := getDiff(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get diff: %v", err)
 		}
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(diff), 0o644); err != nil {
-				log.Fatalf("Failed to write diff to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(diff)
-		}
+		writeOutputOrStdout(outputFile, "diff", []byte(diff))
 
 	case "get-files":
 		files, err := getFiles(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get files: %v", err)
 		}
-		content := strings.Join(files, "\n")
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
-				log.Fatalf("Failed to write files to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(content)
-		}
+		writeOutputOrStdout(outputFile, "files", []byte(strings.Join(files, "\n")))
 
 	case "get-commits":
 		commits, err := getCommits(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get commits: %v", err)
 		}
-		content := strings.Join(commits, "\n")
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
-				log.Fatalf("Failed to write commits to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(content)
-		}
+		writeOutputOrStdout(outputFile, "commits", []byte(strings.Join(commits, "\n")))
 
 	default:
 		log.Fatalf("Unknown action: %s", action)
+	}
+}
+
+// writeOutputOrStdout writes data to outputFile when set, otherwise prints
+// it to stdout. label is used only in the fatal-error message to identify
+// which action produced the data. Fatals on I/O failure — callers are in
+// the main dispatch and have no meaningful recovery path.
+func writeOutputOrStdout(outputFile, label string, data []byte) {
+	if outputFile == "" {
+		fmt.Println(string(data))
+		return
+	}
+	if err := os.WriteFile(outputFile, data, 0o644); err != nil {
+		log.Fatalf("Failed to write %s to %s: %v", label, outputFile, err)
 	}
 }
 
