@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"testing"
 
 	"github.com/menny/cassandra/llm"
@@ -38,10 +39,7 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 			copy(snapshot[i].ToolResults, msg.ToolResults)
 		}
 		if msg.ProviderMetadata != nil {
-			snapshot[i].ProviderMetadata = make(map[string]any)
-			for k, v := range msg.ProviderMetadata {
-				snapshot[i].ProviderMetadata[k] = v
-			}
+			snapshot[i].ProviderMetadata = maps.Clone(msg.ProviderMetadata)
 		}
 	}
 	m.calls = append(m.calls, snapshot)
