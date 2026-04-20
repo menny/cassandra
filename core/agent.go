@@ -182,7 +182,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		}
 
 		a.reporter.ReportUsage(resp.Usage)
-		a.trackUsage(resp.Usage)
+		a.totalUsage.Add(resp.Usage)
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
@@ -248,7 +248,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		}
 
 		a.reporter.ReportUsage(resp.Usage)
-		a.trackUsage(resp.Usage)
+		a.totalUsage.Add(resp.Usage)
 
 		if resp.Text == "" {
 			lastErr = errors.New("extraction returned empty content")
@@ -316,16 +316,12 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	}
 
 	a.reporter.ReportUsage(resp.Usage)
-	a.trackUsage(resp.Usage)
+	a.totalUsage.Add(resp.Usage)
 
 	if resp.Text == "" {
 		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
 	}
 	return resp.Text, nil
-}
-
-func (a *Agent) trackUsage(usage llm.Usage) {
-	a.totalUsage.Add(usage)
 }
 
 // generateContentWithEmptyRetry calls GenerateContent and retries up to
