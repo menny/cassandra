@@ -57,10 +57,10 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	return m.responses[idx], nil
 }
 
-func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
+func (m *mockLLM) GenerateStructuredContent(ctx context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
 	m.schemas = append(m.schemas, schema)
 	// For testing, just treat it like GenerateContent but record the call.
-	return m.GenerateContent(context.Background(), msgs, nil, 0)
+	return m.GenerateContent(ctx, msgs, nil, 0)
 }
 
 // textResponse builds a Response with plain text and no tool calls.
