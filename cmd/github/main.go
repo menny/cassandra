@@ -220,8 +220,8 @@ func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), 
 				timer.Stop()
 				return lastResp, ctx.Err()
 			case <-timer.C:
-				baseDelay *= 2
 			}
+			baseDelay *= 2
 		}
 		resp, err := fn()
 		if err == nil {
