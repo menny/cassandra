@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -154,21 +155,19 @@ func registerLocalGrepFiles(r *Registry) {
 		}
 
 		// Filter out lock files as they are usually not relevant and can be huge.
-		for _, lf := range LockFiles {
-			cmdArgs = append(cmdArgs, fmt.Sprintf(":(exclude)*%s", lf))
-		}
+		cmdArgs = appendLockFileExcludes(cmdArgs)
 
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.
 
-		cmd := exec.Command("git", cmdArgs...)
-		out, err := cmd.CombinedOutput()
+		out, err := runGit("", cmdArgs...)
 		if err != nil {
-			// git grep returns exit code 1 if no matches are found
-			if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1 && len(out) == 0 {
+			// git grep returns exit code 1 if no matches are found.
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(out) == 0 {
 				return "No matches found.", nil
 			}
-			return "", fmt.Errorf("grep_files failed: %v\nOutput: %s", err, string(out))
+			return "", fmt.Errorf("grep_files failed: %w\nOutput: %s", err, string(out))
 		}
 
 		output := string(out)
