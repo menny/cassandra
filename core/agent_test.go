@@ -706,6 +706,33 @@ func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
 	}
 }
 
+// TestExtractStructuredReview_RespectsContextCancellation verifies that a
+// cancelled ctx halts the soft-retry loop: mockLLM returns empty content on
+// the first attempt (triggering a retry) and sleepWithContext at the top of
+// the next iteration detects the cancellation and returns ctx.Err() instead
+// of making a second LLM call.
+func TestExtractStructuredReview_RespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	lm := &mockLLM{responses: []*llm.Response{
+		{Text: ""}, // empty triggers soft retry; sleepWithContext will then propagate ctx.Err()
+	}}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(ctx, "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if lm.callIdx != 1 {
+		t.Errorf("expected 1 LLM call before cancellation halted retry, got %d", lm.callIdx)
+	}
+}
+
 // TestRunReview_EmptyResponseRetry verifies that when the LLM returns a
 // successful but empty response (no text, no tool calls), the agent retries
 // the call and eventually succeeds.
