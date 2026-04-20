@@ -324,18 +324,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 }
 
 func (a *Agent) trackUsage(usage llm.Usage) {
-	if usage.PromptTokens > 0 {
-		a.totalUsage.PromptTokens += usage.PromptTokens
-	}
-	if usage.OutputTokens > 0 {
-		a.totalUsage.OutputTokens += usage.OutputTokens
-	}
-	if usage.ThinkingTokens > 0 {
-		a.totalUsage.ThinkingTokens += usage.ThinkingTokens
-	}
-	if usage.CachedTokens > 0 {
-		a.totalUsage.CachedTokens += usage.CachedTokens
-	}
+	a.totalUsage.Add(usage)
 }
 
 // generateContentWithEmptyRetry calls GenerateContent and retries up to
