@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -155,22 +156,16 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		maxIterations = AbsoluteMaxIter
 	}
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = llm.DefaultMaxTokens
 	}
 
-	var messages []llm.Message
-	if dynamicSystem != "" {
-		messages = []llm.Message{
-			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
-			{Role: llm.RoleSystem, Text: dynamicSystem},
-			{Role: llm.RoleUser, Text: requestText},
-		}
-	} else {
-		messages = []llm.Message{
-			{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
-			{Role: llm.RoleUser, Text: requestText},
-		}
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Text: stableSystem, CacheBreakpoint: true},
 	}
+	if dynamicSystem != "" {
+		messages = append(messages, llm.Message{Role: llm.RoleSystem, Text: dynamicSystem})
+	}
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: requestText})
 
 	tools := a.registry.ToTools()
 
@@ -187,7 +182,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		}
 
 		a.reporter.ReportUsage(resp.Usage)
-		a.trackUsage(resp.Usage)
+		a.totalUsage.Add(resp.Usage)
 
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
@@ -209,11 +204,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 			ProviderMetadata: resp.ProviderMetadata,
 		})
 
-		toolMsg, err := a.executeToolCalls(resp.ToolCalls)
-		if err != nil {
-			return "", err
-		}
-		messages = append(messages, toolMsg)
+		messages = append(messages, a.executeToolCalls(resp.ToolCalls))
 	}
 
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
@@ -257,10 +248,10 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		}
 
 		a.reporter.ReportUsage(resp.Usage)
-		a.trackUsage(resp.Usage)
+		a.totalUsage.Add(resp.Usage)
 
 		if resp.Text == "" {
-			lastErr = fmt.Errorf("extraction returned empty content")
+			lastErr = errors.New("extraction returned empty content")
 			continue
 		}
 
@@ -276,7 +267,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 	return nil, lastErr
 }
 
-func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {
+func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) llm.Message {
 	// Execute all tool calls and collect results into ONE RoleTool message.
 	// All ToolResults must be in a single message so providers see strict
 	// role alternation (no consecutive same-role turns).
@@ -286,7 +277,6 @@ func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) 
 	}
 
 	for _, tc := range toolCalls {
-		// Progress line: print tool name + a compact summary of args.
 		a.reporter.ReportToolCall(tc)
 
 		// Dispatch; on error, surface the message as the tool result so the
@@ -302,7 +292,7 @@ func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) 
 			Content:    result,
 		})
 	}
-	return toolMsg, nil
+	return toolMsg
 }
 
 func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, maxIterations, maxTokens int) (string, error) {
@@ -326,27 +316,12 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	}
 
 	a.reporter.ReportUsage(resp.Usage)
-	a.trackUsage(resp.Usage)
+	a.totalUsage.Add(resp.Usage)
 
 	if resp.Text == "" {
 		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
 	}
 	return resp.Text, nil
-}
-
-func (a *Agent) trackUsage(usage llm.Usage) {
-	if usage.PromptTokens > 0 {
-		a.totalUsage.PromptTokens += usage.PromptTokens
-	}
-	if usage.OutputTokens > 0 {
-		a.totalUsage.OutputTokens += usage.OutputTokens
-	}
-	if usage.ThinkingTokens > 0 {
-		a.totalUsage.ThinkingTokens += usage.ThinkingTokens
-	}
-	if usage.CachedTokens > 0 {
-		a.totalUsage.CachedTokens += usage.CachedTokens
-	}
 }
 
 // generateContentWithEmptyRetry calls GenerateContent and retries up to

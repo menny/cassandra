@@ -39,7 +39,7 @@ func (fr *FileReview) ParseLines() (int, int, error) {
 	if len(parts) == 1 {
 		line, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 		if err != nil {
-			return 0, 0, fmt.Errorf("invalid line format: %v", err)
+			return 0, 0, fmt.Errorf("invalid line format: %w", err)
 		}
 		return line, line, nil
 	}
@@ -47,11 +47,11 @@ func (fr *FileReview) ParseLines() (int, int, error) {
 	if len(parts) == 2 {
 		startLine, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 		if err != nil {
-			return 0, 0, fmt.Errorf("invalid start line format: %v", err)
+			return 0, 0, fmt.Errorf("invalid start line format: %w", err)
 		}
 		endLine, err := strconv.Atoi(strings.TrimSpace(parts[1]))
 		if err != nil {
-			return 0, 0, fmt.Errorf("invalid end line format: %v", err)
+			return 0, 0, fmt.Errorf("invalid end line format: %w", err)
 		}
 
 		if startLine > endLine {

@@ -78,11 +78,12 @@ the companion implementation rules.
   exposes multiple counters (e.g. cache vs. non-cache), every counter path
   must be covered by the usage-presence guard.
 - **`llm.StructuredConfig.Resolve(defaultModel)`** — returns
-  `(model, maxTokens)` with `ModelOverride` and `DefaultStructuredMaxTokens`
+  `(model, maxTokens)` with `ModelOverride` and `DefaultMaxTokens`
   applied. `GenerateStructuredContent` implementations call this to
   eliminate per-provider defaulting boilerplate.
-- **`llm.DefaultStructuredMaxTokens = 8192`** — fallback budget for
-  structured-output calls. Kept in lockstep with the CLI `--max-tokens`
+- **`llm.DefaultMaxTokens = 8192`** — fallback token budget for both
+  `GenerateContent` and `GenerateStructuredContent` when the caller
+  does not specify one. Kept in lockstep with the CLI `--max-tokens`
   default in `cmd/ai_reviewer`.
 - **`llm.retry[T]`** (package-private) — the canonical exponential-back-off
   + ctx-cancellation loop. `RetryingModel` wraps the interface via this

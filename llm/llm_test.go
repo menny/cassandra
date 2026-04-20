@@ -7,6 +7,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUsage_Add(t *testing.T) {
+	t.Run("accumulates positive counts", func(t *testing.T) {
+		u := Usage{PromptTokens: 10, OutputTokens: 5}
+		u.Add(Usage{PromptTokens: 3, OutputTokens: 2, ThinkingTokens: 7, CachedTokens: 1})
+		assert.Equal(t, Usage{PromptTokens: 13, OutputTokens: 7, ThinkingTokens: 7, CachedTokens: 1}, u)
+	})
+
+	t.Run("ignores UnknownUsage sentinel", func(t *testing.T) {
+		u := Usage{PromptTokens: 10, OutputTokens: 5}
+		u.Add(UnknownUsage())
+		assert.Equal(t, Usage{PromptTokens: 10, OutputTokens: 5}, u)
+	})
+
+	t.Run("ignores zero fields", func(t *testing.T) {
+		u := Usage{PromptTokens: 10}
+		u.Add(Usage{PromptTokens: 0, OutputTokens: 0, ThinkingTokens: 4})
+		assert.Equal(t, Usage{PromptTokens: 10, ThinkingTokens: 4}, u)
+	})
+}
+
 func TestToolCall_UnmarshalArguments(t *testing.T) {
 	t.Run("empty arguments", func(t *testing.T) {
 		tc := &ToolCall{Arguments: ""}

@@ -21,7 +21,7 @@ Every `GenerateStructuredContent` implementation MUST open with:
 modelName, maxTokens := config.Resolve(p.modelName)
 ```
 Do not inline model-override or max-tokens defaulting.
-`llm.DefaultStructuredMaxTokens` is the single source of truth and is kept
+`llm.DefaultMaxTokens` is the single source of truth and is kept
 in lockstep with the CLI `--max-tokens` default.
 
 ### 3. Usage Sentinel
@@ -34,6 +34,11 @@ Anthropic's `InputTokens`, `CacheReadInputTokens`,
 data?" MUST cover **every** counter path. A guard that only checks the
 non-cache counters will silently leave `CachedTokens` at its sentinel for
 cache-only responses — the exact bug fixed in `da5f0f3`.
+
+Callers aggregating per-iteration `Usage` into a session total MUST use
+`(*Usage).Add(other)`, which ignores sentinel fields (values ≤ 0) so
+`UnknownUsage()` responses do not corrupt the aggregate. Do not hand-roll
+field-by-field accumulation.
 
 ### 4. Tool-Name Contracts
 Tool names referenced by downstream consumers or documented in

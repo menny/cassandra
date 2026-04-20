@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"testing"
 
 	"github.com/menny/cassandra/llm"
@@ -25,7 +26,14 @@ type mockLLM struct {
 	callIdx   int
 }
 
-func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
+func (m *mockLLM) GenerateContent(ctx context.Context, msgs []llm.Message, _ []llm.ToolDef, _ int) (*llm.Response, error) {
+	// Honor ctx at entry so a cancelled context surfaces as ctx.Err() before
+	// any scripted response is returned. This is what real provider SDKs do,
+	// and it is the only way a ctx-forwarding test at the double's boundary
+	// can observe the cancellation path.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	snapshot := make([]llm.Message, len(msgs))
 	for i, msg := range msgs {
 		snapshot[i] = msg
@@ -38,10 +46,7 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 			copy(snapshot[i].ToolResults, msg.ToolResults)
 		}
 		if msg.ProviderMetadata != nil {
-			snapshot[i].ProviderMetadata = make(map[string]any)
-			for k, v := range msg.ProviderMetadata {
-				snapshot[i].ProviderMetadata[k] = v
-			}
+			snapshot[i].ProviderMetadata = maps.Clone(msg.ProviderMetadata)
 		}
 	}
 	m.calls = append(m.calls, snapshot)
@@ -57,10 +62,10 @@ func (m *mockLLM) GenerateContent(_ context.Context, msgs []llm.Message, _ []llm
 	return m.responses[idx], nil
 }
 
-func (m *mockLLM) GenerateStructuredContent(_ context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
+func (m *mockLLM) GenerateStructuredContent(ctx context.Context, msgs []llm.Message, schema map[string]any, _ llm.StructuredConfig) (*llm.Response, error) {
 	m.schemas = append(m.schemas, schema)
 	// For testing, just treat it like GenerateContent but record the call.
-	return m.GenerateContent(context.Background(), msgs, nil, 0)
+	return m.GenerateContent(ctx, msgs, nil, 0)
 }
 
 // textResponse builds a Response with plain text and no tool calls.
@@ -197,10 +202,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		tc1 := llm.ToolCall{ID: "id1", Name: "tool1"}
 		tc2 := llm.ToolCall{ID: "id2", Name: "tool2"}
 
-		msg, err := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
-		if err != nil {
-			t.Fatal(err)
-		}
+		msg := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
 
 		if msg.Role != llm.RoleTool {
 			t.Errorf("expected RoleTool, got %v", msg.Role)
@@ -215,13 +217,10 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 
 	t.Run("error-handling (individual tool failure)", func(t *testing.T) {
 		d := newMockDispatcher()
-		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", fmt.Errorf("boom") }
+		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", errors.New("boom") }
 
 		agent := NewAgent(nil, d, WithStderr(io.Discard))
-		msg, err := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
-		if err != nil {
-			t.Errorf("executeToolCalls should not return error on tool failure, got: %v", err)
-		}
+		msg := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
 
 		if len(msg.ToolResults) != 1 {
 			t.Fatal("expected 1 result")
@@ -711,6 +710,56 @@ func TestExtractStructuredReview_LLMErrorReturnsImmediately(t *testing.T) {
 	// Must stop after exactly one call — no outer retry on hard errors.
 	if lm.callIdx != 1 {
 		t.Errorf("expected 1 LLM call, got %d", lm.callIdx)
+	}
+}
+
+// TestMockLLM_GenerateStructuredContent_ForwardsCanceledContext verifies
+// that the test double forwards ctx to GenerateContent rather than silently
+// substituting context.Background() — the exact bug fixed in 7acedcd. This
+// is the only test that anchors cancellation at the double's boundary;
+// without it, ExtractStructuredReview's cancellation coverage would pass
+// even after a regression in GenerateStructuredContent's ctx forwarding.
+func TestMockLLM_GenerateStructuredContent_ForwardsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	lm := &mockLLM{responses: []*llm.Response{textResponse("never returned")}}
+
+	_, err := lm.GenerateStructuredContent(ctx, nil, nil, llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if lm.callIdx != 0 {
+		t.Errorf("expected 0 calls (mock should short-circuit on cancelled ctx), got %d", lm.callIdx)
+	}
+}
+
+// TestExtractStructuredReview_RespectsContextCancellation verifies that a
+// cancelled ctx flows through ExtractStructuredReview's soft-retry loop and
+// surfaces as a wrapped context.Canceled. With mockLLM now honoring ctx at
+// entry, the cancellation is observed on the first call and the loop never
+// enters its second attempt.
+func TestExtractStructuredReview_RespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	lm := &mockLLM{responses: []*llm.Response{textResponse("never returned")}}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.ExtractStructuredReview(ctx, "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	// mockLLM short-circuits on cancelled ctx; the first call never records.
+	if lm.callIdx != 0 {
+		t.Errorf("expected 0 LLM calls (mock short-circuit on cancelled ctx), got %d", lm.callIdx)
 	}
 }
 
