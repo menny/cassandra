@@ -167,7 +167,33 @@ runs:
     - name: Setup Execution Environment
       id: setup_env
       shell: bash
-      run: "mkdir -p \"${{ runner.temp }}/bin\"\n\nBIN_DIR=\"${{ steps.fetch_binaries.outputs.bin_dir }}\"\nBIN_CASSANDRA=\"${{ steps.fetch_binaries.outputs.bin_cassandra }}\"\nBIN_GITHUB=\"${{ steps.fetch_binaries.outputs.bin_github }}\"\n\nif [[ \"${{ steps.fetch_binaries.outputs.download_success }}\" == \"true\" ]]; then\n  echo \"CASSANDRA_BIN=$BIN_CASSANDRA\" >> $GITHUB_ENV\n  echo \"GITHUB_BIN=$BIN_GITHUB\" >> $GITHUB_ENV\nelse\n  # Create wrapper scripts that call bazel\n  CASSANDRA_WRAPPER=\"${{ runner.temp }}/bin/cassandra_wrapper.sh\"\n  cat << 'EOF' > \"$CASSANDRA_WRAPPER\"\n#!/bin/bash\ncd \"${{ github.action_path }}\"\nexec bazel run //cmd/ai_reviewer:ai_reviewer -- \"$@\"\nEOF\n  chmod +x \"$CASSANDRA_WRAPPER\"\n  \n  GITHUB_WRAPPER=\"${{ runner.temp }}/bin/github_wrapper.sh\"\n  cat << 'EOF' > \"$GITHUB_WRAPPER\"\n#!/bin/bash\ncd \"${{ github.action_path }}\"\nexec bazel run //cmd/github:github -- \"$@\"\nEOF\n  chmod +x \"$GITHUB_WRAPPER\"\n  \n  echo \"CASSANDRA_BIN=$CASSANDRA_WRAPPER\" >> $GITHUB_ENV\n  echo \"GITHUB_BIN=$GITHUB_WRAPPER\" >> $GITHUB_ENV\nfi\n"
+      run: |
+        mkdir -p "${{ runner.temp }}/bin"
+
+        if [[ "${{ steps.fetch_binaries.outputs.download_success }}" == "true" ]]; then
+          echo "CASSANDRA_BIN=${{ steps.fetch_binaries.outputs.bin_cassandra }}" >> $GITHUB_ENV
+          echo "GITHUB_BIN=${{ steps.fetch_binaries.outputs.bin_github }}" >> $GITHUB_ENV
+        else
+          # Create wrapper scripts that call bazel
+          CASSANDRA_WRAPPER="${{ runner.temp }}/bin/cassandra_wrapper.sh"
+          cat << 'EOF' > "$CASSANDRA_WRAPPER"
+#!/bin/bash
+cd "${{ github.action_path }}"
+exec bazel run //cmd/ai_reviewer:ai_reviewer -- "$@"
+EOF
+          chmod +x "$CASSANDRA_WRAPPER"
+
+          GITHUB_WRAPPER="${{ runner.temp }}/bin/github_wrapper.sh"
+          cat << 'EOF' > "$GITHUB_WRAPPER"
+#!/bin/bash
+cd "${{ github.action_path }}"
+exec bazel run //cmd/github:github -- "$@"
+EOF
+          chmod +x "$GITHUB_WRAPPER"
+
+          echo "CASSANDRA_BIN=$CASSANDRA_WRAPPER" >> $GITHUB_ENV
+          echo "GITHUB_BIN=$GITHUB_WRAPPER" >> $GITHUB_ENV
+        fi
     - name: Add Status Reaction
       if: github.event.pull_request.number != ''
       shell: bash
