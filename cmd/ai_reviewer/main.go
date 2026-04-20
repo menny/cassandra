@@ -42,7 +42,7 @@ func main() {
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
 	flag.StringVar(&approvalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	flag.IntVar(&maxTokens, "max-tokens", 8192, "Max tokens for the LLM response")
+	flag.IntVar(&maxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
 	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
 	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
