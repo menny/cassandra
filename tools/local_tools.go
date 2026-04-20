@@ -160,8 +160,7 @@ func registerLocalGrepFiles(r *Registry) {
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.
 
-		cmd := exec.Command("git", cmdArgs...)
-		out, err := cmd.CombinedOutput()
+		out, err := runGit("", cmdArgs...)
 		if err != nil {
 			// git grep returns exit code 1 if no matches are found.
 			var exitErr *exec.ExitError

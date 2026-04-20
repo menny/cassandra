@@ -26,6 +26,19 @@ func appendLockFileExcludes(args []string) []string {
 	return args
 }
 
+// runGit invokes `git <args>` in the given working directory (or the current
+// directory when dir is empty) and returns combined stdout+stderr. Callers
+// wrap the returned error with their own context; runGit itself does not
+// format the error so callers can inspect the exit code via errors.As
+// (*exec.ExitError) where relevant.
+func runGit(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd.CombinedOutput()
+}
+
 func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	var diffRange string
 	if head == "HEAD" {
@@ -40,9 +53,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	cmdArgs = append(cmdArgs, "--", ".")
 	cmdArgs = appendLockFileExcludes(cmdArgs)
 
-	cmd := exec.Command("git", cmdArgs...)
-	cmd.Dir = workingDir
-	out, err := cmd.CombinedOutput()
+	out, err := runGit(workingDir, cmdArgs...)
 	if err != nil {
 		return "", nil, fmt.Errorf("git diff %s failed in %s: %w\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
@@ -54,9 +65,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 
 	// Get file list
 	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."})
-	nameOnlyCmd := exec.Command("git", nameOnlyArgs...)
-	nameOnlyCmd.Dir = workingDir
-	nameOnlyOut, err := nameOnlyCmd.CombinedOutput()
+	nameOnlyOut, err := runGit(workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
 	}
@@ -81,11 +90,7 @@ func FetchGitCommits(workingDir, base, head string) (string, error) {
 	}
 
 	// Use a clean format for commit messages
-	cmdArgs := []string{"log", "--pretty=format:- %s", "--no-merges", commitRange}
-	cmd := exec.Command("git", cmdArgs...)
-	cmd.Dir = workingDir
-
-	out, err := cmd.CombinedOutput()
+	out, err := runGit(workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
 	if err != nil {
 		// If git log fails (e.g., shallow clone), we return an error to be handled by the caller.
 		return "", fmt.Errorf("git log %s failed: %w. Output: %s", commitRange, err, string(out))
