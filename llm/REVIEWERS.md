@@ -20,6 +20,6 @@ Behavioral divergence between `llm/anthropic` and `llm/google` is a defect unles
 ## Paired edits (block if one is missing)
 
 - `submitReviewToolName` ↔ `DESIGN.md §Technical Decisions 4`.
-- `DefaultStructuredMaxTokens` ↔ CLI `--max-tokens` default in `cmd/ai_reviewer`.
+- `DefaultMaxTokens` ↔ CLI `--max-tokens` default in `cmd/ai_reviewer`.
 - New provider ↔ `factory.providers` map + `README.md` §Supported Models.
 - `llm.Model` signature change ↔ test doubles under `llm/`.

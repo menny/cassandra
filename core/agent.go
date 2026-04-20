@@ -155,7 +155,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		maxIterations = AbsoluteMaxIter
 	}
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = llm.DefaultMaxTokens
 	}
 
 	messages := []llm.Message{

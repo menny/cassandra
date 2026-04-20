@@ -21,7 +21,7 @@ Every `GenerateStructuredContent` implementation MUST open with:
 modelName, maxTokens := config.Resolve(p.modelName)
 ```
 Do not inline model-override or max-tokens defaulting.
-`llm.DefaultStructuredMaxTokens` is the single source of truth and is kept
+`llm.DefaultMaxTokens` is the single source of truth and is kept
 in lockstep with the CLI `--max-tokens` default.
 
 ### 3. Usage Sentinel

@@ -136,11 +136,12 @@ type Response struct {
 	Usage            Usage          // token usage for this interaction
 }
 
-// DefaultStructuredMaxTokens is the fallback max-tokens budget used by
-// providers when StructuredConfig.MaxTokens is unset. Kept in sync with the
-// CLI's --max-tokens default (see cmd/ai_reviewer) so the structured
-// extraction pass has a consistent headroom across provider implementations.
-const DefaultStructuredMaxTokens = 8192
+// DefaultMaxTokens is the fallback max-tokens budget for LLM calls when the
+// caller does not specify one — covering both GenerateContent (via
+// core.Agent.RunReview) and GenerateStructuredContent (via
+// StructuredConfig.Resolve). Kept in sync with the CLI's --max-tokens
+// default (see cmd/ai_reviewer) so every pass has consistent headroom.
+const DefaultMaxTokens = 8192
 
 // StructuredConfig provides options for structured output generation.
 type StructuredConfig struct {
@@ -151,8 +152,8 @@ type StructuredConfig struct {
 }
 
 // Resolve returns the effective model and max-tokens values, applying the
-// provider's default model when no override is set and
-// DefaultStructuredMaxTokens when MaxTokens is non-positive.
+// provider's default model when no override is set and DefaultMaxTokens
+// when MaxTokens is non-positive.
 func (c StructuredConfig) Resolve(defaultModel string) (string, int) {
 	model := defaultModel
 	if c.ModelOverride != "" {
@@ -160,7 +161,7 @@ func (c StructuredConfig) Resolve(defaultModel string) (string, int) {
 	}
 	maxTokens := c.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = DefaultStructuredMaxTokens
+		maxTokens = DefaultMaxTokens
 	}
 	return model, maxTokens
 }
