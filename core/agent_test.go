@@ -212,7 +212,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 
 	t.Run("error-handling (individual tool failure)", func(t *testing.T) {
 		d := newMockDispatcher()
-		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", fmt.Errorf("boom") }
+		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", errors.New("boom") }
 
 		agent := NewAgent(nil, d, WithStderr(io.Discard))
 		msg := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})

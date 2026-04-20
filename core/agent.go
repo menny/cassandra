@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -250,7 +251,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		a.trackUsage(resp.Usage)
 
 		if resp.Text == "" {
-			lastErr = fmt.Errorf("extraction returned empty content")
+			lastErr = errors.New("extraction returned empty content")
 			continue
 		}
 
