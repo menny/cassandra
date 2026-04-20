@@ -16,6 +16,12 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+// stderr is used for all non-fatal diagnostic / warning output so that any
+// future stdout contract (matching cmd/ai_reviewer) isn't polluted by
+// log-package timestamp prefixes. log.Fatalf still uses the default logger
+// for fatal exits — the timestamp is acceptable on termination.
+var stderr = log.New(os.Stderr, "", 0)
+
 func main() {
 	var repoFullName string
 	var prNumber int
@@ -276,7 +282,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	self, _, err := client.Users.Get(ctx, "")
 	selfLogin := ""
 	if err != nil {
-		log.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
+		stderr.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
 	} else {
 		selfLogin = self.GetLogin()
 	}
@@ -318,7 +324,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	// Delete redundant comments first
 	for _, id := range redundantCommentIDs {
 		if _, err := client.Issues.DeleteComment(ctx, owner, repo, id); err != nil {
-			log.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
+			stderr.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
 		}
 	}
 
@@ -450,10 +456,10 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	if metadataFile != "" {
 		metadataBytes, err := os.ReadFile(metadataFile)
 		if err != nil {
-			log.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
+			stderr.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
 		} else {
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				log.Printf("Warning: failed to unmarshal metadata: %v", err)
+				stderr.Printf("Warning: failed to unmarshal metadata: %v", err)
 			}
 		}
 	}
@@ -465,7 +471,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	// 1. Dismiss previous reviews BEFORE providing new review
 	if tag != "" {
 		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, reviewTag, 0); err != nil {
-			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+			stderr.Printf("Warning: failed to dismiss previous reviews: %v", err)
 		}
 	}
 
@@ -474,7 +480,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		for _, c := range metadata.Comments {
 			if c.IsSelf && strings.Contains(c.Body, inlineTag) {
 				if _, err := client.PullRequests.DeleteComment(ctx, owner, repo, c.ID); err != nil {
-					log.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
+					stderr.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
 				}
 			}
 		}
@@ -483,7 +489,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	// 3. Post Non-Specific Review as a separate comment
 	if sr.NonSpecificReview != "" {
 		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
-			log.Printf("Warning: failed to post non-specific review comment: %v", err)
+			stderr.Printf("Warning: failed to post non-specific review comment: %v", err)
 		}
 	}
 
@@ -493,7 +499,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
 		if err != nil {
-			log.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
+			stderr.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
 			reviewRationale = fmt.Sprintf("%s\n\n- **%s**: %s", reviewRationale, fr.Path, fr.Review)
 			continue
 		}
@@ -550,7 +556,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			hasComments := len(reviewRequest.Comments) > 0
 
 			if isPermissionError {
-				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
+				stderr.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
 
 				// Try again with COMMENT action, keeping inline comments
@@ -569,7 +575,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			}
 
 			if hasComments {
-				log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
+				stderr.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
 				reviewRequest.Comments = nil
 				var sb strings.Builder
 				sb.WriteString(reviewRequest.GetBody())
@@ -615,7 +621,7 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 					})
 					return resp, err
 				}, 3); err != nil {
-					log.Printf("Warning: failed to dismiss review %d: %v", reviewID, err)
+					stderr.Printf("Warning: failed to dismiss review %d: %v", reviewID, err)
 				}
 			}
 		}
