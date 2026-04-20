@@ -188,6 +188,17 @@ func parseRepo(fullName string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// Tag prefixes used to namespace bot-authored PR content. DESIGN.md
+// describes the separation: main-tag comments carry the persistent
+// architectural review, inline-tag comments carry per-line feedback, and
+// the empty-prefix form identifies formal PR-level review bodies. Changes
+// to these prefixes must be coordinated with README.md's troubleshooting
+// section since they appear verbatim in user-visible documentation.
+const (
+	tagPrefixMain   = "cassandra-main-"
+	tagPrefixInline = "cassandra-inline-"
+)
+
 // retryableStatusCodes are HTTP status codes that indicate a transient failure
 // on the GitHub API side and are safe to retry.
 var retryableStatusCodes = map[int]bool{
@@ -270,7 +281,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	mainTag := wrapTag(tag, "cassandra-main-")
+	mainTag := wrapTag(tag, tagPrefixMain)
 	return postCommentText(ctx, client, owner, repo, prNumber, string(body), mainTag)
 }
 
@@ -353,8 +364,8 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		return nil, fmt.Errorf("failed to get PR: %w", err)
 	}
 
-	mainTag := wrapTag(tag, "cassandra-main-")
-	inlineTag := wrapTag(tag, "cassandra-inline-")
+	mainTag := wrapTag(tag, tagPrefixMain)
+	inlineTag := wrapTag(tag, tagPrefixInline)
 	reviewTag := wrapTag(tag, "")
 
 	metadata := &core.PRMetadata{
@@ -465,8 +476,8 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	}
 
 	reviewTag := wrapTag(tag, "")
-	inlineTag := wrapTag(tag, "cassandra-inline-")
-	mainTag := wrapTag(tag, "cassandra-main-")
+	inlineTag := wrapTag(tag, tagPrefixInline)
+	mainTag := wrapTag(tag, tagPrefixMain)
 
 	// 1. Dismiss previous reviews BEFORE providing new review
 	if tag != "" {
