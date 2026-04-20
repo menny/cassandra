@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -164,8 +165,9 @@ func registerLocalGrepFiles(r *Registry) {
 		cmd := exec.Command("git", cmdArgs...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			// git grep returns exit code 1 if no matches are found
-			if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1 && len(out) == 0 {
+			// git grep returns exit code 1 if no matches are found.
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(out) == 0 {
 				return "No matches found.", nil
 			}
 			return "", fmt.Errorf("grep_files failed: %w\nOutput: %s", err, string(out))
