@@ -155,9 +155,7 @@ func registerLocalGrepFiles(r *Registry) {
 		}
 
 		// Filter out lock files as they are usually not relevant and can be huge.
-		for _, lf := range LockFiles {
-			cmdArgs = append(cmdArgs, fmt.Sprintf(":(exclude)*%s", lf))
-		}
+		cmdArgs = appendLockFileExcludes(cmdArgs)
 
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.

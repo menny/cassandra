@@ -16,6 +16,16 @@ var LockFiles = []string{
 	"Gemfile.lock",
 }
 
+// appendLockFileExcludes appends a git pathspec ":(exclude)*<name>" for each
+// entry in LockFiles to args, returning the grown slice. Used to suppress
+// noisy lockfile churn in diff and grep output.
+func appendLockFileExcludes(args []string) []string {
+	for _, lf := range LockFiles {
+		args = append(args, fmt.Sprintf(":(exclude)*%s", lf))
+	}
+	return args
+}
+
 func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	var diffRange string
 	if head == "HEAD" {
@@ -28,9 +38,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
-	for _, lf := range LockFiles {
-		cmdArgs = append(cmdArgs, fmt.Sprintf(":(exclude)*%s", lf))
-	}
+	cmdArgs = appendLockFileExcludes(cmdArgs)
 
 	cmd := exec.Command("git", cmdArgs...)
 	cmd.Dir = workingDir
@@ -45,10 +53,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	}
 
 	// Get file list
-	nameOnlyArgs := []string{"diff", "--name-only", diffRange, "--", "."}
-	for _, lf := range LockFiles {
-		nameOnlyArgs = append(nameOnlyArgs, fmt.Sprintf(":(exclude)*%s", lf))
-	}
+	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."})
 	nameOnlyCmd := exec.Command("git", nameOnlyArgs...)
 	nameOnlyCmd.Dir = workingDir
 	nameOnlyOut, err := nameOnlyCmd.CombinedOutput()
