@@ -209,11 +209,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 			ProviderMetadata: resp.ProviderMetadata,
 		})
 
-		toolMsg, err := a.executeToolCalls(resp.ToolCalls)
-		if err != nil {
-			return "", err
-		}
-		messages = append(messages, toolMsg)
+		messages = append(messages, a.executeToolCalls(resp.ToolCalls))
 	}
 
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
@@ -276,7 +272,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 	return nil, lastErr
 }
 
-func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) {
+func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) llm.Message {
 	// Execute all tool calls and collect results into ONE RoleTool message.
 	// All ToolResults must be in a single message so providers see strict
 	// role alternation (no consecutive same-role turns).
@@ -286,7 +282,6 @@ func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) 
 	}
 
 	for _, tc := range toolCalls {
-		// Progress line: print tool name + a compact summary of args.
 		a.reporter.ReportToolCall(tc)
 
 		// Dispatch; on error, surface the message as the tool result so the
@@ -302,7 +297,7 @@ func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) (llm.Message, error) 
 			Content:    result,
 		})
 	}
-	return toolMsg, nil
+	return toolMsg
 }
 
 func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, maxIterations, maxTokens int) (string, error) {
