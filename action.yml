@@ -182,18 +182,18 @@ runs:
           # Create wrapper scripts that call bazel
           CASSANDRA_WRAPPER="${{ runner.temp }}/bin/cassandra_wrapper.sh"
           cat << 'EOF' > "$CASSANDRA_WRAPPER"
-#!/bin/bash
-cd "${{ github.action_path }}"
-exec bazel run //cmd/ai_reviewer:ai_reviewer -- "$@"
-EOF
+          #!/bin/bash
+          cd "${{ github.action_path }}"
+          exec bazel run //cmd/ai_reviewer:ai_reviewer -- "$@"
+          EOF
           chmod +x "$CASSANDRA_WRAPPER"
 
           GITHUB_WRAPPER="${{ runner.temp }}/bin/github_wrapper.sh"
           cat << 'EOF' > "$GITHUB_WRAPPER"
-#!/bin/bash
-cd "${{ github.action_path }}"
-exec bazel run //cmd/github:github -- "$@"
-EOF
+          #!/bin/bash
+          cd "${{ github.action_path }}"
+          exec bazel run //cmd/github:github -- "$@"
+          EOF
           chmod +x "$GITHUB_WRAPPER"
 
           echo "CASSANDRA_BIN=$CASSANDRA_WRAPPER" >> $GITHUB_ENV
