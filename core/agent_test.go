@@ -197,10 +197,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		tc1 := llm.ToolCall{ID: "id1", Name: "tool1"}
 		tc2 := llm.ToolCall{ID: "id2", Name: "tool2"}
 
-		msg, err := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
-		if err != nil {
-			t.Fatal(err)
-		}
+		msg := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
 
 		if msg.Role != llm.RoleTool {
 			t.Errorf("expected RoleTool, got %v", msg.Role)
@@ -218,10 +215,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", fmt.Errorf("boom") }
 
 		agent := NewAgent(nil, d, WithStderr(io.Discard))
-		msg, err := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
-		if err != nil {
-			t.Errorf("executeToolCalls should not return error on tool failure, got: %v", err)
-		}
+		msg := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
 
 		if len(msg.ToolResults) != 1 {
 			t.Fatal("expected 1 result")
