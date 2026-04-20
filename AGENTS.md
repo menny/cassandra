@@ -34,10 +34,9 @@ This project uses `aspect_rules_lint` (v2.3.0) to integrate standard tooling dir
 
 ## Architecture Reference
 
-Before introducing major changes or restructuring the review loop, please read the **[DESIGN.md](file:///Users/mennyevendanan/dev/menny/cassandra/DESIGN.md)** document. It covers:
+Before introducing major changes or restructuring the review loop, please read the **[DESIGN.md](DESIGN.md)** document. It covers:
 - The decision to use a native Go ReAct loop rather than complex Python graphs.
 - The rationale behind the custom Tool Registry.
-- The `Do / Try / Consider` feedback format.
 
 ## Output Contract
 
