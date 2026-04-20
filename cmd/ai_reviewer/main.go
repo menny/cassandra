@@ -302,13 +302,13 @@ func formatMetadata(metadata core.PRMetadata) string {
 	var sb strings.Builder
 	sb.WriteString("### PR Metadata\n")
 	if metadata.RepoFullName != "" {
-		sb.WriteString(fmt.Sprintf("- **Repository**: %s\n", metadata.RepoFullName))
+		fmt.Fprintf(&sb, "- **Repository**: %s\n", metadata.RepoFullName)
 	}
-	sb.WriteString(fmt.Sprintf("- **Author**: %s\n", metadata.Author))
-	sb.WriteString(fmt.Sprintf("- **Date**: %s\n", metadata.CreatedAt.Format("2006-01-02")))
-	sb.WriteString(fmt.Sprintf("- **Title**: %s\n", metadata.Title))
+	fmt.Fprintf(&sb, "- **Author**: %s\n", metadata.Author)
+	fmt.Fprintf(&sb, "- **Date**: %s\n", metadata.CreatedAt.Format("2006-01-02"))
+	fmt.Fprintf(&sb, "- **Title**: %s\n", metadata.Title)
 	if metadata.Description != "" {
-		sb.WriteString(fmt.Sprintf("- **Description**: %s\n", metadata.Description))
+		fmt.Fprintf(&sb, "- **Description**: %s\n", metadata.Description)
 	}
 
 	if len(metadata.Comments) > 0 {
@@ -330,11 +330,11 @@ func formatMetadata(metadata core.PRMetadata) string {
 					location = fmt.Sprintf(" on %s (file-level)", c.Path)
 				}
 			}
-			sb.WriteString(fmt.Sprintf("- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location))
+			fmt.Fprintf(&sb, "- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location)
 			// Indent body and wrap in blockquote to maintain Markdown structure
 			lines := strings.Split(c.Body, "\n")
 			for _, line := range lines {
-				sb.WriteString(fmt.Sprintf("  > %s\n", line))
+				fmt.Fprintf(&sb, "  > %s\n", line)
 			}
 		}
 	}

@@ -26,6 +26,19 @@ func appendLockFileExcludes(args []string) []string {
 	return args
 }
 
+// IsLockFile reports whether path names a known dependency lockfile —
+// either at the repository root (path == name) or in any subdirectory
+// (path ends in "/name"). Used by callers that operate on pre-computed
+// paths (e.g. PR file lists) rather than via git pathspec excludes.
+func IsLockFile(path string) bool {
+	for _, lf := range LockFiles {
+		if path == lf || strings.HasSuffix(path, "/"+lf) {
+			return true
+		}
+	}
+	return false
+}
+
 // runGit invokes `git <args>` in the given working directory (or the current
 // directory when dir is empty) and returns combined stdout+stderr. Callers
 // wrap the returned error with their own context; runGit itself does not

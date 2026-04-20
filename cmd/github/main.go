@@ -16,6 +16,12 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+// stderr is used for all non-fatal diagnostic / warning output so that any
+// future stdout contract (matching cmd/ai_reviewer) isn't polluted by
+// log-package timestamp prefixes. log.Fatalf still uses the default logger
+// for fatal exits — the timestamp is acceptable on termination.
+var stderr = log.New(os.Stderr, "", 0)
+
 func main() {
 	var repoFullName string
 	var prNumber int
@@ -120,57 +126,45 @@ func main() {
 			log.Fatalf("Failed to marshal metadata: %v", err)
 		}
 
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, bytes, 0o644); err != nil {
-				log.Fatalf("Failed to write metadata to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(string(bytes))
-		}
+		writeOutputOrStdout(outputFile, "metadata", bytes)
 
 	case "get-diff":
 		diff, err := getDiff(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get diff: %v", err)
 		}
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(diff), 0o644); err != nil {
-				log.Fatalf("Failed to write diff to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(diff)
-		}
+		writeOutputOrStdout(outputFile, "diff", []byte(diff))
 
 	case "get-files":
 		files, err := getFiles(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get files: %v", err)
 		}
-		content := strings.Join(files, "\n")
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
-				log.Fatalf("Failed to write files to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(content)
-		}
+		writeOutputOrStdout(outputFile, "files", []byte(strings.Join(files, "\n")))
 
 	case "get-commits":
 		commits, err := getCommits(ctx, client, owner, repo, prNumber)
 		if err != nil {
 			log.Fatalf("Failed to get commits: %v", err)
 		}
-		content := strings.Join(commits, "\n")
-		if outputFile != "" {
-			if err := os.WriteFile(outputFile, []byte(content), 0o644); err != nil {
-				log.Fatalf("Failed to write commits to %s: %v", outputFile, err)
-			}
-		} else {
-			fmt.Println(content)
-		}
+		writeOutputOrStdout(outputFile, "commits", []byte(strings.Join(commits, "\n")))
 
 	default:
 		log.Fatalf("Unknown action: %s", action)
+	}
+}
+
+// writeOutputOrStdout writes data to outputFile when set, otherwise prints
+// it to stdout. label is used only in the fatal-error message to identify
+// which action produced the data. Fatals on I/O failure — callers are in
+// the main dispatch and have no meaningful recovery path.
+func writeOutputOrStdout(outputFile, label string, data []byte) {
+	if outputFile == "" {
+		fmt.Println(string(data))
+		return
+	}
+	if err := os.WriteFile(outputFile, data, 0o644); err != nil {
+		log.Fatalf("Failed to write %s to %s: %v", label, outputFile, err)
 	}
 }
 
@@ -181,6 +175,17 @@ func parseRepo(fullName string) (owner, repo string, err error) {
 	}
 	return parts[0], parts[1], nil
 }
+
+// Tag prefixes used to namespace bot-authored PR content. DESIGN.md
+// describes the separation: main-tag comments carry the persistent
+// architectural review, inline-tag comments carry per-line feedback, and
+// the empty-prefix form identifies formal PR-level review bodies. Changes
+// to these prefixes must be coordinated with README.md's troubleshooting
+// section since they appear verbatim in user-visible documentation.
+const (
+	tagPrefixMain   = "cassandra-main-"
+	tagPrefixInline = "cassandra-inline-"
+)
 
 // retryableStatusCodes are HTTP status codes that indicate a transient failure
 // on the GitHub API side and are safe to retry.
@@ -214,8 +219,8 @@ func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), 
 				timer.Stop()
 				return lastResp, ctx.Err()
 			case <-timer.C:
-				baseDelay *= 2
 			}
+			baseDelay *= 2
 		}
 		resp, err := fn()
 		if err == nil {
@@ -264,7 +269,7 @@ func postComment(ctx context.Context, client *github.Client, owner, repo string,
 		return fmt.Errorf("failed to read body file: %w", err)
 	}
 
-	mainTag := wrapTag(tag, "cassandra-main-")
+	mainTag := wrapTag(tag, tagPrefixMain)
 	return postCommentText(ctx, client, owner, repo, prNumber, string(body), mainTag)
 }
 
@@ -276,7 +281,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	self, _, err := client.Users.Get(ctx, "")
 	selfLogin := ""
 	if err != nil {
-		log.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
+		stderr.Printf("Warning: failed to get self user (likely due to GITHUB_TOKEN permissions): %v. Deduplication will rely solely on the tag.", err)
 	} else {
 		selfLogin = self.GetLogin()
 	}
@@ -318,7 +323,7 @@ func postCommentText(ctx context.Context, client *github.Client, owner, repo str
 	// Delete redundant comments first
 	for _, id := range redundantCommentIDs {
 		if _, err := client.Issues.DeleteComment(ctx, owner, repo, id); err != nil {
-			log.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
+			stderr.Printf("Warning: failed to delete redundant comment %d: %v", id, err)
 		}
 	}
 
@@ -347,8 +352,8 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		return nil, fmt.Errorf("failed to get PR: %w", err)
 	}
 
-	mainTag := wrapTag(tag, "cassandra-main-")
-	inlineTag := wrapTag(tag, "cassandra-inline-")
+	mainTag := wrapTag(tag, tagPrefixMain)
+	inlineTag := wrapTag(tag, tagPrefixInline)
 	reviewTag := wrapTag(tag, "")
 
 	metadata := &core.PRMetadata{
@@ -450,22 +455,22 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	if metadataFile != "" {
 		metadataBytes, err := os.ReadFile(metadataFile)
 		if err != nil {
-			log.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
+			stderr.Printf("Warning: failed to read metadata file: %v. Deduplication will be limited.", err)
 		} else {
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				log.Printf("Warning: failed to unmarshal metadata: %v", err)
+				stderr.Printf("Warning: failed to unmarshal metadata: %v", err)
 			}
 		}
 	}
 
 	reviewTag := wrapTag(tag, "")
-	inlineTag := wrapTag(tag, "cassandra-inline-")
-	mainTag := wrapTag(tag, "cassandra-main-")
+	inlineTag := wrapTag(tag, tagPrefixInline)
+	mainTag := wrapTag(tag, tagPrefixMain)
 
 	// 1. Dismiss previous reviews BEFORE providing new review
 	if tag != "" {
 		if err := dismissPreviousReviews(ctx, client, owner, repo, prNumber, reviewTag, 0); err != nil {
-			log.Printf("Warning: failed to dismiss previous reviews: %v", err)
+			stderr.Printf("Warning: failed to dismiss previous reviews: %v", err)
 		}
 	}
 
@@ -474,7 +479,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 		for _, c := range metadata.Comments {
 			if c.IsSelf && strings.Contains(c.Body, inlineTag) {
 				if _, err := client.PullRequests.DeleteComment(ctx, owner, repo, c.ID); err != nil {
-					log.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
+					stderr.Printf("Warning: failed to delete old inline comment %d: %v", c.ID, err)
 				}
 			}
 		}
@@ -483,7 +488,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	// 3. Post Non-Specific Review as a separate comment
 	if sr.NonSpecificReview != "" {
 		if err := postCommentText(ctx, client, owner, repo, prNumber, sr.NonSpecificReview, mainTag); err != nil {
-			log.Printf("Warning: failed to post non-specific review comment: %v", err)
+			stderr.Printf("Warning: failed to post non-specific review comment: %v", err)
 		}
 	}
 
@@ -493,7 +498,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 	for _, fr := range sr.FilesReview {
 		startLine, endLine, err := fr.ParseLines()
 		if err != nil {
-			log.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
+			stderr.Printf("Warning: failed to parse lines for %s: %v. Appending to main review rationale.", fr.Path, err)
 			reviewRationale = fmt.Sprintf("%s\n\n- **%s**: %s", reviewRationale, fr.Path, fr.Review)
 			continue
 		}
@@ -550,7 +555,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			hasComments := len(reviewRequest.Comments) > 0
 
 			if isPermissionError {
-				log.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
+				stderr.Printf("Warning: GITHUB_TOKEN is not permitted to approve PRs. Falling back to COMMENT review.")
 				reviewRequest.Event = github.Ptr("COMMENT")
 
 				// Try again with COMMENT action, keeping inline comments
@@ -569,7 +574,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 			}
 
 			if hasComments {
-				log.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
+				stderr.Printf("Warning: failed to post structured review (likely due to line hallucinations): %v. Retrying without inline comments.", errStr)
 				reviewRequest.Comments = nil
 				var sb strings.Builder
 				sb.WriteString(reviewRequest.GetBody())
@@ -577,7 +582,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 				for _, fr := range sr.FilesReview {
 					_, endLine, err := fr.ParseLines()
 					if err == nil && endLine > 0 {
-						sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
+						fmt.Fprintf(&sb, "- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review)
 					}
 				}
 				reviewRequest.Body = github.Ptr(sb.String())
@@ -615,7 +620,7 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 					})
 					return resp, err
 				}, 3); err != nil {
-					log.Printf("Warning: failed to dismiss review %d: %v", reviewID, err)
+					stderr.Printf("Warning: failed to dismiss review %d: %v", reviewID, err)
 				}
 			}
 		}
@@ -645,17 +650,10 @@ func getDiff(ctx context.Context, client *github.Client, owner, repo string, prN
 			// Extract the b/ path from "diff --git a/path/to/file b/path/to/file".
 			// Using strings.Fields would break for paths containing spaces, so we
 			// split on " b/" from the right to correctly isolate the destination path.
-			isLockFile := false
+			skipping = false
 			if idx := strings.LastIndex(line, " b/"); idx != -1 {
-				pathB := line[idx+3:]
-				for _, lf := range tools.LockFiles {
-					if pathB == lf || strings.HasSuffix(pathB, "/"+lf) {
-						isLockFile = true
-						break
-					}
-				}
+				skipping = tools.IsLockFile(line[idx+3:])
 			}
-			skipping = isLockFile
 		}
 
 		if !skipping {
@@ -678,15 +676,7 @@ func getFiles(ctx context.Context, client *github.Client, owner, repo string, pr
 			return nil, err
 		}
 		for _, f := range files {
-			path := f.GetFilename()
-			isLockFile := false
-			for _, lf := range tools.LockFiles {
-				if path == lf || strings.HasSuffix(path, "/"+lf) {
-					isLockFile = true
-					break
-				}
-			}
-			if !isLockFile {
+			if path := f.GetFilename(); !tools.IsLockFile(path) {
 				allFiles = append(allFiles, path)
 			}
 		}
