@@ -97,12 +97,77 @@ runs:
         # Mask the token so it doesn't show up in logs
         echo "::add-mask::$FINAL_TOKEN"
         echo "token=$FINAL_TOKEN" >> $GITHUB_OUTPUT
+    - name: Resolve Action Repository
+      id: resolve_repo
+      shell: bash
+      run: |
+        ACTION_REPO="${{ github.action_repository }}"
+        if [[ -z "$ACTION_REPO" ]]; then
+          ACTION_REPO="${{ github.repository }}"
+        fi
+        echo "action_repo=$ACTION_REPO" >> $GITHUB_OUTPUT
+    - name: Fetch Pre-built Binaries
+      id: fetch_binaries
+      shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
+        ACTION_REPO: ${{ steps.resolve_repo.outputs.action_repo }}
+        GH_TOKEN: ${{ steps.prepare_token.outputs.token }}
+      run: |
+        # Map runner os/arch to Go os/arch
+        # See: https://docs.github.com/en/actions/learn-github-actions/contexts#runner-context
+        case "${{ runner.os }}" in
+          Linux) GOOS="linux" ;;
+          macOS) GOOS="darwin" ;;
+          Windows) GOOS="windows" ;;
+          *) echo "Unsupported OS: ${{ runner.os }}"; exit 1 ;;
+        esac
+
+        case "${{ runner.arch }}" in
+          X64) GOARCH="amd64" ;;
+          ARM64) GOARCH="arm64" ;;
+          *) echo "Unsupported Arch: ${{ runner.arch }}"; exit 1 ;;
+        esac
+
+        SUFFIX=""
+        if [[ "$GOOS" == "windows" ]]; then SUFFIX=".exe"; fi
+
+        BIN_CASSANDRA="cassandra-${GOOS}-${GOARCH}${SUFFIX}"
+        BIN_GITHUB="cassandra-github-${GOOS}-${GOARCH}${SUFFIX}"
+
+        mkdir -p "${{ runner.temp }}/bin"
+
+        DOWNLOAD_SUCCESS="false"
+        # Only attempt to download if it looks like a version tag (vX.Y.Z) and gh CLI is available
+        if [[ "$ACTION_REF" =~ ^v[0-9] ]] && command -v gh >/dev/null 2>&1; then
+          echo "Attempting to download pre-built binaries for release: $ACTION_REF from repo: $ACTION_REPO..."
+          if gh release download "$ACTION_REF" -p "$BIN_CASSANDRA" -p "$BIN_GITHUB" -D "${{ runner.temp }}/bin" -R "$ACTION_REPO" ; then
+            echo "Successfully downloaded pre-built binaries."
+            chmod +x "${{ runner.temp }}/bin/$BIN_CASSANDRA"
+            chmod +x "${{ runner.temp }}/bin/$BIN_GITHUB"
+            DOWNLOAD_SUCCESS="true"
+          else
+            echo "Failed to download binaries for $ACTION_REF. Will fallback to Bazel."
+          fi
+        else
+          echo "Not running from a specific tag/release ($ACTION_REF) or gh CLI not available. Will use Bazel."
+        fi
+
+        echo "download_success=$DOWNLOAD_SUCCESS" >> $GITHUB_OUTPUT
+        echo "bin_dir=${{ runner.temp }}/bin" >> $GITHUB_OUTPUT
+        echo "bin_cassandra=${{ runner.temp }}/bin/$BIN_CASSANDRA" >> $GITHUB_OUTPUT
+        echo "bin_github=${{ runner.temp }}/bin/$BIN_GITHUB" >> $GITHUB_OUTPUT
     - name: Setup Bazel
+      if: steps.fetch_binaries.outputs.download_success != 'true'
       uses: bazel-contrib/setup-bazel@083175551ceeceebc757ebee2127fde78840ca77 # 0.18.0
       with:
         bazelisk-cache: true
         disk-cache: cassandra-ai-review
         repository-cache: true
+    - name: Setup Execution Environment
+      id: setup_env
+      shell: bash
+      run: "mkdir -p \"${{ runner.temp }}/bin\"\n\nBIN_DIR=\"${{ steps.fetch_binaries.outputs.bin_dir }}\"\nBIN_CASSANDRA=\"${{ steps.fetch_binaries.outputs.bin_cassandra }}\"\nBIN_GITHUB=\"${{ steps.fetch_binaries.outputs.bin_github }}\"\n\nif [[ \"${{ steps.fetch_binaries.outputs.download_success }}\" == \"true\" ]]; then\n  echo \"CASSANDRA_BIN=$BIN_CASSANDRA\" >> $GITHUB_ENV\n  echo \"GITHUB_BIN=$BIN_GITHUB\" >> $GITHUB_ENV\nelse\n  # Create wrapper scripts that call bazel\n  CASSANDRA_WRAPPER=\"${{ runner.temp }}/bin/cassandra_wrapper.sh\"\n  cat << 'EOF' > \"$CASSANDRA_WRAPPER\"\n#!/bin/bash\ncd \"${{ github.action_path }}\"\nexec bazel run //cmd/ai_reviewer:ai_reviewer -- \"$@\"\nEOF\n  chmod +x \"$CASSANDRA_WRAPPER\"\n  \n  GITHUB_WRAPPER=\"${{ runner.temp }}/bin/github_wrapper.sh\"\n  cat << 'EOF' > \"$GITHUB_WRAPPER\"\n#!/bin/bash\ncd \"${{ github.action_path }}\"\nexec bazel run //cmd/github:github -- \"$@\"\nEOF\n  chmod +x \"$GITHUB_WRAPPER\"\n  \n  echo \"CASSANDRA_BIN=$CASSANDRA_WRAPPER\" >> $GITHUB_ENV\n  echo \"GITHUB_BIN=$GITHUB_WRAPPER\" >> $GITHUB_ENV\nfi\n"
     - name: Add Status Reaction
       if: github.event.pull_request.number != ''
       shell: bash
@@ -111,10 +176,7 @@ runs:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
         REACTION_ICON: ${{ inputs.reaction_icon }}
       run: |
-        # Use the action's source directory for Bazel.
-        # This binary replaces the 'gh' CLI for managing PR reactions.
-        cd "${{ github.action_path }}"
-        REACTION_ID=$(bazel run //cmd/github:github -- add-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --content "$REACTION_ICON")
+        REACTION_ID=$("$GITHUB_BIN" add-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --content "$REACTION_ICON")
         if [ -n "$REACTION_ID" ]; then
           echo "CASSANDRA_REACTION_ID=$REACTION_ID" >> $GITHUB_ENV
         fi
@@ -126,8 +188,7 @@ runs:
         METADATA_TAG: ${{ inputs.metadata_tag }}
       run: |
         METADATA_FILE="${{ runner.temp }}/cassandra_metadata.json"
-        cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "$METADATA_TAG" --output "$METADATA_FILE"
+        "$GITHUB_BIN" get-metadata --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --tag "$METADATA_TAG" --output "$METADATA_FILE"
         echo "METADATA_FILE=$METADATA_FILE" >> $GITHUB_ENV
     - name: Fetch PR Context
       if: github.event.pull_request.number != ''
@@ -139,10 +200,9 @@ runs:
         FILES_LIST_FILE="${{ runner.temp }}/cassandra_files.txt"
         COMMITS_FILE="${{ runner.temp }}/cassandra_commits.txt"
 
-        cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- get-diff --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$DIFF_FILE"
-        bazel run //cmd/github:github -- get-files --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$FILES_LIST_FILE"
-        bazel run //cmd/github:github -- get-commits --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$COMMITS_FILE"
+        "$GITHUB_BIN" get-diff --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$DIFF_FILE"
+        "$GITHUB_BIN" get-files --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$FILES_LIST_FILE"
+        "$GITHUB_BIN" get-commits --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$COMMITS_FILE"
 
         echo "DIFF_FILE=$DIFF_FILE" >> $GITHUB_ENV
         echo "FILES_LIST_FILE=$FILES_LIST_FILE" >> $GITHUB_ENV
@@ -211,10 +271,7 @@ runs:
           ARGS+=(--main-guidelines "$MAIN_GUIDELINES")
         fi
 
-        # Execute via Bazel in the action's source directory
-        cd "${{ github.action_path }}"
-
-        bazel run //cmd/ai_reviewer:ai_reviewer -- "${ARGS[@]}"
+        "$CASSANDRA_BIN" "${ARGS[@]}"
 
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
@@ -243,9 +300,7 @@ runs:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
         METADATA_TAG: ${{ inputs.metadata_tag }}
       run: |
-        # Execute via Bazel in the action's source directory
-        cd "${{ github.action_path }}"
-        bazel run //cmd/github:github -- post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "$METADATA_TAG"
+        "$GITHUB_BIN" post-comment --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --file "$REVIEW_FILE" --tag "$METADATA_TAG"
     - name: Post AI Structured Review
       if: github.event.pull_request.number != '' && inputs.use_inline_comments == 'true'
       shell: bash
@@ -255,9 +310,6 @@ runs:
         ALLOW_REVIEW_ACTION: ${{ inputs.submit_review_action }}
         DELETE_OLD_COMMENTS: ${{ inputs.delete_old_comments }}
       run: |
-        # Execute via Bazel in the action's source directory
-        cd "${{ github.action_path }}"
-
         ARGS=(
           post-structured-review
           --repo-full-name "${{ github.repository }}"
@@ -277,7 +329,7 @@ runs:
           ARGS+=(--delete-old-comments=false)
         fi
 
-        bazel run //cmd/github:github -- "${ARGS[@]}"
+        "$GITHUB_BIN" "${ARGS[@]}"
     - name: Remove Status Reaction
       if: always() && github.event.pull_request.number != ''
       shell: bash
@@ -286,7 +338,5 @@ runs:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
         if [ -n "$CASSANDRA_REACTION_ID" ]; then
-          # Execute via Bazel in the action's source directory
-          cd "${{ github.action_path }}"
-          bazel run //cmd/github:github -- remove-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --reaction-id "$CASSANDRA_REACTION_ID"
+          "$GITHUB_BIN" remove-reaction --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --reaction-id "$CASSANDRA_REACTION_ID"
         fi
