@@ -65,6 +65,8 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 - **Mock Isolation**: When using `mockLLM` or similar history-tracking doubles, you MUST perform a deep copy of the message slice and its internal slices (`ToolCalls`, `ToolResults`). Shallow copies will lead to state contamination across iterations.
 - **Safer JSON Construction**: Avoid manual string concatenation for JSON arguments in tests. Use `json.Marshal` or existing helpers to ensure paths (especially in `t.TempDir()`) containing special characters do not break the test payload.
 - **Negative Testing**: Every new tool or core logic change SHOULD include error-handling test cases (e.g., malformed JSON, missing files, individual tool failures).
+- **Test Doubles Must Forward `ctx` and Arguments**: A stub or mock implementing a `context.Context`-accepting interface MUST forward the received `ctx` and arguments to any internal delegate. Substituting `context.Background()` silently breaks cancellation tests. Every context-accepting method on a test double needs at least one cancellation-propagation test.
+- **Parallel Method Coverage**: When an interface has parallel methods that share a wrapper (e.g. `GenerateContent` / `GenerateStructuredContent` behind `RetryingModel`), behavioral tests (retries, cancellation, error propagation) MUST cover both methods. Generics or composition that unify them in production do not remove the need for independent test coverage.
 
 ### 4. Performance Mindfulness
 - **Redundant I/O**: When walking the directory tree for configuration or guidelines (like `REVIEWERS.md`), use directory-based caching to avoid redundant disk lookups. If a directory subtree has already been searched for a specific filename, terminate the walk-up early.
@@ -76,6 +78,9 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 - **Zone ordering**: The system prompt is divided into three zones ordered from most- to least-stable (see `core/prompts/library/README.md` for the full Prompt Developer Guide). When editing `BuildSystemPrompt` or any prompt file, **never inject dynamic or per-request data (file paths, PR metadata, commit SHAs) into Zone 1 or Zone 2**. All such content belongs in Zone 3 (the dynamic suffix).
 - **Byte-for-byte stability**: Any change to `reviewer_prompt.md`, a library guideline file, or the `approval_evaluation_prompt.md` will invalidate the prefix cache for every subsequent review using that configuration. Review such changes carefully and keep them minimal.
 - **New sections**: If you add a new semi-static section to `BuildSystemPrompt`, insert it between the existing Zone 2 entries and before the Zone 3 block (AGENTS.md / REVIEWERS.md), maintaining the stable-prefix ordering described in the design.
+
+### 7. Lint Exceptions
+- **Centralize `//nolint` pragmas**: If a construct legitimately needs a lint exception (e.g. `int32` narrowing after a bounds check, an intentionally-unused receiver), wrap it in a named helper so the pragma lives in one place with a comment explaining the invariant. Do not sprinkle `//nolint:gosec` or similar pragmas at multiple call sites — the invariant becomes invisible and copy-paste drift accumulates. See `clampInt32` in `llm/google/provider.go` as the canonical example.
 
 ## Security Standards
 

@@ -14,6 +14,12 @@ import (
 	"github.com/menny/cassandra/llm/internal/util"
 )
 
+// submitReviewToolName is the synthetic tool the Anthropic provider forces
+// the model to call to deliver structured output. The name is a documented
+// contract — see DESIGN.md §Technical Decisions 4 ("Structured Feedback
+// Extraction"). Keep it stable; downstream consumers may match on it.
+const submitReviewToolName = "submit_review"
+
 // Provider implements llm.Model backed by the Anthropic Messages API.
 type Provider struct {
 	client    anthropicsdk.Client
@@ -23,9 +29,7 @@ type Provider struct {
 // New creates a Provider for the given model. Extra SDK options (e.g.
 // option.WithBaseURL) can be passed for testing or proxying.
 func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
-	allOpts := make([]option.RequestOption, 0, 1+len(opts))
-	allOpts = append(allOpts, option.WithAPIKey(apiKey))
-	allOpts = append(allOpts, opts...)
+	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
 	return &Provider{client: anthropicsdk.NewClient(allOpts...), modelName: modelName}
 }
 
@@ -64,26 +68,13 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		return nil, fmt.Errorf("anthropic: building messages: %w", err)
 	}
 
-	modelName := p.modelName
-	if config.ModelOverride != "" {
-		modelName = config.ModelOverride
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 8192
-	}
+	modelName, maxTokens := config.Resolve(p.modelName)
 
 	// Define a synthetic tool to enforce the structured response.
-	toolName := "submit_review"
 	tool := anthropicsdk.ToolParam{
-		Name:        toolName,
+		Name:        submitReviewToolName,
 		Description: param.NewOpt("Returns the structured code review."),
-		InputSchema: anthropicsdk.ToolInputSchemaParam{
-			Type:       "object",
-			Properties: schema["properties"],
-			Required:   util.ParseRequired(schema["required"]),
-		},
+		InputSchema: schemaParamFromJSONSchema(schema),
 	}
 
 	sdkParams := anthropicsdk.MessageNewParams{
@@ -95,7 +86,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		ToolChoice: anthropicsdk.ToolChoiceUnionParam{
 			OfTool: &anthropicsdk.ToolChoiceToolParam{
 				Type: "tool",
-				Name: toolName,
+				Name: submitReviewToolName,
 			},
 		},
 	}
@@ -184,40 +175,39 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropicsdk.TextBlockParam,
 func toAnthropicTools(tools []llm.ToolDef) []anthropicsdk.ToolUnionParam {
 	out := make([]anthropicsdk.ToolUnionParam, 0, len(tools))
 	for _, t := range tools {
-		// The Anthropic API requires the top-level tool schema to be an
-		// "object". If a tool defines a different top-level type (e.g.
-		// "array"), this conversion will produce a malformed schema.
-		schema := anthropicsdk.ToolInputSchemaParam{
-			Type:       "object",
-			Properties: t.Parameters["properties"],
-		}
-		// Forward required field so the model knows which parameters are mandatory.
-		schema.Required = util.ParseRequired(t.Parameters["required"])
-
 		tp := anthropicsdk.ToolParam{
 			Name:        t.Name,
 			Description: param.NewOpt(t.Description),
-			InputSchema: schema,
+			InputSchema: schemaParamFromJSONSchema(t.Parameters),
 		}
 		out = append(out, anthropicsdk.ToolUnionParam{OfTool: &tp})
 	}
 	return out
 }
 
+// schemaParamFromJSONSchema converts a JSON Schema object (as stored in
+// llm.ToolDef.Parameters) into an Anthropic ToolInputSchemaParam. The
+// Anthropic API requires the top-level schema to be an "object"; if a tool
+// defines a different top-level type (e.g. "array") the resulting schema
+// will be malformed.
+func schemaParamFromJSONSchema(schema map[string]any) anthropicsdk.ToolInputSchemaParam {
+	return anthropicsdk.ToolInputSchemaParam{
+		Type:       "object",
+		Properties: schema["properties"],
+		Required:   util.ParseRequired(schema["required"]),
+	}
+}
+
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
-	resp := &llm.Response{
-		Usage: llm.Usage{
-			PromptTokens:   -1,
-			OutputTokens:   -1,
-			ThinkingTokens: 0,
-			CachedTokens:   0,
-		},
-	}
+	resp := &llm.Response{Usage: llm.UnknownUsage()}
 
 	// The SDK usage struct is not a pointer, but we check if we have values.
-	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 {
+	// Cache-only responses report tokens exclusively through the cache counters,
+	// so the gate must include those or CachedTokens would stay at its -1 sentinel.
+	if msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 ||
+		msg.Usage.CacheReadInputTokens > 0 || msg.Usage.CacheCreationInputTokens > 0 {
 		resp.Usage.PromptTokens = int(msg.Usage.InputTokens + msg.Usage.CacheCreationInputTokens)
 		resp.Usage.OutputTokens = int(msg.Usage.OutputTokens)
 		resp.Usage.CachedTokens = int(msg.Usage.CacheReadInputTokens)

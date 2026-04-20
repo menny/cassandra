@@ -64,7 +64,31 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Provider Implementations**:
   - `llm/anthropic`: Uses `github.com/anthropics/anthropic-sdk-go`.
   - `llm/google`: Uses `google.golang.org/genai`.
-- **Factory**: `llm/factory/factory.go` provides a single `New` function to construct the appropriate `Model` implementation.
+- **Factory**: `llm/factory/factory.go` provides a single `New` function to construct the appropriate `Model` implementation. Providers are registered via the package-level `providers` map; adding a provider is a one-line map entry.
+
+#### Shared Contracts
+
+The following symbols in `llm/llm.go` are the load-bearing contracts that every
+provider implementation depends on. See [`llm/AGENTS.md`](llm/AGENTS.md) for
+the companion implementation rules.
+
+- **`llm.UnknownUsage()`** — sentinel `Usage` (`PromptTokens: -1`,
+  `OutputTokens: -1`) meaning "provider reported no token data". Providers
+  seed `Response.Usage` with this and overwrite on success. When a provider
+  exposes multiple counters (e.g. cache vs. non-cache), every counter path
+  must be covered by the usage-presence guard.
+- **`llm.StructuredConfig.Resolve(defaultModel)`** — returns
+  `(model, maxTokens)` with `ModelOverride` and `DefaultStructuredMaxTokens`
+  applied. `GenerateStructuredContent` implementations call this to
+  eliminate per-provider defaulting boilerplate.
+- **`llm.DefaultStructuredMaxTokens = 8192`** — fallback budget for
+  structured-output calls. Kept in lockstep with the CLI `--max-tokens`
+  default in `cmd/ai_reviewer`.
+- **`llm.retry[T]`** (package-private) — the canonical exponential-back-off
+  + ctx-cancellation loop. `RetryingModel` wraps the interface via this
+  helper; any new cross-cutting `llm.Model` wrapper (caching, telemetry,
+  rate-limiting) should follow the same composition rather than
+  re-implementing the loop.
 
 ## Technical Decisions
 
@@ -81,7 +105,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
    - The system separates reasoning from formatting. The primary review pass is free-form markdown to optimize for reasoning quality.
    - **Secondary Extraction**: A second, optional LLM call converts the markdown review into a structured JSON representation.
    - **Implementation strategy**:
-     - **Anthropic**: Instructs the model to use a `submit_review` tool with the target schema.
+     - **Anthropic**: Forces the model to call a synthetic tool whose name is pinned by the package-level const `llm/anthropic.submitReviewToolName` (`"submit_review"`). This name is a stable contract — downstream consumers may match on it, so changes must be coordinated with any code that introspects the structured response.
      - **Google**: Uses `ResponseMIMEType = "application/json"` and `ResponseSchema`.
 
 ## Output Contract

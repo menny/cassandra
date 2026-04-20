@@ -6,12 +6,50 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 
 	"google.golang.org/genai"
 
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/internal/util"
 )
+
+// thoughtSignatureKey is the ProviderMetadata key under which the Gemini
+// thought signature (opaque []byte) is stored on llm.Message.
+const thoughtSignatureKey = "google_thought_signature"
+
+// thoughtSignature extracts the Gemini thought signature from a Message's
+// ProviderMetadata. Returns nil if the key is absent or the stored value is
+// not a []byte — both of which are valid states for non-thinking models.
+func thoughtSignature(m llm.Message) []byte {
+	sig, _ := m.ProviderMetadata[thoughtSignatureKey].([]byte)
+	return sig
+}
+
+// clampInt32 saturates n into the int32 range. The Gemini SDK's
+// MaxOutputTokens is an int32 while our llm.Model API uses int, so every
+// call site needs this conversion; centralizing it removes duplicated
+// //nolint:gosec pragmas.
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n) //nolint:gosec // bounds-checked above
+}
+
+// jsonSchemaTypes maps JSON Schema type names (lowercase) to their
+// genai.Type counterparts (uppercase enum). Used by convertSchema.
+var jsonSchemaTypes = map[string]genai.Type{
+	"object":  genai.TypeObject,
+	"string":  genai.TypeString,
+	"number":  genai.TypeNumber,
+	"integer": genai.TypeInteger,
+	"boolean": genai.TypeBoolean,
+	"array":   genai.TypeArray,
+}
 
 // Provider implements llm.Model backed by the Google Generative AI API.
 type Provider struct {
@@ -37,7 +75,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	}
 
 	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
+		MaxOutputTokens: clampInt32(maxTokens),
 	}
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
@@ -61,18 +99,10 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		return nil, fmt.Errorf("google: building contents: %w", err)
 	}
 
-	modelName := p.modelName
-	if config.ModelOverride != "" {
-		modelName = config.ModelOverride
-	}
-
-	maxTokens := config.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = 8192
-	}
+	modelName, maxTokens := config.Resolve(p.modelName)
 
 	genaiConfig := &genai.GenerateContentConfig{
-		MaxOutputTokens:  int32(min(maxTokens, math.MaxInt32)), //nolint:gosec // clamped above
+		MaxOutputTokens:  clampInt32(maxTokens),
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   convertSchema(schema),
 	}
@@ -97,12 +127,9 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 		switch m.Role {
 		case llm.RoleSystem:
 			if system == nil {
-				system = &genai.Content{
-					Parts: []*genai.Part{{Text: m.Text}},
-				}
-			} else {
-				system.Parts = append(system.Parts, &genai.Part{Text: m.Text})
+				system = &genai.Content{}
 			}
+			system.Parts = append(system.Parts, &genai.Part{Text: m.Text})
 
 		case llm.RoleUser:
 			contents = append(contents, &genai.Content{
@@ -112,10 +139,7 @@ func toContents(messages []llm.Message) ([]*genai.Content, *genai.Content, error
 
 		case llm.RoleAssistant:
 			var parts []*genai.Part
-			var sig []byte
-			if s, ok := m.ProviderMetadata["google_thought_signature"].([]byte); ok {
-				sig = s
-			}
+			sig := thoughtSignature(m)
 
 			if m.Reasoning != "" {
 				parts = append(parts, &genai.Part{
@@ -193,19 +217,10 @@ func convertSchema(m map[string]any) *genai.Schema {
 	s := &genai.Schema{}
 
 	if t, ok := m["type"].(string); ok {
-		switch t {
-		case "object":
-			s.Type = genai.TypeObject
-		case "string":
-			s.Type = genai.TypeString
-		case "number":
-			s.Type = genai.TypeNumber
-		case "integer":
-			s.Type = genai.TypeInteger
-		case "boolean":
-			s.Type = genai.TypeBoolean
-		case "array":
-			s.Type = genai.TypeArray
+		if mapped, known := jsonSchemaTypes[t]; known {
+			s.Type = mapped
+		} else {
+			fmt.Fprintf(os.Stderr, "google: convertSchema: unknown JSON Schema type %q; resulting schema will be malformed\n", t)
 		}
 	}
 	if desc, ok := m["description"].(string); ok {
@@ -240,12 +255,7 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 		return nil, fmt.Errorf("google: candidate has no content")
 	}
 
-	result := &llm.Response{
-		Usage: llm.Usage{
-			PromptTokens: -1,
-			OutputTokens: -1,
-		},
-	}
+	result := &llm.Response{Usage: llm.UnknownUsage()}
 
 	if resp.UsageMetadata != nil {
 		result.Usage.PromptTokens = int(resp.UsageMetadata.PromptTokenCount - resp.UsageMetadata.CachedContentTokenCount)
@@ -264,7 +274,7 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 			if result.ProviderMetadata == nil {
 				result.ProviderMetadata = make(map[string]any)
 			}
-			result.ProviderMetadata["google_thought_signature"] = part.ThoughtSignature
+			result.ProviderMetadata[thoughtSignatureKey] = part.ThoughtSignature
 		}
 
 		// Both fields are checked independently: the Gemini API can return a

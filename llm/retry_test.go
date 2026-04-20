@@ -29,8 +29,8 @@ func (s *stubModel) GenerateContent(_ context.Context, _ []Message, _ []ToolDef,
 	return nil, errors.New("stubModel: no response configured")
 }
 
-func (s *stubModel) GenerateStructuredContent(_ context.Context, _ []Message, _ map[string]any, _ StructuredConfig) (*Response, error) {
-	return s.GenerateContent(context.Background(), nil, nil, 0)
+func (s *stubModel) GenerateStructuredContent(ctx context.Context, messages []Message, _ map[string]any, _ StructuredConfig) (*Response, error) {
+	return s.GenerateContent(ctx, messages, nil, 0)
 }
 
 // immediateRetryModel makes retries instant by using a zero base delay.
@@ -90,6 +90,34 @@ func TestRetryingModel_RespectsContextCancellation(t *testing.T) {
 	require.Error(t, err)
 	// After the first failure the wrapper should detect ctx.Err() and stop.
 	assert.Equal(t, 1, stub.callCount)
+}
+
+func TestRetryingModel_GenerateStructuredContent_RespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	stub := &stubModel{
+		errs: []error{errors.New("transient")},
+	}
+	// Real delay so the cancelled context is detected before sleeping.
+	m := NewRetryingModel(stub, 3, 10*time.Second)
+
+	_, err := m.GenerateStructuredContent(ctx, nil, nil, StructuredConfig{})
+	require.Error(t, err)
+	assert.Equal(t, 1, stub.callCount)
+}
+
+func TestRetryingModel_GenerateStructuredContent_ExhaustsAllAttempts(t *testing.T) {
+	sentinel := errors.New("permanent failure")
+	stub := &stubModel{
+		errs: []error{sentinel, sentinel, sentinel},
+	}
+	m := newInstantRetryModel(stub, 3)
+
+	_, err := m.GenerateStructuredContent(context.Background(), nil, nil, StructuredConfig{})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 3, stub.callCount)
 }
 
 func TestRetryingModel_GenerateStructuredContent_Retries(t *testing.T) {
