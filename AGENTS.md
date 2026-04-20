@@ -34,10 +34,15 @@ This project uses `aspect_rules_lint` (v2.3.0) to integrate standard tooling dir
 
 ## Architecture Reference
 
-Before introducing major changes or restructuring the review loop, please read the **[DESIGN.md](file:///Users/mennyevendanan/dev/menny/cassandra/DESIGN.md)** document. It covers:
+Before introducing major changes or restructuring the review loop, please read the **[DESIGN.md](DESIGN.md)** document. It covers:
 - The decision to use a native Go ReAct loop rather than complex Python graphs.
 - The rationale behind the custom Tool Registry.
-- The `Do / Try / Consider` feedback format.
+
+## Code Style Reference
+
+**[CODE_STYLE.md](CODE_STYLE.md)** captures recurring coding patterns with rule + example + rationale for each: error handling idioms (`errors.New`, `%w`, `errors.As`), helper extraction, sentinel handling, registries over switches, typed accessors for untyped maps, centralized `//nolint`, stdout/stderr discipline, test-double `ctx` forwarding, paired-edit documentation, and stdlib-idiom preferences.
+
+Consult it when writing new code or when a review comment cites an idiom you don't recognize. AGENTS.md states *what MUST be done*; CODE_STYLE.md shows *how to write it so it matches the rest of the codebase*.
 
 ## Output Contract
 

@@ -12,7 +12,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Main Guidelines**: Defaults to `general`. This can be:
   - A path to a local Markdown file (absolute or relative to the current directory).
   - The name of a pre-defined prompt from the internal library (e.g., `asana-do-try-consider`, `google`, `palantir`).
-- **Approval Evaluation Guidelines**: Defines the criteria for `APPROVE`, `REJECT`, and `COMMENT` verdicts.
+- **Approval Evaluation Guidelines**: Defines the criteria for `APPROVE`, `REQUEST_CHANGES`, and `COMMENT` verdicts.
   - Defaults to an internal "velocity-first" prompt.
   - Can be overridden via `--approval-evaluation-prompt-file`.
 - Coordinates the flow from git diff extraction to system prompt building, and finally running the review agent.
@@ -38,7 +38,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
   5. **Iteration**: The loop repeats until a final answer is produced or the `maxIterations` cap is reached.
   6. **Cap Reached**: If the cap is reached, the agent forces a final review call by appending a system message and stripping tool definitions from the next LLM call.
 
-### 3. Tool Registry (`tools/`)
+### 4. Tool Registry (`tools/`)
 - **Interface**: The `ToolDispatcher` interface (defined in `core/agent.go`) is the minimal set of methods the Agent needs:
   ```go
   type ToolDispatcher interface {
@@ -52,7 +52,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
   - `glob_files`: Finds files matching a pattern or extension.
   - `grep_files`: Searches for patterns in the repository using `git grep`.
 
-### 4. LLM Abstraction (`llm/`)
+### 5. LLM Abstraction (`llm/`)
 - **Interface**: `llm.Model` (in `llm/llm.go`) is the provider-agnostic interface:
   ```go
   type Model interface {
