@@ -36,7 +36,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", nil, fmt.Errorf("git diff %s failed in %s: %v\nOutput: %s", diffRange, workingDir, err, string(out))
+		return "", nil, fmt.Errorf("git diff %s failed in %s: %w\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
 
 	diffText := string(out)
@@ -83,7 +83,7 @@ func FetchGitCommits(workingDir, base, head string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		// If git log fails (e.g., shallow clone), we return an error to be handled by the caller.
-		return "", fmt.Errorf("git log %s failed: %v. Output: %s", commitRange, err, string(out))
+		return "", fmt.Errorf("git log %s failed: %w. Output: %s", commitRange, err, string(out))
 	}
 
 	return string(out), nil

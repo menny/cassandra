@@ -168,7 +168,7 @@ func registerLocalGrepFiles(r *Registry) {
 			if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1 && len(out) == 0 {
 				return "No matches found.", nil
 			}
-			return "", fmt.Errorf("grep_files failed: %v\nOutput: %s", err, string(out))
+			return "", fmt.Errorf("grep_files failed: %w\nOutput: %s", err, string(out))
 		}
 
 		output := string(out)
