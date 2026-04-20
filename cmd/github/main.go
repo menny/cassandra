@@ -583,7 +583,7 @@ func postStructuredReview(ctx context.Context, client *github.Client, owner, rep
 				for _, fr := range sr.FilesReview {
 					_, endLine, err := fr.ParseLines()
 					if err == nil && endLine > 0 {
-						sb.WriteString(fmt.Sprintf("- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review))
+						fmt.Fprintf(&sb, "- **%s** (%s): %s\n", fr.Path, fr.Lines, fr.Review)
 					}
 				}
 				reviewRequest.Body = github.Ptr(sb.String())
