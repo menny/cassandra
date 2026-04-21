@@ -59,6 +59,10 @@ inputs:
     description: 'Whether to delete previous bot-authored inline comments before posting a new review to keep the PR clean.'
     required: false
     default: 'true'
+  mcp_config:
+    description: 'Path to an mcp.json file configuring custom tools for the reviewer'
+    required: false
+    default: ''
 outputs:
   review_file:
     description: 'Path to the generated markdown review file.'
@@ -249,6 +253,7 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
         MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
+        MCP_CONFIG: ${{ inputs.mcp_config }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
@@ -264,6 +269,16 @@ runs:
           --review-output-file "$REVIEW_FILE"
           --output-json "$JSON_FILE"
         )
+
+        if [[ -n "$MCP_CONFIG" ]]; then
+          MCP_PATH="${{ github.workspace }}/$WORKING_DIRECTORY/$MCP_CONFIG"
+          if [[ -f "$MCP_PATH" ]]; then
+            ARGS+=(--mcp-config "$MCP_PATH")
+          else
+            # Try it as a relative path or literal if not found in the workspace
+            ARGS+=(--mcp-config "$MCP_CONFIG")
+          fi
+        fi
 
         if [[ -f "$METADATA_FILE" ]]; then
           ARGS+=(--metadata-json "$METADATA_FILE")

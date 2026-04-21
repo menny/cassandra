@@ -3,7 +3,19 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "prompts",
     srcs = ["prompts.go"],
-    embedsrcs = [":all_prompts"],
+    embedsrcs = [
+        "approval_evaluation_prompt.md",
+        "extraction_prompt.md",
+        "library/README.md",
+        "library/asana-do-try-consider.md",
+        "library/conventional-comments.md",
+        "library/general.md",
+        "library/google.md",
+        "library/minimalist.md",
+        "library/palantir.md",
+        "library/security-first.md",
+        "reviewer_prompt.md",
+    ],
     importpath = "github.com/menny/cassandra/core/prompts",
     visibility = ["//visibility:public"],
 )

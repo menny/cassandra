@@ -1,0 +1,30 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "mcp",
+    srcs = [
+        "client.go",
+        "config.go",
+    ],
+    importpath = "github.com/menny/cassandra/tools/mcp",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//llm",
+        "@com_github_modelcontextprotocol_go_sdk//mcp",
+    ],
+)
+
+go_test(
+    name = "mcp_test",
+    srcs = [
+        "client_test.go",
+        "config_test.go",
+    ],
+    embed = [":mcp"],
+    deps = [
+        "//llm",
+        "@com_github_modelcontextprotocol_go_sdk//mcp",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

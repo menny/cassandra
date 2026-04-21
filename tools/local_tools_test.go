@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ func TestLocalReadFile(t *testing.T) {
 	}
 
 	args, _ := json.Marshal(map[string]any{"file_path": testFile})
-	result, err := r.HandleCall(llm.ToolCall{
+	result, err := r.HandleCall(context.Background(), llm.ToolCall{
 		Name:      "read_file",
 		Arguments: string(args),
 	})
@@ -52,7 +53,7 @@ func TestLocalGlobFiles(t *testing.T) {
 	}
 
 	args, _ := json.Marshal(map[string]any{"directory": tmpDir, "query": ".go"})
-	result, err := r.HandleCall(llm.ToolCall{
+	result, err := r.HandleCall(context.Background(), llm.ToolCall{
 		Name:      "glob_files",
 		Arguments: string(args),
 	})
@@ -73,7 +74,7 @@ func TestLocalReadFile_Errors(t *testing.T) {
 	registerLocalReadFile(r)
 
 	t.Run("missing file", func(t *testing.T) {
-		_, err := r.HandleCall(llm.ToolCall{
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "read_file",
 			Arguments: `{"file_path":"non_existent_file.txt"}`,
 		})
@@ -83,7 +84,7 @@ func TestLocalReadFile_Errors(t *testing.T) {
 	})
 
 	t.Run("malformed json", func(t *testing.T) {
-		_, err := r.HandleCall(llm.ToolCall{
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "read_file",
 			Arguments: `{"file_path": 123}`, // Should be string
 		})
@@ -100,7 +101,7 @@ func TestLocalGlobFiles_Errors(t *testing.T) {
 	t.Run("invalid directory", func(t *testing.T) {
 		// filepath.WalkDir doesn't necessarily error if the root doesn't exist depending on OS,
 		// but we can test malformed JSON.
-		_, err := r.HandleCall(llm.ToolCall{
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "glob_files",
 			Arguments: `{"query": 123}`,
 		})
@@ -130,7 +131,7 @@ func TestLocalGrepFiles(t *testing.T) {
 
 	t.Run("basic grep", func(t *testing.T) {
 		args, _ := json.Marshal(map[string]any{"query": "Cassandra"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -144,7 +145,7 @@ func TestLocalGrepFiles(t *testing.T) {
 
 	t.Run("no matches", func(t *testing.T) {
 		args, _ := json.Marshal(map[string]any{"query": "NonExistentString"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -168,7 +169,7 @@ func TestLocalGrepFiles(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "subdir/subfile.txt")
 
 		args, _ := json.Marshal(map[string]any{"query": "Match", "directory": "subdir"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -188,7 +189,7 @@ func TestLocalGrepFiles(t *testing.T) {
 		}
 
 		args, _ := json.Marshal(map[string]any{"query": "Modified"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -208,7 +209,7 @@ func TestLocalGrepFiles(t *testing.T) {
 		}
 
 		args, _ := json.Marshal(map[string]any{"query": "Untracked"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -223,7 +224,7 @@ func TestLocalGrepFiles(t *testing.T) {
 	t.Run("query with hyphen", func(t *testing.T) {
 		// Use a pattern that looks like a flag
 		args, _ := json.Marshal(map[string]any{"query": "-Cassandra"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -237,7 +238,7 @@ func TestLocalGrepFiles(t *testing.T) {
 
 	t.Run("case-insensitive grep", func(t *testing.T) {
 		args, _ := json.Marshal(map[string]any{"query": "cassandra", "case_insensitive": true})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -261,7 +262,7 @@ func TestLocalGrepFiles(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "truncation.txt")
 
 		args, _ := json.Marshal(map[string]any{"query": "TruncMatch"})
-		result, err := r.HandleCall(llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})

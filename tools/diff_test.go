@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestFetchGitDiff(t *testing.T) {
 	t.Run("Triple-dot diff", func(t *testing.T) {
 		// diff main...feature should ONLY show feature.txt
 		// NOT main_new.txt
-		diff, files, err := FetchGitDiff(tmpDir, "main", "feature")
+		diff, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -97,7 +98,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "go.sum")
 		runGitCmd(t, tmpDir, "commit", "-m", "add go.sum")
 
-		_, files, err := FetchGitDiff(tmpDir, "main", "feature")
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -119,7 +120,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "uncommitted.txt")
 
 		// head="HEAD" should include uncommitted changes
-		_, files, err := FetchGitDiff(tmpDir, "main", "HEAD")
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,7 +136,7 @@ func TestFetchGitDiff(t *testing.T) {
 		}
 
 		// head="feature" should NOT include uncommitted changes (uses triple-dot)
-		_, files, err = FetchGitDiff(tmpDir, "main", "feature")
+		_, files, err = FetchGitDiff(context.Background(), tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +176,7 @@ func TestFetchGitCommits(t *testing.T) {
 	setupGitRepo(t, tmpDir)
 
 	t.Run("Commits between main and feature", func(t *testing.T) {
-		commits, err := FetchGitCommits(tmpDir, "main", "feature")
+		commits, err := FetchGitCommits(context.Background(), tmpDir, "main", "feature")
 		if err != nil {
 			t.Fatalf("FetchGitCommits failed: %v", err)
 		}
@@ -198,7 +199,7 @@ func TestFetchGitCommits(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "extra.txt")
 		runGitCmd(t, tmpDir, "commit", "-m", "extra commit")
 
-		commits, err := FetchGitCommits(tmpDir, "main", "HEAD")
+		commits, err := FetchGitCommits(context.Background(), tmpDir, "main", "HEAD")
 		if err != nil {
 			t.Fatalf("FetchGitCommits failed: %v", err)
 		}

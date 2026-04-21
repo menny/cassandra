@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,7 +29,7 @@ func registerLocalReadFile(r *Registry) {
 		},
 	}
 
-	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
+	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args struct {
 			FilePath string `json:"file_path"`
 		}
@@ -64,7 +65,7 @@ func registerLocalGlobFiles(r *Registry) {
 		},
 	}
 
-	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
+	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args struct {
 			Directory string `json:"directory"`
 			Query     string `json:"query"`
@@ -126,7 +127,7 @@ func registerLocalGrepFiles(r *Registry) {
 		},
 	}
 
-	r.RegisterTool(def, func(tc llm.ToolCall) (string, error) {
+	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args struct {
 			Query           string `json:"query"`
 			Directory       string `json:"directory"`
@@ -160,7 +161,7 @@ func registerLocalGrepFiles(r *Registry) {
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.
 
-		out, err := runGit("", cmdArgs...)
+		out, err := runGit(ctx, "", cmdArgs...)
 		if err != nil {
 			// git grep returns exit code 1 if no matches are found.
 			var exitErr *exec.ExitError
