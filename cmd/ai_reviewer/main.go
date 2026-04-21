@@ -15,6 +15,7 @@ import (
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
+	"github.com/menny/cassandra/tools/mcp"
 )
 
 // stderr is used for all diagnostic / progress output so that the final review
@@ -38,6 +39,7 @@ func main() {
 	var diffFile string
 	var filesListFile string
 	var commitsFile string
+	var mcpConfigFile string
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
@@ -52,6 +54,7 @@ func main() {
 	flag.StringVar(&diffFile, "diff-file", "", "Path to a file containing the git diff")
 	flag.StringVar(&filesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
 	flag.StringVar(&commitsFile, "commits-file", "", "Path to a file containing the commit messages")
+	flag.StringVar(&mcpConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
@@ -143,6 +146,32 @@ func main() {
 	// Initialize Agent and Tool Registry
 	registry := tools.NewRegistry()
 	tools.RegisterLocalTools(registry)
+
+	if mcpConfigFile != "" {
+		mcpData, err := os.ReadFile(mcpConfigFile)
+		if err != nil {
+			log.Fatalf("Failed to read MCP config file %s: %v", mcpConfigFile, err)
+		}
+		var mcpConfig mcp.Config
+		if err := json.Unmarshal(mcpData, &mcpConfig); err != nil {
+			log.Fatalf("Failed to parse MCP config file %s: %v", mcpConfigFile, err)
+		}
+		mcpConfig.ExpandEnv()
+
+		mcpManager := mcp.NewManager()
+		defer func() {
+			if err := mcpManager.Close(); err != nil {
+				stderr.Printf("Warning: failed to close MCP manager: %v\n", err)
+			}
+		}()
+
+		stderr.Printf("Initializing MCP servers from %s...\n", mcpConfigFile)
+		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(llm.ToolCall) (string, error)) {
+			registry.RegisterTool(def, handler)
+		}); err != nil {
+			log.Fatalf("Failed to register MCP servers: %v", err)
+		}
+	}
 
 	agent := core.NewAgent(client, registry)
 

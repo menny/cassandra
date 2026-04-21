@@ -11,6 +11,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 - **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files, glob matching, and pattern searching with `grep`) to autonomously gather surrounding context about your codebase before finalizing feedback.
 - **Visual Status Indicators**: Automatically adds an "eyes" reaction to Pull Requests while the review is in progress, providing immediate feedback.
 - **Inline PR Reviews**: Supports formal GitHub PR Reviews with line-level feedback, including automatic dismissal of stale reviews and deduplication of comments.
+- **Model Context Protocol (MCP) Support**: Connect to custom local or remote tools through the Model Context Protocol to extend the reviewer's capabilities.
 - **CI/CD Ready**: Supports outputting reviews directly to files or as structured JSON, making it easy to integrate with GitHub Actions or other CI pipelines.
 
 ## Requirements
@@ -56,6 +57,7 @@ To review changes between a base and a head commit/branch:
 | `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | | No |
 | `--review-output-file` | Path to a file where the final review will be written | | No |
 | `--output-json` | Path to a file where the structured JSON review will be written | | No |
+| `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | | No |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
 | `--max-tokens` | Max tokens for the LLM response | `8192` | No |
 
@@ -77,6 +79,7 @@ To review changes between a base and a head commit/branch:
 | `use_inline_comments` | Whether to post inline comments to the PR (requires structured JSON output) | `true` | No |
 | `submit_review_action` | Whether to allow formal "approve/reject" actions or force neutral "comment" | `false` | No |
 | `delete_old_comments` | Whether to delete previous bot-authored inline comments before posting a new review | `true` | No |
+| `mcp_config` | Path to an `mcp.json` file configuring custom tools for the reviewer | | No |
 
 ## GitHub Action Outputs
 
@@ -215,6 +218,50 @@ my-repo/
 ```
 
 Both file types can coexist in the same directory and are loaded independently.
+
+### Custom Tools with Model Context Protocol (MCP)
+
+Cassandra supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), allowing you to extend the reviewer's capabilities with custom tools. This is useful for integrating with internal APIs, specialized linters, or documentation search.
+
+#### Configuration (`mcp.json`)
+
+Create an `mcp.json` file to define your MCP servers. Cassandra supports both local `stdio` servers and remote `sse` (HTTP) servers. Environment variables in the configuration are automatically expanded using `os.ExpandEnv`.
+
+```json
+{
+  "mcpServers": {
+    "my-local-tool": {
+      "command": "node",
+      "args": ["/path/to/server.js"],
+      "env": {
+        "DEBUG": "true"
+      }
+    },
+    "my-remote-tool": {
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer ${MY_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+#### Usage in GitHub Actions
+
+Pass the path to your `mcp.json` via the `mcp_config` input. Ensure any environment variables required by your MCP configuration are available in the step's environment.
+
+```yaml
+      - name: Run Cassandra AI Review
+        uses: menny/cassandra@v1
+        with:
+          provider: 'google'
+          model_id: 'gemini-2.5-flash'
+          provider_api_key: ${{ secrets.GEMINI_API_KEY }}
+          mcp_config: '.github/mcp.json'
+        env:
+          MY_API_KEY: ${{ secrets.MY_INTERNAL_TOOL_KEY }}
+```
 
 ### Troubleshooting
 
