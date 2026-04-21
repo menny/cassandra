@@ -42,7 +42,7 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) RegisterServers(ctx context.Context, config Config, register func(llm.ToolDef, func(llm.ToolCall) (string, error))) error {
+func (m *Manager) RegisterServers(ctx context.Context, config Config, register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
 	var lastErr error
 	var successCount int
 	for name, server := range config.MCPServers {
@@ -77,7 +77,7 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return h.base.RoundTrip(out)
 }
 
-func (m *Manager) registerServer(ctx context.Context, serverName string, cfg ServerConfig, register func(llm.ToolDef, func(llm.ToolCall) (string, error))) error {
+func (m *Manager) registerServer(ctx context.Context, serverName string, cfg ServerConfig, register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
 	var transport mcp.Transport
 
 	if cfg.Command != "" {
@@ -142,8 +142,13 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 			} else {
 				// Fallback to unmarshaling if it's not a map
 				data, err := json.Marshal(t.InputSchema)
-				if err == nil {
-					_ = json.Unmarshal(data, &parameters)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to marshal input schema for tool %q: %v. Skipping tool registration.\n", t.Name, err)
+					continue
+				}
+				if err := json.Unmarshal(data, &parameters); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to unmarshal input schema for tool %q: %v. Skipping tool registration.\n", t.Name, err)
+					continue
 				}
 			}
 		}
@@ -154,7 +159,7 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 			Parameters:  parameters,
 		}
 
-		handler := func(tc llm.ToolCall) (string, error) {
+		handler := func(ctx context.Context, tc llm.ToolCall) (string, error) {
 			// We use map[string]any here as an intentional exception to the
 			// project's struct-based argument guideline because MCP tool
 			// schemas are dynamic and discovered only at runtime.
@@ -163,8 +168,9 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 				return "", err
 			}
 
-			// Per review feedback: ensure we don't block the agent indefinitely.
-			timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
+			// Per review feedback: ensure we don't block the agent indefinitely
+			// and respect application-level shutdown signals by chaining from ctx.
+			timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
 			defer cancel()
 
 			callParams := &mcp.CallToolParams{

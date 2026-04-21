@@ -166,7 +166,7 @@ func main() {
 		}()
 
 		stderr.Printf("Initializing MCP servers from %s...\n", mcpConfigFile)
-		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(llm.ToolCall) (string, error)) {
+		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
 			stderr.Printf("Error: failed to register MCP servers: %v\n", err)
@@ -207,7 +207,7 @@ func main() {
 	} else {
 		stderr.Println("Fetching git diff locally...")
 		var err error
-		diffOutput, changedFiles, err = tools.FetchGitDiff(targetDir, base, head)
+		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, base, head)
 		if err != nil {
 			log.Fatalf("Failed to extract git diff: %v", err)
 		}
@@ -221,7 +221,7 @@ func main() {
 		commitsOutput = string(commitsBytes)
 	} else {
 		stderr.Println("Fetching git commits locally...")
-		commits, err := tools.FetchGitCommits(targetDir, base, head)
+		commits, err := tools.FetchGitCommits(ctx, targetDir, base, head)
 		if err != nil {
 			// Don't fail if commits fetching fails (e.g. shallow clone), just log it
 			stderr.Printf("Warning: failed to fetch git commits: %v\n", err)

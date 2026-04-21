@@ -86,18 +86,18 @@ func makeToolCall(id, name string, args map[string]any) llm.ToolCall {
 
 // mockDispatcher is a minimal ToolDispatcher stub.
 type mockDispatcher struct {
-	handlers map[string]func(llm.ToolCall) (string, error)
+	handlers map[string]func(context.Context, llm.ToolCall) (string, error)
 }
 
 func newMockDispatcher() *mockDispatcher {
-	return &mockDispatcher{handlers: make(map[string]func(llm.ToolCall) (string, error))}
+	return &mockDispatcher{handlers: make(map[string]func(context.Context, llm.ToolCall) (string, error))}
 }
 
 func (d *mockDispatcher) ToTools() []llm.ToolDef { return nil }
 
-func (d *mockDispatcher) HandleCall(tc llm.ToolCall) (string, error) {
+func (d *mockDispatcher) HandleCall(ctx context.Context, tc llm.ToolCall) (string, error) {
 	if fn, ok := d.handlers[tc.Name]; ok {
-		return fn(tc)
+		return fn(ctx, tc)
 	}
 	return "", fmt.Errorf("mockDispatcher: unknown tool %q", tc.Name)
 }
@@ -150,7 +150,7 @@ func TestAgent_Reporter(t *testing.T) {
 			textResponse("done"),
 		}}
 		d := newMockDispatcher()
-		d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "ok", nil }
+		d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "ok", nil }
 
 		agent := NewAgent(lm, d, WithReporter(spy))
 		_, err := agent.RunReview(context.Background(), "sys", "", "req", 5, 1024)
@@ -195,14 +195,14 @@ func TestAgent_Reporter(t *testing.T) {
 func TestAgent_ExecuteToolCalls(t *testing.T) {
 	t.Run("happy-path", func(t *testing.T) {
 		d := newMockDispatcher()
-		d.handlers["tool1"] = func(_ llm.ToolCall) (string, error) { return "res1", nil }
-		d.handlers["tool2"] = func(_ llm.ToolCall) (string, error) { return "res2", nil }
+		d.handlers["tool1"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "res1", nil }
+		d.handlers["tool2"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "res2", nil }
 
 		agent := NewAgent(nil, d, WithStderr(io.Discard))
 		tc1 := llm.ToolCall{ID: "id1", Name: "tool1"}
 		tc2 := llm.ToolCall{ID: "id2", Name: "tool2"}
 
-		msg := agent.executeToolCalls([]llm.ToolCall{tc1, tc2})
+		msg := agent.executeToolCalls(context.Background(), []llm.ToolCall{tc1, tc2})
 
 		if msg.Role != llm.RoleTool {
 			t.Errorf("expected RoleTool, got %v", msg.Role)
@@ -217,10 +217,10 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 
 	t.Run("error-handling (individual tool failure)", func(t *testing.T) {
 		d := newMockDispatcher()
-		d.handlers["bad"] = func(_ llm.ToolCall) (string, error) { return "", errors.New("boom") }
+		d.handlers["bad"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "", errors.New("boom") }
 
 		agent := NewAgent(nil, d, WithStderr(io.Discard))
-		msg := agent.executeToolCalls([]llm.ToolCall{{ID: "id1", Name: "bad"}})
+		msg := agent.executeToolCalls(context.Background(), []llm.ToolCall{{ID: "id1", Name: "bad"}})
 
 		if len(msg.ToolResults) != 1 {
 			t.Fatal("expected 1 result")
@@ -258,7 +258,7 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 		textResponse("review done"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return wantResult, nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return wantResult, nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
@@ -315,7 +315,7 @@ func TestRunReview_MultipleToolCallsInOneTurn(t *testing.T) {
 		textResponse("multi-tool review"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "content", nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
@@ -354,7 +354,7 @@ func TestRunReview_CapReached(t *testing.T) {
 		textResponse("forced review"), // forced-final call
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "x", nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 2, 1024)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestRunReview_PreserveAssistantText(t *testing.T) {
 		textResponse("review done"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "content", nil }
 
 	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "req", 5, 1024)
 	if err != nil {
@@ -458,7 +458,7 @@ func TestRunReview_PreserveReasoningAndMetadata(t *testing.T) {
 		textResponse("review done"),
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "content", nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "content", nil }
 
 	_, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "req", 5, 1024)
 	if err != nil {
@@ -484,7 +484,7 @@ func TestRunReview_LowCapEnforcement(t *testing.T) {
 		textResponse("forced review"), // forced-final call
 	}}
 	d := newMockDispatcher()
-	d.handlers["read_file"] = func(_ llm.ToolCall) (string, error) { return "x", nil }
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "x", nil }
 
 	got, err := newTestAgent(lm, d).RunReview(context.Background(), "sys", "", "request", 1, 1024)
 	if err != nil {

@@ -33,7 +33,7 @@ func CalculateMaxIterations(changedFiles int) int {
 // *tools.Registry satisfies this interface; tests can supply a lightweight stub.
 type ToolDispatcher interface {
 	ToTools() []llm.ToolDef
-	HandleCall(tc llm.ToolCall) (string, error)
+	HandleCall(ctx context.Context, tc llm.ToolCall) (string, error)
 }
 
 // Reporter defines how the Agent reports progress and diagnostics.
@@ -204,7 +204,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 			ProviderMetadata: resp.ProviderMetadata,
 		})
 
-		messages = append(messages, a.executeToolCalls(resp.ToolCalls))
+		messages = append(messages, a.executeToolCalls(ctx, resp.ToolCalls))
 	}
 
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
@@ -267,7 +267,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 	return nil, lastErr
 }
 
-func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) llm.Message {
+func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) llm.Message {
 	// Execute all tool calls and collect results into ONE RoleTool message.
 	// All ToolResults must be in a single message so providers see strict
 	// role alternation (no consecutive same-role turns).
@@ -281,7 +281,7 @@ func (a *Agent) executeToolCalls(toolCalls []llm.ToolCall) llm.Message {
 
 		// Dispatch; on error, surface the message as the tool result so the
 		// LLM can reason about it rather than crashing the whole loop.
-		result, toolErr := a.registry.HandleCall(tc)
+		result, toolErr := a.registry.HandleCall(ctx, tc)
 		if toolErr != nil {
 			result = fmt.Sprintf("error: %v", toolErr)
 		}

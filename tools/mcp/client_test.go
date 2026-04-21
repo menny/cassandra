@@ -51,9 +51,9 @@ func TestManager_RegisterServers_Mock(t *testing.T) {
 	manager.mu.Unlock()
 
 	var registeredTools []llm.ToolDef
-	handlers := make(map[string]func(llm.ToolCall) (string, error))
+	handlers := make(map[string]func(context.Context, llm.ToolCall) (string, error))
 
-	register := func(def llm.ToolDef, handler func(llm.ToolCall) (string, error)) {
+	register := func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 		registeredTools = append(registeredTools, def)
 		handlers[def.Name] = handler
 	}
@@ -79,7 +79,7 @@ func TestManager_RegisterServers_Mock(t *testing.T) {
 			Parameters:  parameters,
 		}
 
-		handler := func(tc llm.ToolCall) (string, error) {
+		handler := func(ctx context.Context, tc llm.ToolCall) (string, error) {
 			var args map[string]any
 			_ = tc.UnmarshalArguments(&args)
 			res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: t.Name, Arguments: args})
@@ -95,7 +95,7 @@ func TestManager_RegisterServers_Mock(t *testing.T) {
 	assert.Equal(t, "myserver_echo", registeredTools[0].Name)
 
 	// Test calling the tool
-	result, err := handlers["myserver_echo"](llm.ToolCall{
+	result, err := handlers["myserver_echo"](ctx, llm.ToolCall{
 		Name:      "myserver_echo",
 		Arguments: `{"msg":"hello"}`,
 	})

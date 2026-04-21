@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -44,15 +45,15 @@ func IsLockFile(path string) bool {
 // wrap the returned error with their own context; runGit itself does not
 // format the error so callers can inspect the exit code via errors.As
 // (*exec.ExitError) where relevant.
-func runGit(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	return cmd.CombinedOutput()
 }
 
-func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
+func FetchGitDiff(ctx context.Context, workingDir, base, head string) (string, []string, error) {
 	var diffRange string
 	if head == "HEAD" {
 		// Use single-dot to include uncommitted changes in the working tree/index
@@ -66,7 +67,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 	cmdArgs = append(cmdArgs, "--", ".")
 	cmdArgs = appendLockFileExcludes(cmdArgs)
 
-	out, err := runGit(workingDir, cmdArgs...)
+	out, err := runGit(ctx, workingDir, cmdArgs...)
 	if err != nil {
 		return "", nil, fmt.Errorf("git diff %s failed in %s: %w\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
@@ -78,7 +79,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 
 	// Get file list
 	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."})
-	nameOnlyOut, err := runGit(workingDir, nameOnlyArgs...)
+	nameOnlyOut, err := runGit(ctx, workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
 	}
@@ -94,7 +95,7 @@ func FetchGitDiff(workingDir, base, head string) (string, []string, error) {
 }
 
 // FetchGitCommits retrieves a list of commit messages between base and head.
-func FetchGitCommits(workingDir, base, head string) (string, error) {
+func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string, error) {
 	var commitRange string
 	if head == "HEAD" {
 		commitRange = base + "..HEAD"
@@ -103,7 +104,7 @@ func FetchGitCommits(workingDir, base, head string) (string, error) {
 	}
 
 	// Use a clean format for commit messages
-	out, err := runGit(workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
+	out, err := runGit(ctx, workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
 	if err != nil {
 		// If git log fails (e.g., shallow clone), we return an error to be handled by the caller.
 		return "", fmt.Errorf("git log %s failed: %w. Output: %s", commitRange, err, string(out))
