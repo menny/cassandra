@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -57,10 +58,13 @@ type headerRoundTripper struct {
 }
 
 func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// The RoundTripper contract prohibits modifying the input request.
+	// We must clone the request before adding headers.
+	out := req.Clone(req.Context())
 	for k, v := range h.headers {
-		req.Header.Set(k, v)
+		out.Header.Set(k, v)
 	}
-	return h.base.RoundTrip(req)
+	return h.base.RoundTrip(out)
 }
 
 func (m *Manager) registerServer(ctx context.Context, serverName string, cfg ServerConfig, register func(llm.ToolDef, func(llm.ToolCall) (string, error))) error {
@@ -144,18 +148,18 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 				return "", err
 			}
 
+			// Per review feedback: ensure we don't block the agent indefinitely.
+			timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutSeconds)*time.Second)
+			defer cancel()
+
 			callParams := &mcp.CallToolParams{
 				Name:      t.Name,
 				Arguments: args,
 			}
 
-			res, err := session.CallTool(ctx, callParams)
+			res, err := session.CallTool(timeoutCtx, callParams)
 			if err != nil {
 				return "", fmt.Errorf("MCP tool call failed: %w", err)
-			}
-
-			if res.IsError {
-				return "", fmt.Errorf("MCP tool returned error")
 			}
 
 			var result strings.Builder
@@ -169,6 +173,12 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 					result.WriteString("[Resource Content]")
 				}
 			}
+
+			if res.IsError {
+				// Return the tool's error content to the model so it can potentially self-correct.
+				return "", fmt.Errorf("MCP tool error: %s", result.String())
+			}
+
 			return result.String(), nil
 		}
 
