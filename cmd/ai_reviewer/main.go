@@ -169,7 +169,11 @@ func main() {
 		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
-			log.Fatalf("Failed to register MCP servers: %v", err)
+			stderr.Printf("Error: failed to register MCP servers: %v\n", err)
+			// Explicitly close the manager to reap subprocesses before exiting,
+			// since log.Fatalf/os.Exit bypasses deferred calls.
+			_ = mcpManager.Close()
+			os.Exit(1)
 		}
 	}
 

@@ -14,7 +14,8 @@ import (
 )
 
 func TestManager_RegisterServers_Mock(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	manager := NewManager()
 	defer manager.Close()
 

@@ -59,6 +59,7 @@ When adding new logging or output anywhere in the codebase, apply this rule stri
 To maintain consistency and type safety, all new tools MUST follow the standardized argument handling pattern:
 - **Struct-based Arguments**: Define a local anonymous struct (or a named struct if reused) to represent tool parameters.
 - **Explicit Unmarshaling**: Use `tc.UnmarshalArguments(&args)` within the tool handler. Do not perform manual type assertions or "missing key" checks on a map.
+  - *Exception*: Tools that proxy to external systems with dynamic schemas (e.g., Model Context Protocol tools) may use `map[string]any` since their arguments are discovered at runtime and cannot be statically typed.
 - **Error Propagation**: Return errors from the handler; the `Agent` is responsible for formatting these as "error: ..." strings for the LLM to process.
 
 ### 2. Diagnostic Reporting
@@ -68,6 +69,7 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 
 ### 3. Testing Standards
 - **Mock Isolation**: When using `mockLLM` or similar history-tracking doubles, you MUST perform a deep copy of the message slice and its internal slices (`ToolCalls`, `ToolResults`). Shallow copies will lead to state contamination across iterations.
+- **Avoid Goroutine Leaks**: When starting background tasks or mock servers in tests, ALWAYS use a cancelable `context.Context` (via `context.WithCancel`) and ensure it is canceled (via `defer cancel()`) when the test completes.
 - **Safer JSON Construction**: Avoid manual string concatenation for JSON arguments in tests. Use `json.Marshal` or existing helpers to ensure paths (especially in `t.TempDir()`) containing special characters do not break the test payload.
 - **Negative Testing**: Every new tool or core logic change SHOULD include error-handling test cases (e.g., malformed JSON, missing files, individual tool failures).
 - **Test Doubles Must Forward `ctx` and Arguments**: A stub or mock implementing a `context.Context`-accepting interface MUST forward the received `ctx` and arguments to any internal delegate. Substituting `context.Background()` silently breaks cancellation tests. Every context-accepting method on a test double needs at least one cancellation-propagation test.

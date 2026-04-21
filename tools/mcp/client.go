@@ -43,12 +43,22 @@ func (m *Manager) Close() error {
 }
 
 func (m *Manager) RegisterServers(ctx context.Context, config Config, register func(llm.ToolDef, func(llm.ToolCall) (string, error))) error {
+	var lastErr error
+	var successCount int
 	for name, server := range config.MCPServers {
 		if err := m.registerServer(ctx, name, server, register); err != nil {
 			// Per output contract, we report errors to stderr but continue if possible
 			fmt.Fprintf(os.Stderr, "Warning: failed to register MCP server %q: %v\n", name, err)
+			lastErr = err
+		} else {
+			successCount++
 		}
 	}
+
+	if len(config.MCPServers) > 0 && successCount == 0 {
+		return fmt.Errorf("none of the %d configured MCP servers could be registered (last error: %w)", len(config.MCPServers), lastErr)
+	}
+
 	return nil
 }
 
@@ -71,7 +81,9 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 	var transport mcp.Transport
 
 	if cfg.Command != "" {
-		cmd := exec.Command(cfg.Command, cfg.Args...)
+		// Use CommandContext to ensure that the subprocess is reaped if the
+		// main application context is canceled.
+		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 		if cfg.Env != nil {
 			cmd.Env = os.Environ()
 			for k, v := range cfg.Env {
@@ -143,6 +155,9 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		}
 
 		handler := func(tc llm.ToolCall) (string, error) {
+			// We use map[string]any here as an intentional exception to the
+			// project's struct-based argument guideline because MCP tool
+			// schemas are dynamic and discovered only at runtime.
 			var args map[string]any
 			if err := tc.UnmarshalArguments(&args); err != nil {
 				return "", err

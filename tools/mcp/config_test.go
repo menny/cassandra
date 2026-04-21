@@ -1,25 +1,17 @@
 package mcp
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestExpandEnv(t *testing.T) {
-	os.Setenv("TEST_CMD", "my-cmd")
-	os.Setenv("TEST_ARG", "my-arg")
-	os.Setenv("TEST_ENV_VAL", "my-env-val")
-	os.Setenv("TEST_URL", "http://example.com")
-	os.Setenv("TEST_HEADER", "Bearer my-token")
-	defer func() {
-		os.Unsetenv("TEST_CMD")
-		os.Unsetenv("TEST_ARG")
-		os.Unsetenv("TEST_ENV_VAL")
-		os.Unsetenv("TEST_URL")
-		os.Unsetenv("TEST_HEADER")
-	}()
+	t.Setenv("TEST_CMD", "my-cmd")
+	t.Setenv("TEST_ARG", "my-arg")
+	t.Setenv("TEST_ENV_VAL", "my-env-val")
+	t.Setenv("TEST_URL", "http://example.com")
+	t.Setenv("TEST_HEADER", "Bearer my-token")
 
 	cfg := Config{
 		MCPServers: map[string]ServerConfig{
