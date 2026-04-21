@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,17 +37,23 @@ func TestManager_RegisterServers_Mock(t *testing.T) {
 		}, nil, nil
 	})
 
+	// Add an error tool to the mock server
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "fail",
+		Description: "always fails",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input any) (*mcp.CallToolResult, any, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "error details"},
+			},
+			IsError: true,
+		}, nil, nil
+	})
+
 	go func() {
 		_ = server.Run(ctx, serverTransport)
 	}()
-
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
-	session, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-
-	manager.mu.Lock()
-	manager.sessions = append(manager.sessions, session)
-	manager.mu.Unlock()
 
 	var registeredTools []llm.ToolDef
 	handlers := make(map[string]func(context.Context, llm.ToolCall) (string, error))
@@ -58,47 +63,25 @@ func TestManager_RegisterServers_Mock(t *testing.T) {
 		handlers[def.Name] = handler
 	}
 
-	// We've manually established the session, now we simulate the tool registration logic
-	// that Manager.registerServer normally performs after connection.
-	toolsRes, err := session.ListTools(ctx, nil)
+	cfg := ServerConfig{TimeoutSeconds: 30}
+	err := manager.registerServerWithTransport(ctx, "myserver", clientTransport, cfg, register)
 	require.NoError(t, err)
 
-	serverName := "myserver"
-	for _, t := range toolsRes.Tools {
-		toolName := serverName + "_" + t.Name
+	assert.Len(t, registeredTools, 2)
 
-		parameters := make(map[string]any)
-		if t.InputSchema != nil {
-			data, _ := json.Marshal(t.InputSchema)
-			_ = json.Unmarshal(data, &parameters)
-		}
-
-		def := llm.ToolDef{
-			Name:        toolName,
-			Description: fmt.Sprintf("[%s] %s", serverName, t.Description),
-			Parameters:  parameters,
-		}
-
-		handler := func(ctx context.Context, tc llm.ToolCall) (string, error) {
-			var args map[string]any
-			_ = tc.UnmarshalArguments(&args)
-			res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: t.Name, Arguments: args})
-			if err != nil {
-				return "", err
-			}
-			return res.Content[0].(*mcp.TextContent).Text, nil
-		}
-		register(def, handler)
-	}
-
-	assert.Len(t, registeredTools, 1)
-	assert.Equal(t, "myserver_echo", registeredTools[0].Name)
-
-	// Test calling the tool
+	// Test calling the echo tool
 	result, err := handlers["myserver_echo"](ctx, llm.ToolCall{
 		Name:      "myserver_echo",
 		Arguments: `{"msg":"hello"}`,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, "echo: hello", result)
+
+	// Test calling the fail tool (should return error)
+	_, err = handlers["myserver_fail"](ctx, llm.ToolCall{
+		Name:      "myserver_fail",
+		Arguments: `{}`,
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "MCP tool error: error details")
 }

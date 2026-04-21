@@ -229,6 +229,29 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 			t.Errorf("expected error string in content, got: %q", msg.ToolResults[0].Content)
 		}
 	})
+
+	t.Run("context propagation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		d := newMockDispatcher()
+		d.handlers["tool"] = func(ctx context.Context, _ llm.ToolCall) (string, error) {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			return "ok", nil
+		}
+
+		agent := NewAgent(nil, d, WithStderr(io.Discard))
+		msg := agent.executeToolCalls(ctx, []llm.ToolCall{{ID: "id1", Name: "tool"}})
+
+		if len(msg.ToolResults) != 1 {
+			t.Fatal("expected 1 result")
+		}
+		if msg.ToolResults[0].Content != "error: context canceled" {
+			t.Errorf("expected context canceled error, got: %q", msg.ToolResults[0].Content)
+		}
+	})
 }
 
 // TestRunReview_DirectResponse verifies that when the LLM responds with plain

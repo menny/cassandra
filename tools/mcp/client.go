@@ -94,7 +94,6 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 			Command: cmd,
 		}
 	} else if cfg.URL != "" {
-
 		// SSE transport
 		sseTransport := &mcp.SSEClientTransport{
 			Endpoint: cfg.URL,
@@ -112,6 +111,10 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		return fmt.Errorf("invalid server config: neither command nor url specified")
 	}
 
+	return m.registerServerWithTransport(ctx, serverName, transport, cfg, register)
+}
+
+func (m *Manager) registerServerWithTransport(ctx context.Context, serverName string, transport mcp.Transport, cfg ServerConfig, register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "cassandra-reviewer",
 		Version: "0.0.1",
@@ -132,6 +135,7 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 	}
 
 	for _, t := range toolsRes.Tools {
+		t := t // capture range variable
 		toolName := fmt.Sprintf("%s_%s", serverName, t.Name)
 
 		// Map MCP JSON Schema to llm.ToolDef
