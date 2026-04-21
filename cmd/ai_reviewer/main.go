@@ -18,11 +18,16 @@ import (
 	"github.com/menny/cassandra/tools/mcp"
 )
 
-// stderr is used for all diagnostic / progress output so that the final review
-// (written to stdout) can be cleanly captured or piped by the caller.
-var stderr = log.New(os.Stderr, "", 0)
-
 func main() {
+	ctx := context.Background()
+	stderr := log.New(os.Stderr, "", 0)
+	if err := run(ctx, stderr); err != nil {
+		stderr.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, stderr *log.Logger) error {
 	var base string
 	var head string
 	var modelName string
@@ -65,8 +70,7 @@ func main() {
 
 	// Error if there are dangling positional arguments
 	if len(flag.Args()) > 0 {
-		fmt.Printf("Error: unknown or positional arguments provided: %v\n", flag.Args())
-		os.Exit(1)
+		return fmt.Errorf("unknown or positional arguments provided: %v", flag.Args())
 	}
 
 	// Move to the intended working directory if executing via bazel or explicitly requested
@@ -76,7 +80,7 @@ func main() {
 	}
 	if targetDir != "" {
 		if err := os.Chdir(targetDir); err != nil {
-			log.Fatalf("Failed to change directory to %s: %v", targetDir, err)
+			return fmt.Errorf("failed to change directory to %s: %w", targetDir, err)
 		}
 	}
 
@@ -92,21 +96,20 @@ func main() {
 	}
 
 	if len(missing) > 0 {
-		stderr.Printf("Error: missing required arguments:\n  - %s\n", strings.Join(missing, "\n  - "))
-		os.Exit(1)
+		return fmt.Errorf("missing required arguments:\n  - %s", strings.Join(missing, "\n  - "))
 	}
 
 	// Resolve main guidelines content
 	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines)
 	if err != nil {
-		log.Fatalf("Failed to resolve main guidelines: %v", err)
+		return fmt.Errorf("failed to resolve main guidelines: %w", err)
 	}
 
 	var approvalEvaluationContent string
 	if approvalEvaluationPromptFile != "" {
 		content, err := os.ReadFile(approvalEvaluationPromptFile)
 		if err != nil {
-			log.Fatalf("Failed to read approval evaluation prompt file: %v", err)
+			return fmt.Errorf("failed to read approval evaluation prompt file: %w", err)
 		}
 		approvalEvaluationContent = string(content)
 	}
@@ -135,12 +138,10 @@ func main() {
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
-	ctx := context.Background()
-
 	// Initialize LLM Client
 	client, err := factory.New(ctx, provider, modelName, providerAPIKey)
 	if err != nil {
-		log.Fatalf("Failed to initialize LLM: %v", err)
+		return fmt.Errorf("failed to initialize LLM: %w", err)
 	}
 
 	// Initialize Agent and Tool Registry
@@ -150,11 +151,11 @@ func main() {
 	if mcpConfigFile != "" {
 		mcpData, err := os.ReadFile(mcpConfigFile)
 		if err != nil {
-			log.Fatalf("Failed to read MCP config file %s: %v", mcpConfigFile, err)
+			return fmt.Errorf("failed to read MCP config file %s: %w", mcpConfigFile, err)
 		}
 		var mcpConfig mcp.Config
 		if err := json.Unmarshal(mcpData, &mcpConfig); err != nil {
-			log.Fatalf("Failed to parse MCP config file %s: %v", mcpConfigFile, err)
+			return fmt.Errorf("failed to parse MCP config file %s: %w", mcpConfigFile, err)
 		}
 		mcpConfig.ExpandEnv()
 
@@ -169,11 +170,7 @@ func main() {
 		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
-			stderr.Printf("Error: failed to register MCP servers: %v\n", err)
-			// Explicitly close the manager to reap subprocesses before exiting,
-			// since log.Fatalf/os.Exit bypasses deferred calls.
-			_ = mcpManager.Close()
-			os.Exit(1)
+			return fmt.Errorf("failed to register MCP servers: %w", err)
 		}
 	}
 
@@ -185,18 +182,18 @@ func main() {
 
 	if diffFile != "" || filesListFile != "" {
 		if diffFile == "" || filesListFile == "" {
-			log.Fatal("Both --diff-file and --files-list-file must be provided together.")
+			return fmt.Errorf("both --diff-file and --files-list-file must be provided together")
 		}
 
 		diffBytes, err := os.ReadFile(diffFile)
 		if err != nil {
-			log.Fatalf("Failed to read diff file %s: %v", diffFile, err)
+			return fmt.Errorf("failed to read diff file %s: %w", diffFile, err)
 		}
 		diffOutput = string(diffBytes)
 
 		filesBytes, err := os.ReadFile(filesListFile)
 		if err != nil {
-			log.Fatalf("Failed to read files list file %s: %v", filesListFile, err)
+			return fmt.Errorf("failed to read files list file %s: %w", filesListFile, err)
 		}
 		lines := strings.Split(strings.TrimSpace(string(filesBytes)), "\n")
 		for _, line := range lines {
@@ -209,14 +206,14 @@ func main() {
 		var err error
 		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, base, head)
 		if err != nil {
-			log.Fatalf("Failed to extract git diff: %v", err)
+			return fmt.Errorf("failed to extract git diff: %w", err)
 		}
 	}
 
 	if commitsFile != "" {
 		commitsBytes, err := os.ReadFile(commitsFile)
 		if err != nil {
-			log.Fatalf("Failed to read commits file %s: %v", commitsFile, err)
+			return fmt.Errorf("failed to read commits file %s: %w", commitsFile, err)
 		}
 		commitsOutput = string(commitsBytes)
 	} else {
@@ -232,7 +229,7 @@ func main() {
 
 	if len(changedFiles) == 0 {
 		stderr.Println("No changes found to review.")
-		os.Exit(0)
+		return nil
 	}
 
 	var requestTextBuilder strings.Builder
@@ -265,7 +262,7 @@ func main() {
 
 	systemStable, systemDynamic, promptSummary, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, approvalEvaluationContent)
 	if err != nil {
-		log.Fatalf("Failed to build system prompt: %v", err)
+		return fmt.Errorf("failed to build system prompt: %w", err)
 	}
 
 	stderr.Println("=== Prompt Summary ===")
@@ -283,7 +280,7 @@ func main() {
 
 	result, err := agent.RunReview(ctx, systemStable, systemDynamic, requestText, maxIterations, maxTokens)
 	if err != nil {
-		log.Fatalf("Review failed: %v", err)
+		return fmt.Errorf("review failed: %w", err)
 	}
 
 	// Final review goes to stdout so it can be captured cleanly.
@@ -291,7 +288,7 @@ func main() {
 
 	if reviewOutputFile != "" {
 		if err := core.WriteFileWithDirs(reviewOutputFile, []byte(result)); err != nil {
-			log.Fatalf("Failed to write review to %s: %v", reviewOutputFile, err)
+			return fmt.Errorf("failed to write review to %s: %w", reviewOutputFile, err)
 		}
 		stderr.Printf("Review written to %s\n", reviewOutputFile)
 	}
@@ -303,7 +300,7 @@ func main() {
 			MaxTokens:     maxTokens,
 		})
 		if err != nil {
-			log.Fatalf("Structured extraction failed: %v", err)
+			return fmt.Errorf("structured extraction failed: %w", err)
 		}
 
 		// Populate the raw text manually to save tokens during extraction
@@ -311,14 +308,16 @@ func main() {
 
 		jsonBytes, err := json.MarshalIndent(structured, "", "  ")
 		if err != nil {
-			log.Fatalf("Failed to marshal structured review: %v", err)
+			return fmt.Errorf("failed to marshal structured review: %w", err)
 		}
 
 		if err := core.WriteFileWithDirs(outputJSONFile, jsonBytes); err != nil {
-			log.Fatalf("Failed to write structured review to %s: %v", outputJSONFile, err)
+			return fmt.Errorf("failed to write structured review to %s: %w", outputJSONFile, err)
 		}
 		stderr.Printf("Structured review written to %s\n", outputJSONFile)
 	}
+
+	return nil
 }
 
 func resolveMainGuidelinesContent(guidelinesPath string) (string, error) {
