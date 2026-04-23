@@ -71,7 +71,7 @@ func TestFormatMetadata(t *testing.T) {
 	require.Contains(t, formatted, "  > comment 2")
 }
 
-func TestResolveMainGuidelinesContent(t *testing.T) {
+func TestResolveGuidelinesContent(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create a local file
@@ -80,19 +80,19 @@ func TestResolveMainGuidelinesContent(t *testing.T) {
 	require.NoError(t, os.WriteFile(localFile, []byte(localContent), 0o644))
 
 	t.Run("resolves local file path", func(t *testing.T) {
-		content, err := resolveMainGuidelinesContent(localFile)
+		content, err := resolveGuidelinesContent(localFile)
 		require.NoError(t, err)
 		require.Equal(t, localContent, content)
 	})
 
 	t.Run("resolves named prompt from embedded library", func(t *testing.T) {
-		content, err := resolveMainGuidelinesContent("google")
+		content, err := resolveGuidelinesContent("google")
 		require.NoError(t, err)
 		require.Contains(t, content, "Google Engineering Practices")
 	})
 
 	t.Run("fails on non-existent path and name", func(t *testing.T) {
-		_, err := resolveMainGuidelinesContent("non-existent-at-all")
+		_, err := resolveGuidelinesContent("non-existent-at-all")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "prompt \"non-existent-at-all\" not found in library")
 	})

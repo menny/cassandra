@@ -25,3 +25,5 @@ jobs:
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
           submit_review_action: 'true'
+          supplemental_guidelines: |
+            .github/ai-reviewer/haiku-praise.md

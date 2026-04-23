@@ -54,7 +54,8 @@ type PromptSummary struct {
 }
 
 // BuildSystemPrompt constructs the full system prompt by combining base prompts,
-// the selected general guidelines (mainGuidelinesContent), any repository-specific rules found
+// the selected general guidelines (mainGuidelinesContent), any additive
+// supplementalGuidelinesContent, any repository-specific rules found
 // in REVIEWERS.md or AGENTS.md files, and optional personal preferences from
 // personal.ai_code_review_guidelines.md located in the workspace root.
 //
@@ -70,13 +71,14 @@ type PromptSummary struct {
 // Stable (Zone 1+2):
 //  1. reviewerPrompt            — static, embedded at build time
 //  2. <code_review_guidelines>  — semi-static, one value per deployment config
-//  3. <approval_evaluation_guidelines> — semi-static
-//  4. <personal_review_guidelines>     — semi-static, optional
+//  3. <supplemental_guideline>  — semi-static, additive guidelines
+//  4. <approval_evaluation_guidelines> — semi-static
+//  5. <personal_review_guidelines>     — semi-static, optional
 //
 // Dynamic (Zone 3):
-//  5. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  6. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent, approvalEvaluationContent string) (stable, dynamic string, summary PromptSummary, err error) {
+//  6. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  7. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -87,6 +89,12 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 
 	// Zone 1 (static) + Zone 2 (semi-static) — identical across all PRs on the same config.
 	stable = reviewerPrompt + "\n<code_review_guidelines>\n" + mainGuidelinesContent + "\n</code_review_guidelines>\n"
+
+	for _, sg := range supplementalGuidelinesContent {
+		if sg != "" {
+			stable += "\n<supplemental_guideline>\n" + sg + "\n</supplemental_guideline>\n"
+		}
+	}
 
 	stable += "\n<approval_evaluation_guidelines>\n" + approvalEvaluationContent + "\n</approval_evaluation_guidelines>\n"
 

@@ -35,6 +35,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	var providerAPIKey string
 	var workingDir string
 	var mainGuidelines string
+	var supplementalGuidelines []string
 	var maxTokens int
 	var reviewOutputFile string
 	var outputJSONFile string
@@ -48,6 +49,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 
 	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
+	flag.StringArrayVar(&supplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
 	flag.StringVar(&approvalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
 	flag.IntVar(&maxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response")
 	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
@@ -100,9 +102,18 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 
 	// Resolve main guidelines content
-	mainGuidelinesContent, err := resolveMainGuidelinesContent(mainGuidelines)
+	mainGuidelinesContent, err := resolveGuidelinesContent(mainGuidelines)
 	if err != nil {
 		return fmt.Errorf("failed to resolve main guidelines: %w", err)
+	}
+
+	var supplementalGuidelinesContent []string
+	for _, sg := range supplementalGuidelines {
+		content, err := resolveGuidelinesContent(sg)
+		if err != nil {
+			return fmt.Errorf("failed to resolve supplemental guideline %q: %w", sg, err)
+		}
+		supplementalGuidelinesContent = append(supplementalGuidelinesContent, content)
 	}
 
 	var approvalEvaluationContent string
@@ -122,6 +133,9 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	stderr.Printf("  LLM Model: %s\n", modelName)
 	if mainGuidelines != "" {
 		stderr.Printf("  Main Guidelines: %s\n", mainGuidelines)
+	}
+	if len(supplementalGuidelines) > 0 {
+		stderr.Printf("  Supplemental Guidelines: %s\n", strings.Join(supplementalGuidelines, ", "))
 	}
 	if outputJSONFile != "" {
 		stderr.Printf("  Structured Output JSON: %s\n", outputJSONFile)
@@ -260,7 +274,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	// Compute max ReAct iterations based on changed files.
 	maxIterations := core.CalculateMaxIterations(len(changedFiles))
 
-	systemStable, systemDynamic, promptSummary, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, approvalEvaluationContent)
+	systemStable, systemDynamic, promptSummary, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, supplementalGuidelinesContent, approvalEvaluationContent)
 	if err != nil {
 		return fmt.Errorf("failed to build system prompt: %w", err)
 	}
@@ -320,7 +334,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	return nil
 }
 
-func resolveMainGuidelinesContent(guidelinesPath string) (string, error) {
+func resolveGuidelinesContent(guidelinesPath string) (string, error) {
 	// Try the path as provided first
 	if content, err := os.ReadFile(guidelinesPath); err == nil {
 		return string(content), nil
