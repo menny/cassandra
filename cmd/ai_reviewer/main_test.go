@@ -6,9 +6,70 @@ import (
 	"testing"
 	"time"
 
+	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
+
 	"github.com/menny/cassandra/core"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConfigPrecedence(t *testing.T) {
+	tmpDir := t.TempDir()
+	tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+	tomlContent := `
+model = "config-model"
+provider = "config-provider"
+max-tokens = 100
+`
+	require.NoError(t, os.WriteFile(tomlPath, []byte(tomlContent), 0o644))
+
+	t.Run("CLI takes precedence over config", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		fs.String("model", "", "")
+		fs.String("provider", "", "")
+		fs.Int("max-tokens", 0, "")
+
+		v := viper.New()
+		v.SetDefault("max-tokens", 50)
+
+		// Simulate CLI flag
+		require.NoError(t, fs.Set("model", "cli-model"))
+
+		// Only bind changed flags
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		v.SetConfigFile(tomlPath)
+		require.NoError(t, v.ReadInConfig())
+
+		require.Equal(t, "cli-model", v.GetString("model"))
+		require.Equal(t, "config-provider", v.GetString("provider"))
+		require.Equal(t, 100, v.GetInt("max-tokens"))
+	})
+
+	t.Run("Config takes precedence over default", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		fs.String("model", "default-model", "")
+
+		v := viper.New()
+		v.SetDefault("model", "viper-default")
+
+		// Only bind changed flags (none changed here)
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		v.SetConfigFile(tomlPath)
+		require.NoError(t, v.ReadInConfig())
+
+		require.Equal(t, "config-model", v.GetString("model"))
+	})
+}
 
 func TestFormatMetadata(t *testing.T) {
 	now := time.Date(2026, 4, 9, 10, 0, 0, 0, time.UTC)

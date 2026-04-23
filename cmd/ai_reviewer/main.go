@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/prompts"
@@ -17,6 +18,29 @@ import (
 	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/tools/mcp"
 )
+
+type config struct {
+	Base                         string   `mapstructure:"base"`
+	Head                         string   `mapstructure:"head"`
+	Model                        string   `mapstructure:"model"`
+	Provider                     string   `mapstructure:"provider"`
+	ProviderAPIKey               string   `mapstructure:"provider-api-key"`
+	ProviderURL                  string   `mapstructure:"provider-url"`
+	WorkingDir                   string   `mapstructure:"cwd"`
+	MainGuidelines               string   `mapstructure:"main-guidelines"`
+	SupplementalGuidelines       []string `mapstructure:"supplemental-guidelines"`
+	MaxTokens                    int      `mapstructure:"max-tokens"`
+	ReviewOutputFile             string   `mapstructure:"review-output-file"`
+	OutputJSONFile               string   `mapstructure:"output-json"`
+	ExtractionModel              string   `mapstructure:"extraction-model"`
+	MetadataJSONFile             string   `mapstructure:"metadata-json"`
+	ApprovalEvaluationPromptFile string   `mapstructure:"approval-evaluation-prompt-file"`
+	DiffFile                     string   `mapstructure:"diff-file"`
+	FilesListFile                string   `mapstructure:"files-list-file"`
+	CommitsFile                  string   `mapstructure:"commits-file"`
+	MCPConfigFile                string   `mapstructure:"mcp-config"`
+	ConfigFile                   string   `mapstructure:"config"`
+}
 
 func main() {
 	ctx := context.Background()
@@ -28,46 +52,29 @@ func main() {
 }
 
 func run(ctx context.Context, stderr *log.Logger) error {
-	var base string
-	var head string
-	var modelName string
-	var provider string
-	var providerAPIKey string
-	var providerURL string
-	var workingDir string
-	var mainGuidelines string
-	var supplementalGuidelines []string
-	var maxTokens int
-	var reviewOutputFile string
-	var outputJSONFile string
-	var extractionModel string
-	var metadataJSONFile string
-	var approvalEvaluationPromptFile string
-	var diffFile string
-	var filesListFile string
-	var commitsFile string
-	var mcpConfigFile string
+	var cfg config
 
-	flag.StringVar(&workingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&mainGuidelines, "main-guidelines", "general", "Path to a file or a named prompt from the library")
-	flag.StringArrayVar(&supplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
-	flag.StringVar(&approvalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	flag.IntVar(&maxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response")
-	flag.StringVar(&base, "base", "main", "Base commit/branch for diff")
-	flag.StringVar(&head, "head", "HEAD", "Head commit/branch for diff")
-	flag.StringVar(&reviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
-	flag.StringVar(&outputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
-	flag.StringVar(&extractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
-	flag.StringVar(&metadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
-	flag.StringVar(&diffFile, "diff-file", "", "Path to a file containing the git diff")
-	flag.StringVar(&filesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
-	flag.StringVar(&commitsFile, "commits-file", "", "Path to a file containing the commit messages")
-	flag.StringVar(&mcpConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	flag.StringVar(&cfg.WorkingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
+	flag.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
+	flag.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
+	flag.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
+	flag.IntVar(&cfg.MaxTokens, "max-tokens", 0, "Max tokens for the LLM response (defaults to provider specific default)")
+	flag.StringVar(&cfg.Base, "base", "", "Base commit/branch for diff (defaults to 'main')")
+	flag.StringVar(&cfg.Head, "head", "", "Head commit/branch for diff (defaults to 'HEAD')")
+	flag.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
+	flag.StringVar(&cfg.OutputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
+	flag.StringVar(&cfg.ExtractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
+	flag.StringVar(&cfg.MetadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
+	flag.StringVar(&cfg.DiffFile, "diff-file", "", "Path to a file containing the git diff")
+	flag.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
+	flag.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
+	flag.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	flag.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 
-	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
-	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
-	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
-	flag.StringVar(&providerURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
+	flag.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
+	flag.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
+	flag.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
+	flag.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 
 	// pflag natively errors and exits on unknown flags unless configured otherwise
 	flag.Parse()
@@ -78,7 +85,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 
 	// Move to the intended working directory if executing via bazel or explicitly requested
-	targetDir := workingDir
+	targetDir := cfg.WorkingDir
 	if targetDir == "" {
 		targetDir = os.Getenv("BUILD_WORKSPACE_DIRECTORY")
 	}
@@ -88,14 +95,57 @@ func run(ctx context.Context, stderr *log.Logger) error {
 		}
 	}
 
+	v := viper.New()
+	// Note: We set defaults in viper instead of pflag.
+	// We only bind flags that were explicitly set by the user (Changed).
+	// This ensures that pflag's zero-value defaults do not override
+	// values from the configuration file or viper's own defaults.
+	v.SetDefault("main-guidelines", "general")
+	v.SetDefault("base", "main")
+	v.SetDefault("head", "HEAD")
+	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
+	v.SetDefault("provider", "google")
+	v.SetDefault("model", "gemini-3-flash-preview")
+
+	flag.VisitAll(func(f *flag.Flag) {
+		if f.Changed {
+			if err := v.BindPFlag(f.Name, f); err != nil {
+				// This is highly unlikely to fail as we are iterating over our own flags
+				stderr.Printf("Warning: failed to bind flag %s to viper: %v\n", f.Name, err)
+			}
+		}
+	})
+
+	if cfg.ConfigFile != "" {
+		v.SetConfigFile(cfg.ConfigFile)
+	} else {
+		v.SetConfigName("cassandra")
+		v.SetConfigType("toml")
+		v.AddConfigPath(".")
+	}
+
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+		if cfg.ConfigFile != "" {
+			return fmt.Errorf("config file %q not found: %w", cfg.ConfigFile, err)
+		}
+	}
+
+	// Sync flag variables with viper (precedence: CLI > Config > Defaults)
+	if err := v.Unmarshal(&cfg); err != nil {
+		return fmt.Errorf("failed to unmarshal configuration: %w", err)
+	}
+
 	var missing []string
-	if provider == "" {
+	if cfg.Provider == "" {
 		missing = append(missing, "--provider")
 	}
-	if modelName == "" {
+	if cfg.Model == "" {
 		missing = append(missing, "--model")
 	}
-	if providerAPIKey == "" {
+	if cfg.ProviderAPIKey == "" {
 		missing = append(missing, "--provider-api-key")
 	}
 
@@ -104,13 +154,13 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 
 	// Resolve main guidelines content
-	mainGuidelinesContent, err := resolveGuidelinesContent(mainGuidelines)
+	mainGuidelinesContent, err := resolveGuidelinesContent(cfg.MainGuidelines)
 	if err != nil {
 		return fmt.Errorf("failed to resolve main guidelines: %w", err)
 	}
 
 	var supplementalGuidelinesContent []string
-	for _, sg := range supplementalGuidelines {
+	for _, sg := range cfg.SupplementalGuidelines {
 		content, err := resolveGuidelinesContent(sg)
 		if err != nil {
 			return fmt.Errorf("failed to resolve supplemental guideline %q: %w", sg, err)
@@ -119,8 +169,8 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 
 	var approvalEvaluationContent string
-	if approvalEvaluationPromptFile != "" {
-		content, err := os.ReadFile(approvalEvaluationPromptFile)
+	if cfg.ApprovalEvaluationPromptFile != "" {
+		content, err := os.ReadFile(cfg.ApprovalEvaluationPromptFile)
 		if err != nil {
 			return fmt.Errorf("failed to read approval evaluation prompt file: %w", err)
 		}
@@ -129,36 +179,37 @@ func run(ctx context.Context, stderr *log.Logger) error {
 
 	stderr.Println("=== Cassandra Configuration ===")
 	stderr.Printf("  Working Directory: %s\n", targetDir)
-	stderr.Printf("  Base: %s\n", base)
-	stderr.Printf("  Head: %s\n", head)
-	stderr.Printf("  LLM Provider: %s\n", provider)
-	stderr.Printf("  LLM Model: %s\n", modelName)
-	if providerURL != "" {
-		stderr.Printf("  LLM Provider URL: %s\n", providerURL)
+	stderr.Printf("  Base: %s\n", cfg.Base)
+	stderr.Printf("  Head: %s\n", cfg.Head)
+	stderr.Printf("  LLM Provider: %s\n", cfg.Provider)
+	stderr.Printf("  LLM Model: %s\n", cfg.Model)
+	if cfg.ProviderURL != "" {
+		stderr.Printf("  LLM Provider URL: %s\n", cfg.ProviderURL)
 	}
-	if mainGuidelines != "" {
-		stderr.Printf("  Main Guidelines: %s\n", mainGuidelines)
+	stderr.Printf("  Max Tokens: %d\n", cfg.MaxTokens)
+	if cfg.MainGuidelines != "" {
+		stderr.Printf("  Main Guidelines: %s\n", cfg.MainGuidelines)
 	}
-	if len(supplementalGuidelines) > 0 {
-		stderr.Printf("  Supplemental Guidelines: %s\n", strings.Join(supplementalGuidelines, ", "))
+	if len(cfg.SupplementalGuidelines) > 0 {
+		stderr.Printf("  Supplemental Guidelines: %s\n", strings.Join(cfg.SupplementalGuidelines, ", "))
 	}
-	if outputJSONFile != "" {
-		stderr.Printf("  Structured Output JSON: %s\n", outputJSONFile)
-		if extractionModel != "" {
-			stderr.Printf("  Extraction Model: %s\n", extractionModel)
+	if cfg.OutputJSONFile != "" {
+		stderr.Printf("  Structured Output JSON: %s\n", cfg.OutputJSONFile)
+		if cfg.ExtractionModel != "" {
+			stderr.Printf("  Extraction Model: %s\n", cfg.ExtractionModel)
 		}
 	}
-	if metadataJSONFile != "" {
-		stderr.Printf("  Metadata JSON: %s\n", metadataJSONFile)
+	if cfg.MetadataJSONFile != "" {
+		stderr.Printf("  Metadata JSON: %s\n", cfg.MetadataJSONFile)
 	}
-	if approvalEvaluationPromptFile != "" {
-		stderr.Printf("  Approval Evaluation Prompt File: %s\n", approvalEvaluationPromptFile)
+	if cfg.ApprovalEvaluationPromptFile != "" {
+		stderr.Printf("  Approval Evaluation Prompt File: %s\n", cfg.ApprovalEvaluationPromptFile)
 	}
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
 	// Initialize LLM Client
-	client, err := factory.New(ctx, provider, modelName, providerAPIKey, providerURL)
+	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize LLM: %w", err)
 	}
@@ -167,14 +218,14 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	registry := tools.NewRegistry()
 	tools.RegisterLocalTools(registry)
 
-	if mcpConfigFile != "" {
-		mcpData, err := os.ReadFile(mcpConfigFile)
+	if cfg.MCPConfigFile != "" {
+		mcpData, err := os.ReadFile(cfg.MCPConfigFile)
 		if err != nil {
-			return fmt.Errorf("failed to read MCP config file %s: %w", mcpConfigFile, err)
+			return fmt.Errorf("failed to read MCP config file %s: %w", cfg.MCPConfigFile, err)
 		}
 		var mcpConfig mcp.Config
 		if err := json.Unmarshal(mcpData, &mcpConfig); err != nil {
-			return fmt.Errorf("failed to parse MCP config file %s: %w", mcpConfigFile, err)
+			return fmt.Errorf("failed to parse MCP config file %s: %w", cfg.MCPConfigFile, err)
 		}
 		mcpConfig.ExpandEnv()
 
@@ -185,7 +236,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 			}
 		}()
 
-		stderr.Printf("Initializing MCP servers from %s...\n", mcpConfigFile)
+		stderr.Printf("Initializing MCP servers from %s...\n", cfg.MCPConfigFile)
 		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
@@ -199,20 +250,20 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	var changedFiles []string
 	var commitsOutput string
 
-	if diffFile != "" || filesListFile != "" {
-		if diffFile == "" || filesListFile == "" {
+	if cfg.DiffFile != "" || cfg.FilesListFile != "" {
+		if cfg.DiffFile == "" || cfg.FilesListFile == "" {
 			return fmt.Errorf("both --diff-file and --files-list-file must be provided together")
 		}
 
-		diffBytes, err := os.ReadFile(diffFile)
+		diffBytes, err := os.ReadFile(cfg.DiffFile)
 		if err != nil {
-			return fmt.Errorf("failed to read diff file %s: %w", diffFile, err)
+			return fmt.Errorf("failed to read diff file %s: %w", cfg.DiffFile, err)
 		}
 		diffOutput = string(diffBytes)
 
-		filesBytes, err := os.ReadFile(filesListFile)
+		filesBytes, err := os.ReadFile(cfg.FilesListFile)
 		if err != nil {
-			return fmt.Errorf("failed to read files list file %s: %w", filesListFile, err)
+			return fmt.Errorf("failed to read files list file %s: %w", cfg.FilesListFile, err)
 		}
 		lines := strings.Split(strings.TrimSpace(string(filesBytes)), "\n")
 		for _, line := range lines {
@@ -223,21 +274,21 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	} else {
 		stderr.Println("Fetching git diff locally...")
 		var err error
-		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, base, head)
+		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head)
 		if err != nil {
 			return fmt.Errorf("failed to extract git diff: %w", err)
 		}
 	}
 
-	if commitsFile != "" {
-		commitsBytes, err := os.ReadFile(commitsFile)
+	if cfg.CommitsFile != "" {
+		commitsBytes, err := os.ReadFile(cfg.CommitsFile)
 		if err != nil {
-			return fmt.Errorf("failed to read commits file %s: %w", commitsFile, err)
+			return fmt.Errorf("failed to read commits file %s: %w", cfg.CommitsFile, err)
 		}
 		commitsOutput = string(commitsBytes)
 	} else {
 		stderr.Println("Fetching git commits locally...")
-		commits, err := tools.FetchGitCommits(ctx, targetDir, base, head)
+		commits, err := tools.FetchGitCommits(ctx, targetDir, cfg.Base, cfg.Head)
 		if err != nil {
 			// Don't fail if commits fetching fails (e.g. shallow clone), just log it
 			stderr.Printf("Warning: failed to fetch git commits: %v\n", err)
@@ -262,8 +313,8 @@ func run(ctx context.Context, stderr *log.Logger) error {
 
 	requestText := requestTextBuilder.String()
 
-	if metadataJSONFile != "" {
-		metadataBytes, err := os.ReadFile(metadataJSONFile)
+	if cfg.MetadataJSONFile != "" {
+		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
 		if err != nil {
 			stderr.Printf("Warning: failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
 		} else {
@@ -297,7 +348,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 	stderr.Println("======================")
 
-	result, err := agent.RunReview(ctx, systemStable, systemDynamic, requestText, maxIterations, maxTokens)
+	result, err := agent.RunReview(ctx, systemStable, systemDynamic, requestText, maxIterations, cfg.MaxTokens)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
@@ -305,18 +356,18 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 
-	if reviewOutputFile != "" {
-		if err := core.WriteFileWithDirs(reviewOutputFile, []byte(result)); err != nil {
-			return fmt.Errorf("failed to write review to %s: %w", reviewOutputFile, err)
+	if cfg.ReviewOutputFile != "" {
+		if err := core.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
+			return fmt.Errorf("failed to write review to %s: %w", cfg.ReviewOutputFile, err)
 		}
-		stderr.Printf("Review written to %s\n", reviewOutputFile)
+		stderr.Printf("Review written to %s\n", cfg.ReviewOutputFile)
 	}
 
-	if outputJSONFile != "" {
+	if cfg.OutputJSONFile != "" {
 		extractionPrompt := prompts.BuildExtractionPrompt()
 		structured, err := agent.ExtractStructuredReview(ctx, extractionPrompt, result, llm.StructuredConfig{
-			ModelOverride: extractionModel,
-			MaxTokens:     maxTokens,
+			ModelOverride: cfg.ExtractionModel,
+			MaxTokens:     cfg.MaxTokens,
 		})
 		if err != nil {
 			return fmt.Errorf("structured extraction failed: %w", err)
@@ -330,10 +381,10 @@ func run(ctx context.Context, stderr *log.Logger) error {
 			return fmt.Errorf("failed to marshal structured review: %w", err)
 		}
 
-		if err := core.WriteFileWithDirs(outputJSONFile, jsonBytes); err != nil {
-			return fmt.Errorf("failed to write structured review to %s: %w", outputJSONFile, err)
+		if err := core.WriteFileWithDirs(cfg.OutputJSONFile, jsonBytes); err != nil {
+			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
-		stderr.Printf("Structured review written to %s\n", outputJSONFile)
+		stderr.Printf("Structured review written to %s\n", cfg.OutputJSONFile)
 	}
 
 	return nil

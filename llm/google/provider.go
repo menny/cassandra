@@ -257,6 +257,15 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 
 	result := &llm.Response{Usage: llm.UnknownUsage()}
 
+	switch candidate.FinishReason {
+	case genai.FinishReasonStop:
+		result.FinishReason = llm.FinishReasonStop
+	case genai.FinishReasonMaxTokens:
+		result.FinishReason = llm.FinishReasonLength
+	default:
+		result.FinishReason = llm.FinishReasonOther
+	}
+
 	if resp.UsageMetadata != nil {
 		result.Usage.PromptTokens = int(resp.UsageMetadata.PromptTokenCount - resp.UsageMetadata.CachedContentTokenCount)
 		result.Usage.OutputTokens = int(resp.UsageMetadata.CandidatesTokenCount)

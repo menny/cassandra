@@ -117,6 +117,7 @@ type spyReporter struct {
 	extractionRetries    []int
 	emptyResponseRetries []int
 	capsReached          []int
+	truncated            []int
 }
 
 func (s *spyReporter) ReportIteration(iter int) {
@@ -137,6 +138,9 @@ func (s *spyReporter) ReportEmptyResponseRetry(attempt int) {
 	s.emptyResponseRetries = append(s.emptyResponseRetries, attempt)
 }
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
+func (s *spyReporter) ReportTruncated(maxTokens int) {
+	s.truncated = append(s.truncated, maxTokens)
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -166,6 +170,28 @@ func TestAgent_Reporter(t *testing.T) {
 		}
 		if spy.finalReviews != 1 {
 			t.Errorf("expected 1 final review report, got %d", spy.finalReviews)
+		}
+		if len(spy.truncated) != 0 {
+			t.Errorf("expected 0 truncations reported, got %v", spy.truncated)
+		}
+	})
+
+	t.Run("truncation reporting", func(t *testing.T) {
+		spy := &spyReporter{}
+		lm := &mockLLM{responses: []*llm.Response{
+			{Text: "partial...", FinishReason: llm.FinishReasonLength},
+		}}
+		d := newMockDispatcher()
+
+		agent := NewAgent(lm, d, WithReporter(spy))
+		maxTokens := 128
+		_, err := agent.RunReview(context.Background(), "sys", "", "req", 5, maxTokens)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(spy.truncated) != 1 || spy.truncated[0] != maxTokens {
+			t.Errorf("expected truncation report with %d tokens, got %v", maxTokens, spy.truncated)
 		}
 	})
 
