@@ -11,6 +11,7 @@ import (
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/anthropic"
 	"github.com/menny/cassandra/llm/google"
+	"github.com/menny/cassandra/llm/openai"
 )
 
 // Provider identifies a supported LLM provider.
@@ -19,6 +20,7 @@ type Provider string
 const (
 	ProviderAnthropic Provider = "anthropic"
 	ProviderGoogle    Provider = "google"
+	ProviderOpenAI    Provider = "openai"
 )
 
 // providerFactory constructs a provider-specific llm.Model. Implementations
@@ -36,6 +38,11 @@ var providers = map[Provider]providerFactory{
 	},
 	ProviderGoogle: func(ctx context.Context, apiKey, modelName string) (llm.Model, error) {
 		return google.New(ctx, apiKey, modelName)
+	},
+	ProviderOpenAI: func(_ context.Context, apiKey, modelName string) (llm.Model, error) {
+		// OpenAI client is constructed synchronously; ctx is unused at
+		// construction time (the SDK dials lazily per request).
+		return openai.New(apiKey, modelName), nil
 	},
 }
 

@@ -167,7 +167,7 @@ func (c StructuredConfig) Resolve(defaultModel string) (string, int) {
 }
 
 // Model is the only interface core.Agent depends on.
-// Implementations live in llm/anthropic and llm/google.
+// Implementations live in llm/anthropic, llm/google, and llm/openai.
 type Model interface {
 	GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
 	// GenerateStructuredContent requests the model to produce output adhering to
