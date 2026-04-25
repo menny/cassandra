@@ -110,10 +110,15 @@ func TestToOpenAIMessages_ToolResults(t *testing.T) {
 	}
 	params, err := toOpenAIMessages(msgs)
 	require.NoError(t, err)
-	assert.Len(t, params, 2, "each tool result must be its own message")
-	for _, p := range params {
-		assert.NotNil(t, p.OfTool, "each result message must be OfTool")
-	}
+	require.Len(t, params, 2, "each tool result must be its own message")
+
+	require.NotNil(t, params[0].OfTool, "first result message must be OfTool")
+	assert.Equal(t, "tc1", params[0].OfTool.ToolCallID)
+	assert.Equal(t, "file contents", params[0].OfTool.Content.OfString.Value)
+
+	require.NotNil(t, params[1].OfTool, "second result message must be OfTool")
+	assert.Equal(t, "tc2", params[1].OfTool.ToolCallID)
+	assert.Equal(t, "a.go\nb.go", params[1].OfTool.Content.OfString.Value)
 }
 
 func TestToOpenAIMessages_EmptyToolResults(t *testing.T) {
@@ -125,6 +130,70 @@ func TestToOpenAIMessages_EmptyToolResults(t *testing.T) {
 	params, err := toOpenAIMessages(msgs)
 	require.NoError(t, err)
 	assert.Len(t, params, 1, "empty tool-results message should be dropped")
+}
+
+// ── toOpenAITools ─────────────────────────────────────────────────────────────
+
+// ── injectAdditionalProperties ───────────────────────────────────────────────
+
+func TestInjectAdditionalProperties_FlatObject(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name": map[string]any{"type": "string"},
+		},
+	}
+	injectAdditionalProperties(schema)
+	assert.Equal(t, false, schema["additionalProperties"])
+}
+
+func TestInjectAdditionalProperties_NestedObject(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"address": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"street": map[string]any{"type": "string"},
+				},
+			},
+		},
+	}
+	injectAdditionalProperties(schema)
+	assert.Equal(t, false, schema["additionalProperties"])
+	address := schema["properties"].(map[string]any)["address"].(map[string]any)
+	assert.Equal(t, false, address["additionalProperties"])
+}
+
+func TestInjectAdditionalProperties_Defs(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"item": map[string]any{"$ref": "#/$defs/Item"},
+		},
+		"$defs": map[string]any{
+			"Item": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"id": map[string]any{"type": "string"}},
+			},
+		},
+	}
+	injectAdditionalProperties(schema)
+	assert.Equal(t, false, schema["additionalProperties"])
+	item := schema["$defs"].(map[string]any)["Item"].(map[string]any)
+	assert.Equal(t, false, item["additionalProperties"])
+}
+
+func TestInjectAdditionalProperties_NonObjectUnchanged(t *testing.T) {
+	schema := map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type": "string",
+		},
+	}
+	injectAdditionalProperties(schema)
+	_, hasAdditional := schema["additionalProperties"]
+	assert.False(t, hasAdditional, "non-object schema should not get additionalProperties")
 }
 
 // ── toOpenAITools ─────────────────────────────────────────────────────────────
