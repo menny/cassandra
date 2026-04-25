@@ -65,7 +65,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	flag.StringVar(&mcpConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
-	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
+	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 	flag.StringVar(&providerURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 

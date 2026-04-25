@@ -94,6 +94,10 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 
 // toOpenAIMessages converts []llm.Message to the
 // []openaisdk.ChatCompletionMessageParamUnion slice expected by the SDK.
+//
+// Feature divergence: llm.Message.CacheBreakpoint is intentionally not mapped.
+// Unlike Anthropic (which requires explicit cache-control markers), OpenAI
+// manages prompt caching automatically without caller-controlled breakpoints.
 func toOpenAIMessages(messages []llm.Message) ([]openaisdk.ChatCompletionMessageParamUnion, error) {
 	var params []openaisdk.ChatCompletionMessageParamUnion
 
