@@ -1,7 +1,11 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	openaisdk "github.com/openai/openai-go"
@@ -297,4 +301,83 @@ func TestParseOpenAIResponse_UsageWithCachedAndReasoning(t *testing.T) {
 	assert.Equal(t, 50, result.Usage.OutputTokens)
 	assert.Equal(t, 40, result.Usage.CachedTokens)
 	assert.Equal(t, 10, result.Usage.ThinkingTokens)
+}
+
+// ── baseURL override ──────────────────────────────────────────────────────────
+
+// chatCompletionResponse returns a minimal valid OpenAI Chat Completion JSON
+// body with the given content text. content must be a plain string (no
+// embedded quotes or braces) so the naive template produces valid JSON; use
+// json.Marshal-based construction for richer payloads.
+func chatCompletionResponse(content string) string {
+	b, _ := json.Marshal(content)
+	return `{
+		"id": "chatcmpl-test",
+		"object": "chat.completion",
+		"created": 1700000000,
+		"model": "test-model",
+		"choices": [{
+			"index": 0,
+			"finish_reason": "stop",
+			"message": {"role": "assistant", "content": ` + string(b) + `, "refusal": null},
+			"logprobs": null
+		}],
+		"usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+	}`
+}
+
+// newFakeChatServer creates an httptest.Server that serves a canned
+// OpenAI-compatible /chat/completions response. It captures the request path
+// so callers can assert which endpoint was hit.
+func newFakeChatServer(t *testing.T, responseBody string) (*httptest.Server, *string) {
+	t.Helper()
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, responseBody)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &capturedPath
+}
+
+func TestNew_BaseURL_GenerateContent(t *testing.T) {
+	// Verify that GenerateContent sends its request to the custom base URL and
+	// parses the response correctly.
+	srv, capturedPath := newFakeChatServer(t, chatCompletionResponse("hello from custom url"))
+
+	p := New("fake-api-key", "test-model", srv.URL)
+	resp, err := p.GenerateContent(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Text: "ping"},
+	}, nil, 100)
+
+	require.NoError(t, err)
+	assert.Equal(t, "hello from custom url", resp.Text)
+	assert.Equal(t, "/chat/completions", *capturedPath,
+		"request should have been sent to the custom server's /chat/completions")
+}
+
+func TestNew_BaseURL_GenerateStructuredContent(t *testing.T) {
+	// Verify that GenerateStructuredContent also honours the custom base URL.
+	srv, capturedPath := newFakeChatServer(t, chatCompletionResponse(`{"key":"value"}`))
+
+	p := New("fake-api-key", "test-model", srv.URL)
+	schema := map[string]any{"type": "object"}
+	resp, err := p.GenerateStructuredContent(context.Background(), []llm.Message{
+		{Role: llm.RoleUser, Text: "extract"},
+	}, schema, llm.StructuredConfig{MaxTokens: 100})
+
+	require.NoError(t, err)
+	assert.Contains(t, resp.Text, "key")
+	assert.Equal(t, "/chat/completions", *capturedPath,
+		"structured request should have been sent to the custom server's /chat/completions")
+}
+
+func TestNew_EmptyBaseURL_UsesDefault(t *testing.T) {
+	// Passing an empty baseURL must not modify the client in any way that
+	// breaks construction. We just verify that New succeeds and returns a
+	// non-nil provider (no live request is made in this test).
+	p := New("fake-api-key", "test-model", "")
+	assert.NotNil(t, p)
+	assert.Equal(t, "test-model", p.modelName)
 }

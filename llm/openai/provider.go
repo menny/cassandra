@@ -23,10 +23,16 @@ type Provider struct {
 	modelName string
 }
 
-// New creates a Provider for the given model. Extra SDK options (e.g.
-// option.WithBaseURL) can be passed for testing or proxying.
-func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
-	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
+// New creates a Provider for the given model. baseURL overrides the default
+// OpenAI API endpoint — pass an empty string to use the official API. This
+// allows targeting OpenAI-compatible providers (e.g. Ollama, local LLMs).
+// Extra SDK options can be passed for testing or additional configuration.
+func New(apiKey, modelName, baseURL string, opts ...option.RequestOption) *Provider {
+	allOpts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	if baseURL != "" {
+		allOpts = append(allOpts, option.WithBaseURL(baseURL))
+	}
+	allOpts = append(allOpts, opts...)
 	return &Provider{client: openaisdk.NewClient(allOpts...), modelName: modelName}
 }
 

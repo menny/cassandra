@@ -15,6 +15,10 @@ inputs:
   provider_api_key:
     description: 'API key for the selected provider'
     required: true
+  provider_url:
+    description: 'Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama)'
+    required: false
+    default: ''
   base:
     description: 'Base commit/branch for diff'
     required: false
@@ -252,6 +256,7 @@ runs:
         PROVIDER_API_KEY: ${{ inputs.provider_api_key }}
         PROVIDER: ${{ inputs.provider }}
         MODEL_ID: ${{ inputs.model_id }}
+        PROVIDER_URL: ${{ inputs.provider_url }}
         BASE: ${{ inputs.base }}
         HEAD: ${{ inputs.head }}
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
@@ -274,6 +279,10 @@ runs:
           --review-output-file "$REVIEW_FILE"
           --output-json "$JSON_FILE"
         )
+
+        if [[ -n "$PROVIDER_URL" ]]; then
+          ARGS+=(--provider-url "$PROVIDER_URL")
+        fi
 
         if [[ -n "$SUPPLEMENTAL_GUIDELINES" ]]; then
           while read -r line || [[ -n "$line" ]]; do
