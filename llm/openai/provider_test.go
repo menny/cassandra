@@ -310,7 +310,12 @@ func TestParseOpenAIResponse_UsageWithCachedAndReasoning(t *testing.T) {
 // embedded quotes or braces) so the naive template produces valid JSON; use
 // json.Marshal-based construction for richer payloads.
 func chatCompletionResponse(content string) string {
-	b, _ := json.Marshal(content)
+	b, err := json.Marshal(content)
+	if err != nil {
+		// json.Marshal of a plain string cannot fail; panic here makes
+		// misconfigured test helpers immediately visible.
+		panic("chatCompletionResponse: json.Marshal failed: " + err.Error())
+	}
 	return `{
 		"id": "chatcmpl-test",
 		"object": "chat.completion",
@@ -335,6 +340,9 @@ func newFakeChatServer(t *testing.T, responseBody string) (*httptest.Server, *st
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
+		// WriteString to a ResponseWriter cannot fail in a test server context;
+		// any write error would be due to a client disconnect that is irrelevant
+		// to the assertions this helper supports.
 		_, _ = io.WriteString(w, responseBody)
 	}))
 	t.Cleanup(srv.Close)
