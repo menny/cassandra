@@ -70,11 +70,6 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		return nil, fmt.Errorf("openai: building messages: %w", err)
 	}
 
-	// OpenAI Structured Outputs strict mode requires additionalProperties:false
-	// on every object node in the schema. Inject it recursively so callers do
-	// not need to be aware of this OpenAI-specific constraint.
-	injectAdditionalProperties(schema)
-
 	sdkParams := openaisdk.ChatCompletionNewParams{
 		Model:               openaisdk.ChatModel(modelName),
 		Messages:            msgs,
@@ -84,7 +79,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 				JSONSchema: openaisdk.ResponseFormatJSONSchemaJSONSchemaParam{
 					Name:   submitReviewToolName,
 					Schema: schema,
-					Strict: openaisdk.Bool(true),
+					Strict: openaisdk.Bool(false),
 				},
 			},
 		},
@@ -188,53 +183,4 @@ func parseOpenAIResponse(resp *openaisdk.ChatCompletion) (*llm.Response, error) 
 		})
 	}
 	return result, nil
-}
-
-// injectAdditionalProperties recursively sets "additionalProperties": false on
-// every JSON Schema object node in-place. This is required by the OpenAI
-// Structured Outputs strict mode, which rejects schemas that omit this
-// constraint on any object (see https://platform.openai.com/docs/guides/structured-outputs).
-func injectAdditionalProperties(schema map[string]any) {
-	// Mark this node as a closed object if it declares properties or is typed
-	// as an object, so OpenAI strict mode accepts it.
-	if _, hasProps := schema["properties"]; hasProps {
-		schema["additionalProperties"] = false
-	} else if t, ok := schema["type"].(string); ok && t == "object" {
-		schema["additionalProperties"] = false
-	}
-
-	// Recurse into keyword sub-schemas that contain named child schemas.
-	for _, key := range []string{"properties", "$defs", "definitions"} {
-		if v, ok := schema[key]; ok {
-			if m, ok := v.(map[string]any); ok {
-				for _, vv := range m {
-					if sub, ok := vv.(map[string]any); ok {
-						injectAdditionalProperties(sub)
-					}
-				}
-			}
-		}
-	}
-
-	// Recurse into single-schema keywords.
-	for _, key := range []string{"items", "not", "if", "then", "else"} {
-		if v, ok := schema[key]; ok {
-			if m, ok := v.(map[string]any); ok {
-				injectAdditionalProperties(m)
-			}
-		}
-	}
-
-	// Recurse into array-of-schema keywords.
-	for _, key := range []string{"allOf", "anyOf", "oneOf"} {
-		if v, ok := schema[key]; ok {
-			if arr, ok := v.([]any); ok {
-				for _, item := range arr {
-					if m, ok := item.(map[string]any); ok {
-						injectAdditionalProperties(m)
-					}
-				}
-			}
-		}
-	}
 }
