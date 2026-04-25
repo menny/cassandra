@@ -9,5 +9,6 @@ go_library(
         "//llm",
         "//llm/anthropic",
         "//llm/google",
+        "//llm/openai",
     ],
 )

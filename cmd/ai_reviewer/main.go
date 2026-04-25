@@ -33,6 +33,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	var modelName string
 	var provider string
 	var providerAPIKey string
+	var providerURL string
 	var workingDir string
 	var mainGuidelines string
 	var supplementalGuidelines []string
@@ -64,8 +65,9 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	flag.StringVar(&mcpConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
 
 	flag.StringVar(&modelName, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
-	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic)")
+	flag.StringVar(&provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
 	flag.StringVar(&providerAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
+	flag.StringVar(&providerURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 
 	// pflag natively errors and exits on unknown flags unless configured otherwise
 	flag.Parse()
@@ -131,6 +133,9 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	stderr.Printf("  Head: %s\n", head)
 	stderr.Printf("  LLM Provider: %s\n", provider)
 	stderr.Printf("  LLM Model: %s\n", modelName)
+	if providerURL != "" {
+		stderr.Printf("  LLM Provider URL: %s\n", providerURL)
+	}
 	if mainGuidelines != "" {
 		stderr.Printf("  Main Guidelines: %s\n", mainGuidelines)
 	}
@@ -153,7 +158,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	stderr.Println("===============================")
 
 	// Initialize LLM Client
-	client, err := factory.New(ctx, provider, modelName, providerAPIKey)
+	client, err := factory.New(ctx, provider, modelName, providerAPIKey, providerURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize LLM: %w", err)
 	}

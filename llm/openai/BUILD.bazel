@@ -1,0 +1,25 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "openai",
+    srcs = ["provider.go"],
+    importpath = "github.com/menny/cassandra/llm/openai",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//llm",
+        "@com_github_openai_openai_go//:openai-go",
+        "@com_github_openai_openai_go//option",
+    ],
+)
+
+go_test(
+    name = "openai_test",
+    srcs = ["provider_test.go"],
+    embed = [":openai"],
+    deps = [
+        "//llm",
+        "@com_github_openai_openai_go//:openai-go",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

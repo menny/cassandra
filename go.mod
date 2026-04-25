@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.27.1
 	github.com/google/go-github/v69 v69.2.0
 	github.com/migueleliasweb/go-github-mock v1.5.0
+	github.com/openai/openai-go v1.12.0
 	github.com/spf13/pflag v1.0.6
 	google.golang.org/genai v1.51.0
 )

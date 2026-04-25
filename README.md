@@ -50,7 +50,7 @@ To review changes between a base and a head commit/branch:
 | `--cwd` | Working directory | | No |
 | `--base` | Base commit/branch for diff | `main` | No |
 | `--head` | Head commit/branch for diff | `HEAD` | No |
-| `--provider` | LLM provider to use (`google`, `anthropic`) | | **Yes** |
+| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | **Yes** |
 | `--model` | LLM provider's specific model ID | | **Yes** |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
@@ -66,7 +66,7 @@ To review changes between a base and a head commit/branch:
 
 | Input | Description | Default | Required |
 |---|---|---|---|
-| `provider` | LLM provider to use (`google`, `anthropic`) | `google` | **Yes** |
+| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | `google` | **Yes** |
 | `model_id` | LLM provider's specific model ID | `gemini-3-flash-preview` | **Yes** |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
 | `base` | Base commit/branch for diff | `main` | No |
@@ -122,6 +122,7 @@ For a full list of available models and their IDs, refer to the official documen
 
 - **Google Gemini**: [Gemini API Model Documentation](https://ai.google.dev/gemini-api/docs/models/gemini)
 - **Anthropic Claude**: [Anthropic Claude Model Documentation](https://docs.anthropic.com/en/docs/about-claude/models)
+- **OpenAI**: [OpenAI Models Documentation](https://platform.openai.com/docs/models)
 
 ## GitHub Actions Integration
 
