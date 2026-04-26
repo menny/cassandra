@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -58,7 +59,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	flag.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
 	flag.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
 	flag.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	flag.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
+	flag.IntVar(&cfg.MaxTokens, "max-tokens", 0, "Max tokens for the LLM response (defaults to provider specific default)")
 	flag.StringVar(&cfg.Base, "base", "", "Base commit/branch for diff (defaults to 'main')")
 	flag.StringVar(&cfg.Head, "head", "", "Head commit/branch for diff (defaults to 'HEAD')")
 	flag.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
@@ -125,11 +126,12 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	}
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return fmt.Errorf("failed to read config file: %w", err)
-		}
 		if cfg.ConfigFile != "" {
-			return fmt.Errorf("config file %q not found: %w", cfg.ConfigFile, err)
+			return fmt.Errorf("failed to read config file %q: %w", cfg.ConfigFile, err)
+		}
+		var notFound viper.ConfigFileNotFoundError
+		if !errors.As(err, &notFound) {
+			return fmt.Errorf("failed to read config file: %w", err)
 		}
 	}
 
