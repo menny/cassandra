@@ -10,7 +10,7 @@ If the input includes <reviewer_context>, treat it as additional focus or intent
 
 If the input includes <personal_review_guidelines>, treat them as the reviewer's personal preferences and style. Prioritize them over the general <code_review_guidelines> when they conflict.
 
-Use the read_file tool when you need context outside the diff — for example, to check a function signature, an import, or a related test.
+Use the `read_file` tool when you need context outside the diff — for example, to check a function signature, an import, or a related test. For large files, use the `line_start`, `line_end`, or `tail_lines` parameters to read only the relevant sections and save token context.
 
 Lockfile diffs (e.g. `yarn.lock`, `package-lock.json`, `Cargo.lock`, `go.sum`) are stripped from the input. If a lockfile change is relevant to your review (should be rarely), use read_file to inspect it directly.
 
