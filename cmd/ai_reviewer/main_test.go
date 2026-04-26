@@ -138,14 +138,9 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 	ctx := context.Background()
 	stderr := log.New(os.Stderr, "", 0)
 
-	// Save and restore CWD
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	defer func() { _ = os.Chdir(cwd) }()
-
 	t.Run("silently ignores missing default cassandra.toml", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
 		// We provide just enough flags to trigger the "No changes found" exit path 
 		// (which happens after config loading).
@@ -165,7 +160,7 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 
 	t.Run("errors when explicit --config is missing", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
 		args := []string{
 			"--config", "missing-config.toml",
@@ -181,7 +176,7 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 
 	t.Run("errors when required arguments are missing", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		require.NoError(t, os.Chdir(tmpDir))
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
 		args := []string{
 			"--provider", "google",
@@ -195,7 +190,6 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		require.Contains(t, err.Error(), "--provider-api-key")
 	})
 }
-
 func TestResolveGuidelinesContent(t *testing.T) {
 	tmpDir := t.TempDir()
 
