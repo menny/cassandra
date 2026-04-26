@@ -45,24 +45,28 @@ To review changes between a base and a head commit/branch:
 
 ## CLI Options
 
-| Flag | Description | Default | Required |
-|---|---|---|---|
-| `--cwd` | Working directory | | No |
-| `--base` | Base commit/branch for diff | `main` | No |
-| `--head` | Head commit/branch for diff | `HEAD` | No |
-| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
-| `--model` | LLM provider's specific model ID | | No |
-| `--provider-api-key` | API key for the selected provider | | **Yes** |
-| `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | | No |
-| `--config` | Path to a configuration file (toml) | `cassandra.toml` | No |
-| `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
-| `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | | No |
-| `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | | No |
-| `--review-output-file` | Path to a file where the final review will be written | | No |
-| `--output-json` | Path to a file where the structured JSON review will be written | | No |
-| `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | | No |
-| `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
-| `--max-tokens` | Max tokens for the LLM response | `8192` | No |
+The following settings can be provided via CLI flags, environment variables, or a `cassandra.toml` file.
+
+> **Note**: `provider`, `model`, and `provider-api-key` are **mandatory** and must be provided via one of these methods.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--cwd` | Working directory | |
+| `--base` | Base commit/branch for diff | `main` |
+| `--head` | Head commit/branch for diff | `HEAD` |
+| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | |
+| `--model` | LLM provider's specific model ID | |
+| `--provider-api-key` | API key for the selected provider | |
+| `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | |
+| `--config` | Path to a configuration file (toml) | `cassandra.toml` |
+| `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` |
+| `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | |
+| `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | |
+| `--review-output-file` | Path to a file where the final review will be written | |
+| `--output-json` | Path to a file where the structured JSON review will be written | |
+| `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | |
+| `--extraction-model` | Optional model override for the structured JSON extraction pass | |
+| `--max-tokens` | Max tokens for the LLM response | `8192` |
 
 ## GitHub Action Inputs
 
