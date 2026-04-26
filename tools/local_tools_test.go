@@ -16,26 +16,117 @@ func TestLocalReadFile(t *testing.T) {
 	r := NewRegistry()
 	registerLocalReadFile(r)
 
-	// Create a temp file
+	// Create a temp file with multiple lines
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
-	content := "hello AI"
+	contentLines := []string{"line 1", "line 2", "line 3", "line 4", "line 5"}
+	content := strings.Join(contentLines, "\n")
 	err := os.WriteFile(testFile, []byte(content), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	args, _ := json.Marshal(map[string]any{"file_path": testFile})
-	result, err := r.HandleCall(context.Background(), llm.ToolCall{
-		Name:      "read_file",
-		Arguments: string(args),
+	t.Run("read entire file", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if result != content {
+			t.Errorf("expected %q, got %q", content, result)
+		}
 	})
-	if err != nil {
-		t.Fatalf("expected success, got error: %v", err)
-	}
-	if result != content {
-		t.Errorf("expected %q, got %q", content, result)
-	}
+
+	t.Run("read head (first 2 lines)", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "line_end": 2})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "line 1\nline 2"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("read range (lines 2-4)", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "line_start": 2, "line_end": 4})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "line 2\nline 3\nline 4"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("read from line 3 to end", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "line_start": 3})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "line 3\nline 4\nline 5"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("read tail (last 2 lines)", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "tail_lines": 2})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "line 4\nline 5"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
+		}
+	})
+
+	t.Run("read more tail than exists", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "tail_lines": 10})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != content {
+			t.Errorf("expected %q, got %q", content, result)
+		}
+	})
+
+	t.Run("out of bounds line_start", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": testFile, "line_start": 10})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result != "" {
+			t.Errorf("expected empty string, got %q", result)
+		}
+	})
 }
 
 func TestLocalGlobFiles(t *testing.T) {

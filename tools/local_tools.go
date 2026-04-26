@@ -16,13 +16,25 @@ import (
 func registerLocalReadFile(r *Registry) {
 	def := llm.ToolDef{
 		Name:        "read_file",
-		Description: "Read the contents of a local file from the repository.",
+		Description: "Read the contents of a local file. For large files, use line_start/line_end or tail_lines to save tokens.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"file_path": map[string]any{
 					"type":        "string",
 					"description": "Absolute or relative path to the file to read.",
+				},
+				"line_start": map[string]any{
+					"type":        "integer",
+					"description": "The 1-based line number to start reading from. Defaults to 1.",
+				},
+				"line_end": map[string]any{
+					"type":        "integer",
+					"description": "The 1-based line number to stop reading at (inclusive). If omitted, reads until the end of the file.",
+				},
+				"tail_lines": map[string]any{
+					"type":        "integer",
+					"description": "Read this many lines from the end of the file. If specified, line_start and line_end are ignored.",
 				},
 			},
 			"required": []string{"file_path"},
@@ -31,7 +43,10 @@ func registerLocalReadFile(r *Registry) {
 
 	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args struct {
-			FilePath string `json:"file_path"`
+			FilePath  string `json:"file_path"`
+			LineStart int    `json:"line_start"`
+			LineEnd   int    `json:"line_end"`
+			TailLines int    `json:"tail_lines"`
 		}
 		if err := tc.UnmarshalArguments(&args); err != nil {
 			return "", err
@@ -41,7 +56,52 @@ func registerLocalReadFile(r *Registry) {
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
-		return string(b), nil
+
+		// If no line-limiting arguments are provided, return the whole file.
+		if args.LineStart <= 0 && args.LineEnd <= 0 && args.TailLines <= 0 {
+			return string(b), nil
+		}
+
+		lines := strings.Split(string(b), "\n")
+		numLines := len(lines)
+
+		// Handle tail_lines first as it takes precedence.
+		if args.TailLines > 0 {
+			start := numLines - args.TailLines
+			if start < 0 {
+				start = 0
+			}
+			return strings.Join(lines[start:], "\n"), nil
+		}
+
+		// Handle line range.
+		start := args.LineStart
+		if start <= 0 {
+			start = 1
+		}
+		end := args.LineEnd
+		if end <= 0 || end > numLines {
+			end = numLines
+		}
+
+		// Adjust to 0-based indexing for slicing.
+		startIdx := start - 1
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx >= numLines {
+			return "", nil
+		}
+
+		endIdx := end
+		if endIdx > numLines {
+			endIdx = numLines
+		}
+		if endIdx < startIdx {
+			return "", nil
+		}
+
+		return strings.Join(lines[startIdx:endIdx], "\n"), nil
 	})
 }
 
