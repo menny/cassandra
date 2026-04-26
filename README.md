@@ -66,8 +66,8 @@ To review changes between a base and a head commit/branch:
 
 | Input | Description | Default | Required |
 |---|---|---|---|
-| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | `google` | **Yes** |
-| `model_id` | LLM provider's specific model ID | `gemini-3-flash-preview` | **Yes** |
+| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | **Yes** |
+| `model_id` | LLM provider's specific model ID | | **Yes** |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |

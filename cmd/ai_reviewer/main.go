@@ -105,8 +105,6 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	v.SetDefault("base", "main")
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
-	v.SetDefault("provider", "google")
-	v.SetDefault("model", "gemini-3-flash-preview")
 
 	flag.VisitAll(func(f *flag.Flag) {
 		if f.Changed {
