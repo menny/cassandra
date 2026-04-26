@@ -53,6 +53,7 @@ To review changes between a base and a head commit/branch:
 | `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
 | `--model` | LLM provider's specific model ID | | No |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
+| `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | | No |
 | `--config` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | | No |
@@ -70,6 +71,7 @@ To review changes between a base and a head commit/branch:
 | `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
 | `model_id` | LLM provider's specific model ID | | No |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
+| `provider_url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | | No |
 | `config_file` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
