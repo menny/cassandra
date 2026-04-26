@@ -5,6 +5,7 @@ package factory
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -32,16 +33,18 @@ type providerFactory func(ctx context.Context, apiKey, modelName, baseURL string
 // is a single entry here; factory.New and the "unsupported provider" error
 // message derive from this map automatically.
 var providers = map[Provider]providerFactory{
-	ProviderAnthropic: func(_ context.Context, apiKey, modelName, _ string) (llm.Model, error) {
+	ProviderAnthropic: func(_ context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {
+		if baseURL != "" {
+			fmt.Fprintf(os.Stderr, "Warning: baseURL %q is ignored by the anthropic provider\n", baseURL)
+		}
 		// Anthropic client is constructed synchronously; ctx is unused at
 		// construction time (the SDK dials lazily per request).
-		// baseURL is intentionally ignored: Anthropic uses a separate SDK option
-		// and does not expose an OpenAI-compatible endpoint.
 		return anthropic.New(apiKey, modelName), nil
 	},
-	ProviderGoogle: func(ctx context.Context, apiKey, modelName, _ string) (llm.Model, error) {
-		// baseURL is intentionally ignored: Google uses a separate SDK option
-		// and does not expose an OpenAI-compatible endpoint.
+	ProviderGoogle: func(ctx context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {
+		if baseURL != "" {
+			fmt.Fprintf(os.Stderr, "Warning: baseURL %q is ignored by the google provider\n", baseURL)
+		}
 		return google.New(ctx, apiKey, modelName)
 	},
 	ProviderOpenAI: func(_ context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {

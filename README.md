@@ -45,32 +45,41 @@ To review changes between a base and a head commit/branch:
 
 ## CLI Options
 
-| Flag | Description | Default | Required |
-|---|---|---|---|
-| `--cwd` | Working directory | | No |
-| `--base` | Base commit/branch for diff | `main` | No |
-| `--head` | Head commit/branch for diff | `HEAD` | No |
-| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | **Yes** |
-| `--model` | LLM provider's specific model ID | | **Yes** |
-| `--provider-api-key` | API key for the selected provider | | **Yes** |
-| `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
-| `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | | No |
-| `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | | No |
-| `--review-output-file` | Path to a file where the final review will be written | | No |
-| `--output-json` | Path to a file where the structured JSON review will be written | | No |
-| `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | | No |
-| `--extraction-model` | Optional model override for the structured JSON extraction pass | | No |
-| `--max-tokens` | Max tokens for the LLM response | `8192` | No |
+The following settings can be provided via CLI flags, environment variables, or a `cassandra.toml` file.
+
+> **Note**: `provider`, `model`, and `provider-api-key` are **mandatory** and must be provided via one of these methods.
+
+| Flag | Description | Default |
+|---|---|---|
+| `--cwd` | Working directory | |
+| `--base` | Base commit/branch for diff | `main` |
+| `--head` | Head commit/branch for diff | `HEAD` |
+| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | |
+| `--model` | LLM provider's specific model ID | |
+| `--provider-api-key` | API key for the selected provider | |
+| `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | |
+| `--config` | Path to a configuration file (toml) | `cassandra.toml` |
+| `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` |
+| `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | |
+| `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | |
+| `--review-output-file` | Path to a file where the final review will be written | |
+| `--output-json` | Path to a file where the structured JSON review will be written | |
+| `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | |
+| `--extraction-model` | Optional model override for the structured JSON extraction pass | |
+| `--max-tokens` | Max tokens for the LLM response | `8192` |
 
 ## GitHub Action Inputs
 
 | Input | Description | Default | Required |
 |---|---|---|---|
-| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | `google` | **Yes** |
-| `model_id` | LLM provider's specific model ID | `gemini-3-flash-preview` | **Yes** |
+| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
+| `model_id` | LLM provider's specific model ID | | No |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
+| `provider_url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | | No |
+| `config_file` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
+| `max_tokens` | Max tokens for the LLM response | `8192` | No |
 | `working_directory` | Working directory to review | `.` | No |
 | `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `supplemental_guidelines` | Additive guidelines to supplement the main guidelines. Multiline string where each line is a path or library prompt name. | | No |
@@ -115,6 +124,19 @@ After the review completes, the action exposes the following outputs that downst
           exit 1
 ```
 
+## Configuration File (`cassandra.toml`)
+
+Cassandra automatically looks for a `cassandra.toml` file in your repository's root. This allows you to centralize settings and avoid redundant CLI flags or GitHub Action inputs.
+
+```toml
+# Example cassandra.toml
+provider = "google"
+model = "gemini-3.1-pro-preview"
+main-guidelines = "security-first"
+supplemental-guidelines = [
+  ".github/ai-reviewer/haiku-praise.md"
+]
+```
 
 ### Supported Models
 

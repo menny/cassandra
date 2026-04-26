@@ -47,6 +47,7 @@ type Reporter interface {
 	ReportExtractionRetry(attempt int)
 	ReportEmptyResponseRetry(attempt int)
 	ReportCapReached(maxIterations int)
+	ReportTruncated(maxTokens int)
 }
 
 // defaultReporter writes progress to an io.Writer.
@@ -103,6 +104,10 @@ func (r *defaultReporter) ReportEmptyResponseRetry(attempt int) {
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
 	fmt.Fprintf(r.w, "Warning: reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
+}
+
+func (r *defaultReporter) ReportTruncated(maxTokens int) {
+	fmt.Fprintf(r.w, "Warning: LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens)
 }
 
 // AgentOption configures an Agent.
@@ -184,6 +189,10 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		a.reporter.ReportUsage(resp.Usage)
 		a.totalUsage.Add(resp.Usage)
 
+		if resp.FinishReason == llm.FinishReasonLength {
+			a.reporter.ReportTruncated(maxTokens)
+		}
+
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
 			if resp.Text == "" {
@@ -249,6 +258,11 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 
 		a.reporter.ReportUsage(resp.Usage)
 		a.totalUsage.Add(resp.Usage)
+
+		_, effectiveMaxTokens := config.Resolve("")
+		if resp.FinishReason == llm.FinishReasonLength {
+			a.reporter.ReportTruncated(effectiveMaxTokens)
+		}
 
 		if resp.Text == "" {
 			lastErr = errors.New("extraction returned empty content")

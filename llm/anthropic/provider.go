@@ -203,6 +203,15 @@ func schemaParamFromJSONSchema(schema map[string]any) anthropicsdk.ToolInputSche
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 	resp := &llm.Response{Usage: llm.UnknownUsage()}
 
+	switch msg.StopReason {
+	case anthropicsdk.StopReasonEndTurn, anthropicsdk.StopReasonToolUse:
+		resp.FinishReason = llm.FinishReasonStop
+	case anthropicsdk.StopReasonMaxTokens:
+		resp.FinishReason = llm.FinishReasonLength
+	default:
+		resp.FinishReason = llm.FinishReasonOther
+	}
+
 	// The SDK usage struct is not a pointer, but we check if we have values.
 	// Cache-only responses report tokens exclusively through the cache counters,
 	// so the gate must include those or CachedTokens would stay at its -1 sentinel.

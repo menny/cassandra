@@ -173,7 +173,22 @@ func parseOpenAIResponse(resp *openaisdk.ChatCompletion) (*llm.Response, error) 
 		result.Usage.CachedTokens = int(resp.Usage.PromptTokensDetails.CachedTokens)
 	}
 
-	msg := resp.Choices[0].Message
+	choice := resp.Choices[0]
+	switch choice.FinishReason {
+	case "stop":
+		result.FinishReason = llm.FinishReasonStop
+	case "length":
+		result.FinishReason = llm.FinishReasonLength
+	case "tool_calls":
+		// Tool calls often have "tool_calls" finish reason in OpenAI,
+		// which we treat as "stop" for the purposes of generating content
+		// because the model stopped to yield control.
+		result.FinishReason = llm.FinishReasonStop
+	default:
+		result.FinishReason = llm.FinishReasonOther
+	}
+
+	msg := choice.Message
 	result.Text = msg.Content
 	for _, tc := range msg.ToolCalls {
 		result.ToolCalls = append(result.ToolCalls, llm.ToolCall{

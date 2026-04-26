@@ -6,12 +6,10 @@ branding:
 inputs:
   provider:
     description: 'LLM provider to use (google, anthropic, openai)'
-    required: true
-    default: 'google'
+    required: false
   model_id:
     description: 'LLM provider model id'
-    required: true
-    default: 'gemini-3-flash-preview'
+    required: false
   provider_api_key:
     description: 'API key for the selected provider'
     required: true
@@ -19,14 +17,15 @@ inputs:
     description: 'Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama)'
     required: false
     default: ''
+  config_file:
+    description: 'Path to a configuration file (toml)'
+    required: false
   base:
     description: 'Base commit/branch for diff'
     required: false
-    default: 'main'
   head:
     description: 'Head commit/branch for diff'
     required: false
-    default: 'HEAD'
   working_directory:
     description: 'Working directory to review'
     required: false
@@ -34,7 +33,6 @@ inputs:
   main_guidelines:
     description: 'Path to a file or a named prompt from the library (general, asana-do-try-consider, google, conventional-comments, palantir, minimalist, security-first)'
     required: false
-    default: 'general'
   supplemental_guidelines:
     description: 'Additive guidelines to supplement the main guidelines. Multiline string where each line is a path or library prompt name.'
     required: false
@@ -71,6 +69,9 @@ inputs:
     description: 'Path to an mcp.json file configuring custom tools for the reviewer'
     required: false
     default: ''
+  max_tokens:
+    description: 'Max tokens for the LLM response'
+    required: false
 outputs:
   review_file:
     description: 'Path to the generated markdown review file.'
@@ -257,6 +258,7 @@ runs:
         PROVIDER: ${{ inputs.provider }}
         MODEL_ID: ${{ inputs.model_id }}
         PROVIDER_URL: ${{ inputs.provider_url }}
+        CONFIG_FILE: ${{ inputs.config_file }}
         BASE: ${{ inputs.base }}
         HEAD: ${{ inputs.head }}
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
@@ -264,24 +266,50 @@ runs:
         SUPPLEMENTAL_GUIDELINES: ${{ inputs.supplemental_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
         MCP_CONFIG: ${{ inputs.mcp_config }}
+        MAX_TOKENS: ${{ inputs.max_tokens }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
         JSON_FILE="${{ runner.temp }}/cassandra_review.json"
 
         ARGS=(
-          --provider "$PROVIDER"
-          --model "$MODEL_ID"
-          --provider-api-key "$PROVIDER_API_KEY"
-          --base "$BASE"
-          --head "$HEAD"
-          --cwd "${{ github.workspace }}/$WORKING_DIRECTORY"
           --review-output-file "$REVIEW_FILE"
           --output-json "$JSON_FILE"
         )
 
+        if [[ -n "$PROVIDER" ]]; then
+          ARGS+=(--provider "$PROVIDER")
+        fi
+        if [[ -n "$MODEL_ID" ]]; then
+          ARGS+=(--model "$MODEL_ID")
+        fi
+        if [[ -n "$PROVIDER_API_KEY" ]]; then
+          ARGS+=(--provider-api-key "$PROVIDER_API_KEY")
+        fi
         if [[ -n "$PROVIDER_URL" ]]; then
           ARGS+=(--provider-url "$PROVIDER_URL")
+        fi
+        if [[ -n "$MAX_TOKENS" ]]; then
+          ARGS+=(--max-tokens "$MAX_TOKENS")
+        fi
+
+        if [[ -n "$CONFIG_FILE" ]]; then
+          RESOLVED_CONFIG="${{ github.workspace }}/$WORKING_DIRECTORY/$CONFIG_FILE"
+          if [[ -f "$RESOLVED_CONFIG" ]]; then
+            ARGS+=(--config "$RESOLVED_CONFIG")
+          else
+            ARGS+=(--config "$CONFIG_FILE")
+          fi
+        fi
+
+        if [[ -n "$BASE" ]]; then
+          ARGS+=(--base "$BASE")
+        fi
+        if [[ -n "$HEAD" ]]; then
+          ARGS+=(--head "$HEAD")
+        fi
+        if [[ -n "$WORKING_DIRECTORY" ]]; then
+          ARGS+=(--cwd "${{ github.workspace }}/$WORKING_DIRECTORY")
         fi
 
         if [[ -n "$SUPPLEMENTAL_GUIDELINES" ]]; then
@@ -334,15 +362,17 @@ runs:
           fi
         fi
 
-        # Try to resolve main guidelines:
-        # 1. As a path in the repo being reviewed
-        # 2. As a named prompt in the action's library
-        # The CLI handles both, but we try to provide an absolute path for the repo version.
-        REPO_GUIDELINES="${{ github.workspace }}/$WORKING_DIRECTORY/$MAIN_GUIDELINES"
-        if [[ -f "$REPO_GUIDELINES" ]]; then
-          ARGS+=(--main-guidelines "$REPO_GUIDELINES")
-        else
-          ARGS+=(--main-guidelines "$MAIN_GUIDELINES")
+        if [[ -n "$MAIN_GUIDELINES" ]]; then
+          # Try to resolve main guidelines:
+          # 1. As a path in the repo being reviewed
+          # 2. As a named prompt in the action's library
+          # The CLI handles both, but we try to provide an absolute path for the repo version.
+          REPO_GUIDELINES="${{ github.workspace }}/$WORKING_DIRECTORY/$MAIN_GUIDELINES"
+          if [[ -f "$REPO_GUIDELINES" ]]; then
+            ARGS+=(--main-guidelines "$REPO_GUIDELINES")
+          else
+            ARGS+=(--main-guidelines "$MAIN_GUIDELINES")
+          fi
         fi
 
         "$CASSANDRA_BIN" "${ARGS[@]}"
