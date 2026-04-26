@@ -50,9 +50,10 @@ To review changes between a base and a head commit/branch:
 | `--cwd` | Working directory | | No |
 | `--base` | Base commit/branch for diff | `main` | No |
 | `--head` | Head commit/branch for diff | `HEAD` | No |
-| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | **Yes** |
-| `--model` | LLM provider's specific model ID | | **Yes** |
+| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
+| `--model` | LLM provider's specific model ID | | No |
 | `--provider-api-key` | API key for the selected provider | | **Yes** |
+| `--config` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | | No |
 | `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | | No |
@@ -66,11 +67,13 @@ To review changes between a base and a head commit/branch:
 
 | Input | Description | Default | Required |
 |---|---|---|---|
-| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | **Yes** |
-| `model_id` | LLM provider's specific model ID | | **Yes** |
+| `provider` | LLM provider to use (`google`, `anthropic`, `openai`) | | No |
+| `model_id` | LLM provider's specific model ID | | No |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
+| `config_file` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
+| `max_tokens` | Max tokens for the LLM response | `8192` | No |
 | `working_directory` | Working directory to review | `.` | No |
 | `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `supplemental_guidelines` | Additive guidelines to supplement the main guidelines. Multiline string where each line is a path or library prompt name. | | No |
@@ -115,6 +118,19 @@ After the review completes, the action exposes the following outputs that downst
           exit 1
 ```
 
+## Configuration File (`cassandra.toml`)
+
+Cassandra automatically looks for a `cassandra.toml` file in your repository's root. This allows you to centralize settings and avoid redundant CLI flags or GitHub Action inputs.
+
+```toml
+# Example cassandra.toml
+provider = "google"
+model = "gemini-3.1-pro-preview"
+main-guidelines = "security-first"
+supplemental-guidelines = [
+  ".github/ai-reviewer/haiku-praise.md"
+]
+```
 
 ### Supported Models
 

@@ -654,6 +654,25 @@ func TestAgent_ExtractStructuredReview(t *testing.T) {
 	}
 }
 
+func TestAgent_ExtractStructuredReview_TruncationReporting(t *testing.T) {
+	spy := &spyReporter{}
+	structuredJSON := `{"approval":{"approved":true,"rationale":"ok","action":"APPROVE"},"files_review":[]}`
+	lm := &mockLLM{responses: []*llm.Response{
+		{Text: structuredJSON, FinishReason: llm.FinishReasonLength},
+	}}
+
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+	maxTokens := 128
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw", llm.StructuredConfig{MaxTokens: maxTokens})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(spy.truncated) != 1 || spy.truncated[0] != maxTokens {
+		t.Errorf("expected truncation report with %d tokens, got %v", maxTokens, spy.truncated)
+	}
+}
+
 func TestCalculateMaxIterations(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -259,8 +259,9 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		a.reporter.ReportUsage(resp.Usage)
 		a.totalUsage.Add(resp.Usage)
 
+		_, effectiveMaxTokens := config.Resolve("")
 		if resp.FinishReason == llm.FinishReasonLength {
-			a.reporter.ReportTruncated(config.MaxTokens)
+			a.reporter.ReportTruncated(effectiveMaxTokens)
 		}
 
 		if resp.Text == "" {
