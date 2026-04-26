@@ -138,6 +138,11 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 	ctx := context.Background()
 	stderr := log.New(os.Stderr, "", 0)
 
+	// Save and restore CWD because run() calls os.Chdir
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(cwd) }()
+
 	t.Run("silently ignores missing default cassandra.toml", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
