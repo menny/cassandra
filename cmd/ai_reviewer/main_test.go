@@ -142,7 +142,7 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		tmpDir := t.TempDir()
 		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
-		// We provide just enough flags to trigger the "No changes found" exit path 
+		// We provide just enough flags to trigger the "No changes found" exit path
 		// (which happens after config loading).
 		args := []string{
 			"--provider", "google",
@@ -190,6 +190,7 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		require.Contains(t, err.Error(), "--provider-api-key")
 	})
 }
+
 func TestResolveGuidelinesContent(t *testing.T) {
 	tmpDir := t.TempDir()
 
