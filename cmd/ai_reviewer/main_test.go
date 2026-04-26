@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
@@ -130,6 +132,68 @@ func TestFormatMetadata(t *testing.T) {
 	require.Contains(t, formatted, "  > file comment")
 	require.Contains(t, formatted, "- **cassandra (Cassandra Bot)** (2026-04-09 12:00):")
 	require.Contains(t, formatted, "  > comment 2")
+}
+
+func TestRun_ConfigDiscovery(t *testing.T) {
+	ctx := context.Background()
+	stderr := log.New(os.Stderr, "", 0)
+
+	// Save and restore CWD
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(cwd) }()
+
+	t.Run("silently ignores missing default cassandra.toml", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+
+		// We provide just enough flags to trigger the "No changes found" exit path 
+		// (which happens after config loading).
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--diff-file", "non-existent-diff",
+			"--files-list-file", "non-existent-files",
+		}
+
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		// It should fail on reading the diff file, NOT on reading the config file
+		require.Contains(t, err.Error(), "failed to read diff file")
+	})
+
+	t.Run("errors when explicit --config is missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+
+		args := []string{
+			"--config", "missing-config.toml",
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+		}
+
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to read config file \"missing-config.toml\"")
+	})
+
+	t.Run("errors when required arguments are missing", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		require.NoError(t, os.Chdir(tmpDir))
+
+		args := []string{
+			"--provider", "google",
+			// --model and --provider-api-key missing
+		}
+
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "missing required arguments")
+		require.Contains(t, err.Error(), "--model")
+		require.Contains(t, err.Error(), "--provider-api-key")
+	})
 }
 
 func TestResolveGuidelinesContent(t *testing.T) {
