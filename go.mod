@@ -52,7 +52,6 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	//nolint:unused
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
 	go.opentelemetry.io/otel v1.36.0 // indirect
 	go.opentelemetry.io/otel/metric v1.36.0 // indirect

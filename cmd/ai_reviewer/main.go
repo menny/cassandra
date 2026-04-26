@@ -26,7 +26,7 @@ type config struct {
 	Provider                     string   `mapstructure:"provider"`
 	ProviderAPIKey               string   `mapstructure:"provider-api-key"`
 	ProviderURL                  string   `mapstructure:"provider-url"`
-	WorkingDir                   string   `mapstructure:"cwd"`
+	WorkingDir                   string   `mapstructure:"-"`
 	MainGuidelines               string   `mapstructure:"main-guidelines"`
 	SupplementalGuidelines       []string `mapstructure:"supplemental-guidelines"`
 	MaxTokens                    int      `mapstructure:"max-tokens"`
@@ -58,7 +58,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	flag.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
 	flag.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
 	flag.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	flag.IntVar(&cfg.MaxTokens, "max-tokens", 0, "Max tokens for the LLM response (defaults to provider specific default)")
+	flag.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
 	flag.StringVar(&cfg.Base, "base", "", "Base commit/branch for diff (defaults to 'main')")
 	flag.StringVar(&cfg.Head, "head", "", "Head commit/branch for diff (defaults to 'HEAD')")
 	flag.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
