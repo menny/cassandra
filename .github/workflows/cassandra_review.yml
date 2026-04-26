@@ -27,3 +27,4 @@ jobs:
           submit_review_action: 'true'
           supplemental_guidelines: |
             .github/ai-reviewer/haiku-praise.md
+            .github/ai-reviewer/self-preservation.md
