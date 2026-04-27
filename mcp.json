@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "godoc": {
+      "command": "bazel",
+      "args": [
+        "run",
+        "--noshow_progress",
+        "--ui_event_filters=-info,-stdout,-stderr",
+        "//cmd/mcp_godoc",
+        "--"
+      ]
+    }
+  }
+}

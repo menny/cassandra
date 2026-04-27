@@ -5,6 +5,9 @@
 provider = "google"
 model = "gemini-3.1-pro-preview"
 
+# Path to an MCP configuration file.
+mcp-config = "mcp.json"
+
 # Additive guidelines to supplement the main prompt.
 # These can be local file paths or named prompts from the library.
 supplemental-guidelines = [
