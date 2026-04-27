@@ -138,12 +138,11 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 	ctx := context.Background()
 	stderr := log.New(os.Stderr, "", 0)
 
-	// Save and restore CWD because run() calls os.Chdir
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-	defer func() { _ = os.Chdir(cwd) }()
-
 	t.Run("silently ignores missing default cassandra.toml", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
 		tmpDir := t.TempDir()
 		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
@@ -157,13 +156,17 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 			"--files-list-file", "non-existent-files",
 		}
 
-		err := run(ctx, args, stderr)
+		err = run(ctx, args, stderr)
 		require.Error(t, err)
 		// It should fail on reading the diff file, NOT on reading the config file
 		require.Contains(t, err.Error(), "failed to read diff file")
 	})
 
 	t.Run("errors when explicit --config is missing", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
 		tmpDir := t.TempDir()
 		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
@@ -174,12 +177,16 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 			"--provider-api-key", "fake-key",
 		}
 
-		err := run(ctx, args, stderr)
+		err = run(ctx, args, stderr)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to read config file \"missing-config.toml\"")
 	})
 
 	t.Run("errors when required arguments are missing", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
 		tmpDir := t.TempDir()
 		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
 
@@ -188,7 +195,7 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 			// --model and --provider-api-key missing
 		}
 
-		err := run(ctx, args, stderr)
+		err = run(ctx, args, stderr)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "missing required arguments")
 		require.Contains(t, err.Error(), "--model")
