@@ -46,43 +46,49 @@ type config struct {
 func main() {
 	ctx := context.Background()
 	stderr := log.New(os.Stderr, "", 0)
-	if err := run(ctx, stderr); err != nil {
+	if err := run(ctx, os.Args[1:], stderr); err != nil {
 		stderr.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, stderr *log.Logger) error {
+func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	var cfg config
 
-	flag.StringVar(&cfg.WorkingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
-	flag.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
-	flag.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
-	flag.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	flag.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
-	flag.StringVar(&cfg.Base, "base", "main", "Base commit/branch for diff (defaults to 'main')")
-	flag.StringVar(&cfg.Head, "head", "HEAD", "Head commit/branch for diff (defaults to 'HEAD')")
-	flag.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
-	flag.StringVar(&cfg.OutputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
-	flag.StringVar(&cfg.ExtractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
-	flag.StringVar(&cfg.MetadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
-	flag.StringVar(&cfg.DiffFile, "diff-file", "", "Path to a file containing the git diff")
-	flag.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
-	flag.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
-	flag.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
-	flag.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
+	fs := flag.NewFlagSet("cassandra", flag.ContinueOnError)
 
-	flag.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
-	flag.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
-	flag.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
-	flag.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
+	fs.StringVar(&cfg.WorkingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
+	fs.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
+	fs.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
+	fs.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
+	fs.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
+	fs.StringVar(&cfg.Base, "base", "main", "Base commit/branch for diff (defaults to 'main')")
+	fs.StringVar(&cfg.Head, "head", "HEAD", "Head commit/branch for diff (defaults to 'HEAD')")
+	fs.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
+	fs.StringVar(&cfg.OutputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
+	fs.StringVar(&cfg.ExtractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
+	fs.StringVar(&cfg.MetadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
+	fs.StringVar(&cfg.DiffFile, "diff-file", "", "Path to a file containing the git diff")
+	fs.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
+	fs.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
+	fs.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 
-	// pflag natively errors and exits on unknown flags unless configured otherwise
-	flag.Parse()
+	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
+	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
+	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
+	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
 
 	// Error if there are dangling positional arguments
-	if len(flag.Args()) > 0 {
-		return fmt.Errorf("unknown or positional arguments provided: %v", flag.Args())
+	if len(fs.Args()) > 0 {
+		return fmt.Errorf("unknown or positional arguments provided: %v", fs.Args())
 	}
 
 	// Move to the intended working directory if executing via bazel or explicitly requested
@@ -106,7 +112,7 @@ func run(ctx context.Context, stderr *log.Logger) error {
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 
-	flag.VisitAll(func(f *flag.Flag) {
+	fs.VisitAll(func(f *flag.Flag) {
 		if f.Changed {
 			if err := v.BindPFlag(f.Name, f); err != nil {
 				// This is highly unlikely to fail as we are iterating over our own flags
