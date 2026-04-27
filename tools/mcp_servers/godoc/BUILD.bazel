@@ -1,0 +1,21 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "godoc",
+    srcs = ["server.go"],
+    importpath = "github.com/menny/cassandra/tools/mcp_servers/godoc",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_modelcontextprotocol_go_sdk//mcp",
+    ],
+)
+
+go_test(
+    name = "godoc_test",
+    srcs = ["server_test.go"],
+    embed = [":godoc"],
+    deps = [
+        "@com_github_modelcontextprotocol_go_sdk//mcp",
+        "@com_github_stretchr_testify//assert",
+    ],
+)

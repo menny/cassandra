@@ -23,8 +23,8 @@ When configuring Cassandra (via CLI or GitHub Action), ensure you use the correc
 - `cmd/ai_reviewer/`: Main AI review agent entry point.
 - `cmd/github/`: GitHub utility for PR interactions.
 - `core/`: Core agent logic, ReAct loop, and prompts.
-- `llm/`: LLM provider abstractions and implementations.
-- `tools/`: Tool registry and local codebase exploration tools.
+- `llm/`: LLM provider abstractions (see [llm/AGENTS.md](llm/AGENTS.md)).
+- `tools/`: Tool registry and MCP servers (see [tools/AGENTS.md](tools/AGENTS.md)).
 
 ## Formatting & Linting
 

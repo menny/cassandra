@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "mcp_godoc_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/menny/cassandra/cmd/mcp_godoc",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//tools/mcp_servers/godoc",
+        "@com_github_modelcontextprotocol_go_sdk//mcp",
+    ],
+)
+
+go_binary(
+    name = "mcp_godoc",
+    embed = [":mcp_godoc_lib"],
+    visibility = ["//visibility:public"],
+)
