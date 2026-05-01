@@ -110,21 +110,12 @@ runs:
         # Mask the token so it doesn't show up in logs
         echo "::add-mask::$FINAL_TOKEN"
         echo "token=$FINAL_TOKEN" >> $GITHUB_OUTPUT
-    - name: Resolve Action Repository
-      id: resolve_repo
-      shell: bash
-      run: |
-        ACTION_REPO="${{ github.action_repository }}"
-        if [[ -z "$ACTION_REPO" ]]; then
-          ACTION_REPO="${{ github.repository }}"
-        fi
-        echo "action_repo=$ACTION_REPO" >> $GITHUB_OUTPUT
     - name: Fetch Pre-built Binaries
       id: fetch_binaries
       shell: bash
       env:
         ACTION_REF: ${{ github.action_ref }}
-        ACTION_REPO: ${{ steps.resolve_repo.outputs.action_repo }}
+        ACTION_REPO: menny/cassandra
         GH_TOKEN: ${{ steps.prepare_token.outputs.token }}
       run: |
         # Map runner os/arch to Go os/arch
