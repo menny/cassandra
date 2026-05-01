@@ -324,6 +324,18 @@ Alternatively, set `submit_review_action: 'false'` to use comment-only mode.
 
 **Fix:** Check that the secret name is correct in your repository settings. The action falls back to `github.token` automatically, but if that is also unavailable the step will fail.
 
+### Choosing the Right GitHub Token
+
+Cassandra can work with any GitHub token passed via the `reviewer_github_token` input. Choosing the right one depends on your needs for cross-repo access and PR approval.
+
+| Feature | `GITHUB_TOKEN` (Default) | Classic PAT (`repo` scope) | GitHub App Token |
+|---|---|---|---|
+| **Setup Complexity** | None (Automatic) | Low (Create token) | Medium (Create & Install App) |
+| **Identity** | `github-actions[bot]` | Your User Account | Your App Name |
+| **Self-Approval** | No | **Yes** | **Yes** |
+| **Cross-Repo Access** | Limited | **Full** (Everything you see) | Scoped (Where installed) |
+| **Security** | Highest (Ephemeral) | Lower (Long-lived/Global) | High (Scoped/Short-lived) |
+
 ## Architecture
 
 The project features a lean, custom native Go ReAct loop. Provider-specific interactions are handled via native SDKs (not `langchaingo`). Tools for codebase context gathering are injected securely through model-native Function Calling capabilities.
