@@ -175,6 +175,9 @@ func TestFetchGitDiff_CustomIgnore(t *testing.T) {
 	tmpDir := t.TempDir()
 	setupGitRepo(t, tmpDir)
 
+	// Create a branch so we have a diff
+	runGitCmd(t, tmpDir, "checkout", "-b", "custom-branch")
+
 	// Create a file that we want to ignore specifically
 	customPath := filepath.Join(tmpDir, "custom.ignore")
 	err := os.WriteFile(customPath, []byte("ignore me"), 0o644)
@@ -182,7 +185,16 @@ func TestFetchGitDiff_CustomIgnore(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGitCmd(t, tmpDir, "add", "custom.ignore")
-	runGitCmd(t, tmpDir, "commit", "-m", "add custom ignore")
+
+	// Also add go.sum, which should NOT be ignored since we override the list
+	sumPath := filepath.Join(tmpDir, "go.sum")
+	err = os.WriteFile(sumPath, []byte("some sum"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, tmpDir, "add", "go.sum")
+
+	runGitCmd(t, tmpDir, "commit", "-m", "add custom ignore and go.sum")
 
 	t.Run("Custom ignore list", func(t *testing.T) {
 		ignored := []string{"custom.ignore"}
@@ -191,13 +203,17 @@ func TestFetchGitDiff_CustomIgnore(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		foundGoSum := false
 		for _, f := range files {
 			if f == "custom.ignore" {
 				t.Error("did NOT expect custom.ignore in files")
 			}
 			if f == "go.sum" {
-				// Default list not passed, so it should NOT be ignored
+				foundGoSum = true
 			}
+		}
+		if !foundGoSum {
+			t.Error("expected go.sum in files because it was not in the custom ignore list")
 		}
 	})
 }
