@@ -12,9 +12,17 @@ var LockFiles = []string{
 	"package-lock.json",
 	"yarn.lock",
 	"pnpm-lock.yaml",
+	"bun.lockb",
+	"deno.lock",
 	"Cargo.lock",
 	"poetry.lock",
+	"uv.lock",
 	"Gemfile.lock",
+	"composer.lock",
+	"pubspec.lock",
+	"mix.lock",
+	"flake.lock",
+	"MODULE.bazel.lock",
 }
 
 // appendLockFileExcludes appends a git pathspec ":(exclude)*<name>" for each
