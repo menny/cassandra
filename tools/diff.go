@@ -30,6 +30,9 @@ var DefaultLockFiles = []string{
 // noisy lockfile churn in diff and grep output.
 func appendLockFileExcludes(args []string, ignoredLockFiles []string) []string {
 	for _, lf := range ignoredLockFiles {
+		if strings.TrimSpace(lf) == "" {
+			continue
+		}
 		args = append(args, fmt.Sprintf(":(exclude)*%s", lf))
 	}
 	return args
@@ -41,6 +44,9 @@ func appendLockFileExcludes(args []string, ignoredLockFiles []string) []string {
 // paths (e.g. PR file lists) rather than via git pathspec excludes.
 func IsLockFile(path string, ignoredLockFiles []string) bool {
 	for _, lf := range ignoredLockFiles {
+		if strings.TrimSpace(lf) == "" {
+			continue
+		}
 		if path == lf || strings.HasSuffix(path, "/"+lf) {
 			return true
 		}
