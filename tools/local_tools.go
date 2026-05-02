@@ -216,7 +216,7 @@ func registerLocalGrepFiles(r *Registry) {
 		}
 
 		// Filter out lock files as they are usually not relevant and can be huge.
-		cmdArgs = appendLockFileExcludes(cmdArgs)
+		cmdArgs = appendLockFileExcludes(cmdArgs, DefaultLockFiles)
 
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.

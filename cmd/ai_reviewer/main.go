@@ -41,6 +41,7 @@ type config struct {
 	FilesListFile                string   `mapstructure:"files-list-file"`
 	CommitsFile                  string   `mapstructure:"commits-file"`
 	MCPConfigFile                string   `mapstructure:"mcp-config"`
+	IgnoredLockFiles             []string `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string   `mapstructure:"config"`
 }
 
@@ -74,6 +75,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
 	fs.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
 	fs.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 
 	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
@@ -303,7 +305,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	} else {
 		stderr.Println("Fetching git diff locally...")
 		var err error
-		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head)
+		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head, cfg.IgnoredLockFiles)
 		if err != nil {
 			return fmt.Errorf("failed to extract git diff: %w", err)
 		}
