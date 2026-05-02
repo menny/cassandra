@@ -12,7 +12,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 - **Visual Status Indicators**: Automatically adds an "eyes" reaction to Pull Requests while the review is in progress, providing immediate feedback.
 - **Inline PR Reviews**: Supports formal GitHub PR Reviews with line-level feedback, including automatic dismissal of stale reviews and deduplication of comments.
 - **Model Context Protocol (MCP) Support**: Connect to custom local or remote tools through the Model Context Protocol to extend the reviewer's capabilities.
-- **CI/CD Ready**: Supports outputting reviews directly to files or as structured JSON, making it easy to integrate with GitHub Actions or other CI pipelines.
+- **CI/CD Ready**: Supports outputting reviews directly to files, structured JSON, and detailed session metrics (token usage, tool calls, iterations), making it easy to integrate with GitHub Actions or other CI pipelines.
 
 ## Requirements
 
@@ -64,6 +64,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | |
 | `--review-output-file` | Path to a file where the final review will be written | |
 | `--output-json` | Path to a file where the structured JSON review will be written | |
+| `--metrics-json` | Path to a file where the session metrics (tokens, tool calls, iterations) will be written | |
 | `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | |
 | `--max-tokens` | Max tokens for the LLM response | `8192` |
@@ -100,6 +101,7 @@ After the review completes, the action exposes the following outputs that downst
 |---|---|
 | `review_file` | Absolute path to the generated markdown review file on the runner. |
 | `json_file` | Absolute path to the structured JSON review file (only set when the JSON was successfully written). |
+| `metrics_file` | Absolute path to the session metrics JSON file (tokens, iterations, tool calls). |
 | `approved` | The approval decision: `APPROVE`, `REQUEST_CHANGES`, or `COMMENT`. |
 | `review_rationale` | The high-level rationale for the approval decision (may be multi-line). |
 
@@ -122,6 +124,34 @@ After the review completes, the action exposes the following outputs that downst
         run: |
           echo "Cassandra requested changes: $REVIEW_RATIONALE"
           exit 1
+```
+
+### Session Metrics JSON
+
+When using `--metrics-json` or consuming the `metrics_file` action output, the JSON contains detailed usage statistics:
+
+```json
+{
+  "metrics": {
+    "tokens": {
+      "input": 1240,       // "Fresh" input tokens
+      "output": 850,      // Generated response tokens
+      "thinking": 128,    // Model reasoning tokens (e.g. Gemini Thinking, OpenAI o1)
+      "cached": 4096,     // Tokens served from cache (Input only)
+      "total_input": 5336,
+      "total_output": 978
+    },
+    "iterations": 5,      // Number of agent loop turns
+    "tool_calls": {
+      "total": 12,
+      "by_tool": {
+        "read_file": 8,
+        "glob_files": 3,
+        "grep_search": 1
+      }
+    }
+  }
+}
 ```
 
 ## Configuration File (`cassandra.toml`)
