@@ -11,6 +11,7 @@ mcp-config = "mcp.json"
 # Additive guidelines to supplement the main prompt.
 # These can be local file paths or named prompts from the library.
 supplemental-guidelines = [
-    ".github/ai-reviewer/haiku-praise.md",
-    ".github/ai-reviewer/self-preservation.md"
+    ".cassandra/haiku-praise.md",
+    ".cassandra/self-preservation.md",
+    ".cassandra/drive-by-fixes.md"
 ]
