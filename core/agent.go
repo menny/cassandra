@@ -152,6 +152,13 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 
 // GetMetrics returns the collected usage and execution metrics for the session.
 func (a *Agent) GetMetrics() SessionMetrics {
+	toolCallsCopy := make(map[string]int, len(a.toolCalls))
+	totalTools := 0
+	for k, v := range a.toolCalls {
+		toolCallsCopy[k] = v
+		totalTools += v
+	}
+
 	return SessionMetrics{
 		Tokens: TokenMetrics{
 			Input:       a.totalUsage.PromptTokens,
@@ -163,18 +170,10 @@ func (a *Agent) GetMetrics() SessionMetrics {
 		},
 		Iterations: a.iterations,
 		ToolCalls: ToolCallMetrics{
-			Total:  a.totalToolCalls(),
-			ByTool: a.toolCalls,
+			Total:  totalTools,
+			ByTool: toolCallsCopy,
 		},
 	}
-}
-
-func (a *Agent) totalToolCalls() int {
-	total := 0
-	for _, count := range a.toolCalls {
-		total += count
-	}
-	return total
 }
 
 // RunReview executes the ReAct loop.

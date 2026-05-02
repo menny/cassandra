@@ -204,7 +204,7 @@ func TestLocalGlobFiles_Errors(t *testing.T) {
 
 func TestLocalGrepFiles(t *testing.T) {
 	r := NewRegistry()
-	registerLocalGrepFiles(r)
+	registerLocalGrepFiles(r, DefaultLockFiles)
 
 	tmpDir := t.TempDir()
 	setupGitRepo(t, tmpDir)

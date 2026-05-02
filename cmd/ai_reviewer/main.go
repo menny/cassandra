@@ -229,7 +229,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	// Initialize Agent and Tool Registry
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry)
+	tools.RegisterLocalTools(registry, cfg.IgnoredLockFiles)
 
 	if cfg.MCPConfigFile != "" {
 		mcpData, err := os.ReadFile(cfg.MCPConfigFile)

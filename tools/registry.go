@@ -37,8 +37,8 @@ func (r *Registry) HandleCall(ctx context.Context, tc llm.ToolCall) (string, err
 	return handler(ctx, tc)
 }
 
-func RegisterLocalTools(r *Registry) {
+func RegisterLocalTools(r *Registry, ignoredLockFiles []string) {
 	registerLocalReadFile(r)
 	registerLocalGlobFiles(r)
-	registerLocalGrepFiles(r)
+	registerLocalGrepFiles(r, ignoredLockFiles)
 }

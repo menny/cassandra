@@ -163,7 +163,7 @@ func registerLocalGlobFiles(r *Registry) {
 	})
 }
 
-func registerLocalGrepFiles(r *Registry) {
+func registerLocalGrepFiles(r *Registry, ignoredLockFiles []string) {
 	def := llm.ToolDef{
 		Name:        "grep_files",
 		Description: "Search for a pattern in the repository using git grep. This includes unstaged changes.",
@@ -216,7 +216,7 @@ func registerLocalGrepFiles(r *Registry) {
 		}
 
 		// Filter out lock files as they are usually not relevant and can be huge.
-		cmdArgs = appendLockFileExcludes(cmdArgs, DefaultLockFiles)
+		cmdArgs = appendLockFileExcludes(cmdArgs, ignoredLockFiles)
 
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.
