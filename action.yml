@@ -85,6 +85,9 @@ outputs:
   review_rationale:
     description: 'The high-level rationale for the approval decision.'
     value: ${{ steps.set_outputs.outputs.review_rationale }}
+  metrics_file:
+    description: 'Path to the session metrics JSON file.'
+    value: ${{ steps.set_outputs.outputs.metrics_file }}
 runs:
   using: 'composite'
   steps:
@@ -262,10 +265,12 @@ runs:
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
         JSON_FILE="${{ runner.temp }}/cassandra_review.json"
+        METRICS_FILE="${{ runner.temp }}/cassandra_metrics.json"
 
         ARGS=(
           --review-output-file "$REVIEW_FILE"
           --output-json "$JSON_FILE"
+          --metrics-json "$METRICS_FILE"
         )
 
         if [[ -n "$PROVIDER" ]]; then
@@ -371,6 +376,7 @@ runs:
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
         echo "JSON_FILE=$JSON_FILE" >> $GITHUB_ENV
+        echo "METRICS_FILE=$METRICS_FILE" >> $GITHUB_ENV
     - name: Set Action Outputs
       id: set_outputs
       shell: bash
@@ -387,6 +393,9 @@ runs:
             jq -r '.approval.rationale // ""' "$JSON_FILE"
             echo "$DELIMITER"
           } >> $GITHUB_OUTPUT
+        fi
+        if [[ -f "$METRICS_FILE" ]]; then
+          echo "metrics_file=$METRICS_FILE" >> $GITHUB_OUTPUT
         fi
     - name: Post AI Review Comment
       if: github.event.pull_request.number != '' && inputs.use_inline_comments != 'true'
