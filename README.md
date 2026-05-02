@@ -134,7 +134,7 @@ provider = "google"
 model = "gemini-3.1-pro-preview"
 main-guidelines = "security-first"
 supplemental-guidelines = [
-  ".github/ai-reviewer/haiku-praise.md"
+  ".cassandra/haiku-praise.md"
 ]
 ```
 
