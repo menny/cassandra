@@ -33,6 +33,7 @@ type config struct {
 	MaxTokens                    int      `mapstructure:"max-tokens"`
 	ReviewOutputFile             string   `mapstructure:"review-output-file"`
 	OutputJSONFile               string   `mapstructure:"output-json"`
+	MetricsJSONFile              string   `mapstructure:"metrics-json"`
 	ExtractionModel              string   `mapstructure:"extraction-model"`
 	MetadataJSONFile             string   `mapstructure:"metadata-json"`
 	ApprovalEvaluationPromptFile string   `mapstructure:"approval-evaluation-prompt-file"`
@@ -66,6 +67,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.Head, "head", "HEAD", "Head commit/branch for diff (defaults to 'HEAD')")
 	fs.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 	fs.StringVar(&cfg.OutputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
+	fs.StringVar(&cfg.MetricsJSONFile, "metrics-json", "", "Path to a file where the session metrics will be written")
 	fs.StringVar(&cfg.ExtractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
 	fs.StringVar(&cfg.MetadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
 	fs.StringVar(&cfg.DiffFile, "diff-file", "", "Path to a file containing the git diff")
@@ -204,6 +206,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if cfg.ExtractionModel != "" {
 			stderr.Printf("  Extraction Model: %s\n", cfg.ExtractionModel)
 		}
+	}
+	if cfg.MetricsJSONFile != "" {
+		stderr.Printf("  Session Metrics JSON: %s\n", cfg.MetricsJSONFile)
 	}
 	if cfg.MetadataJSONFile != "" {
 		stderr.Printf("  Metadata JSON: %s\n", cfg.MetadataJSONFile)
@@ -391,6 +396,19 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
 		stderr.Printf("Structured review written to %s\n", cfg.OutputJSONFile)
+	}
+
+	if cfg.MetricsJSONFile != "" {
+		metrics := agent.GetMetrics()
+		jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal metrics: %w", err)
+		}
+
+		if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
+			return fmt.Errorf("failed to write metrics to %s: %w", cfg.MetricsJSONFile, err)
+		}
+		stderr.Printf("Session metrics written to %s\n", cfg.MetricsJSONFile)
 	}
 
 	return nil

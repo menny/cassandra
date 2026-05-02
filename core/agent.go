@@ -130,6 +130,8 @@ type Agent struct {
 	registry   ToolDispatcher
 	reporter   Reporter
 	totalUsage llm.Usage
+	toolCalls  map[string]int
+	iterations int
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -137,14 +139,42 @@ type Agent struct {
 // returned as a string (caller routes it to stdout).
 func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Agent {
 	a := &Agent{
-		llm:      model,
-		registry: registry,
-		reporter: &defaultReporter{w: os.Stderr},
+		llm:       model,
+		registry:  registry,
+		reporter:  &defaultReporter{w: os.Stderr},
+		toolCalls: make(map[string]int),
 	}
 	for _, o := range opts {
 		o(a)
 	}
 	return a
+}
+
+// GetMetrics returns the collected usage and execution metrics for the session.
+func (a *Agent) GetMetrics() SessionMetrics {
+	return SessionMetrics{
+		Tokens: TokenMetrics{
+			Input:       a.totalUsage.PromptTokens,
+			Output:      a.totalUsage.OutputTokens,
+			Thinking:    a.totalUsage.ThinkingTokens,
+			Cached:      a.totalUsage.CachedTokens,
+			TotalInput:  a.totalUsage.TotalInput(),
+			TotalOutput: a.totalUsage.TotalOutput(),
+		},
+		Iterations: a.iterations,
+		ToolCalls: ToolCallMetrics{
+			Total:  a.totalToolCalls(),
+			ByTool: a.toolCalls,
+		},
+	}
+}
+
+func (a *Agent) totalToolCalls() int {
+	total := 0
+	for _, count := range a.toolCalls {
+		total += count
+	}
+	return total
 }
 
 // RunReview executes the ReAct loop.
@@ -179,7 +209,8 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 	}()
 
 	for iter := range maxIterations {
-		a.reporter.ReportIteration(iter + 1)
+		a.iterations = iter + 1
+		a.reporter.ReportIteration(a.iterations)
 
 		resp, err := a.generateContentWithEmptyRetry(ctx, messages, tools, maxTokens)
 		if err != nil {
@@ -291,6 +322,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 	}
 
 	for _, tc := range toolCalls {
+		a.toolCalls[tc.Name]++
 		a.reporter.ReportToolCall(tc)
 
 		// Dispatch; on error, surface the message as the tool result so the
