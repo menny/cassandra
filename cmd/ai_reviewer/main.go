@@ -257,6 +257,24 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	agent := core.NewAgent(client, registry)
 
+	// Ensure metrics are written even on failure
+	if cfg.MetricsJSONFile != "" {
+		defer func() {
+			metrics := agent.GetMetrics()
+			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
+			if err != nil {
+				stderr.Printf("Warning: failed to marshal metrics: %v\n", err)
+				return
+			}
+
+			if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
+				stderr.Printf("Warning: failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
+				return
+			}
+			stderr.Printf("Session metrics written to %s\n", cfg.MetricsJSONFile)
+		}()
+	}
+
 	var diffOutput string
 	var changedFiles []string
 	var commitsOutput string
@@ -396,19 +414,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
 		stderr.Printf("Structured review written to %s\n", cfg.OutputJSONFile)
-	}
-
-	if cfg.MetricsJSONFile != "" {
-		metrics := agent.GetMetrics()
-		jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal metrics: %w", err)
-		}
-
-		if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
-			return fmt.Errorf("failed to write metrics to %s: %w", cfg.MetricsJSONFile, err)
-		}
-		stderr.Printf("Session metrics written to %s\n", cfg.MetricsJSONFile)
 	}
 
 	return nil
