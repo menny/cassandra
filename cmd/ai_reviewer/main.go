@@ -33,6 +33,7 @@ type config struct {
 	MaxTokens                    int      `mapstructure:"max-tokens"`
 	ReviewOutputFile             string   `mapstructure:"review-output-file"`
 	OutputJSONFile               string   `mapstructure:"output-json"`
+	MetricsJSONFile              string   `mapstructure:"metrics-json"`
 	ExtractionModel              string   `mapstructure:"extraction-model"`
 	MetadataJSONFile             string   `mapstructure:"metadata-json"`
 	ApprovalEvaluationPromptFile string   `mapstructure:"approval-evaluation-prompt-file"`
@@ -40,6 +41,7 @@ type config struct {
 	FilesListFile                string   `mapstructure:"files-list-file"`
 	CommitsFile                  string   `mapstructure:"commits-file"`
 	MCPConfigFile                string   `mapstructure:"mcp-config"`
+	IgnoredLockFiles             []string `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string   `mapstructure:"config"`
 }
 
@@ -66,12 +68,14 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.Head, "head", "HEAD", "Head commit/branch for diff (defaults to 'HEAD')")
 	fs.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
 	fs.StringVar(&cfg.OutputJSONFile, "output-json", "", "Path to a file where the structured JSON review will be written")
+	fs.StringVar(&cfg.MetricsJSONFile, "metrics-json", "", "Path to a file where the session metrics will be written")
 	fs.StringVar(&cfg.ExtractionModel, "extraction-model", "", "Optional model override for the structured JSON extraction pass (requires --output-json)")
 	fs.StringVar(&cfg.MetadataJSONFile, "metadata-json", "", "Path to a JSON file containing PR metadata")
 	fs.StringVar(&cfg.DiffFile, "diff-file", "", "Path to a file containing the git diff")
 	fs.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
 	fs.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
 	fs.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 
 	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
@@ -205,6 +209,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			stderr.Printf("  Extraction Model: %s\n", cfg.ExtractionModel)
 		}
 	}
+	if cfg.MetricsJSONFile != "" {
+		stderr.Printf("  Session Metrics JSON: %s\n", cfg.MetricsJSONFile)
+	}
 	if cfg.MetadataJSONFile != "" {
 		stderr.Printf("  Metadata JSON: %s\n", cfg.MetadataJSONFile)
 	}
@@ -222,7 +229,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	// Initialize Agent and Tool Registry
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry)
+	tools.RegisterLocalTools(registry, cfg.IgnoredLockFiles)
 
 	if cfg.MCPConfigFile != "" {
 		mcpData, err := os.ReadFile(cfg.MCPConfigFile)
@@ -252,6 +259,24 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	agent := core.NewAgent(client, registry)
 
+	// Ensure metrics are written even on failure
+	if cfg.MetricsJSONFile != "" {
+		defer func() {
+			metrics := agent.GetMetrics()
+			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
+			if err != nil {
+				stderr.Printf("Warning: failed to marshal metrics: %v\n", err)
+				return
+			}
+
+			if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
+				stderr.Printf("Warning: failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
+				return
+			}
+			stderr.Printf("Session metrics written to %s\n", cfg.MetricsJSONFile)
+		}()
+	}
+
 	var diffOutput string
 	var changedFiles []string
 	var commitsOutput string
@@ -280,7 +305,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	} else {
 		stderr.Println("Fetching git diff locally...")
 		var err error
-		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head)
+		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head, cfg.IgnoredLockFiles)
 		if err != nil {
 			return fmt.Errorf("failed to extract git diff: %w", err)
 		}

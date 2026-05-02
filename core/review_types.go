@@ -14,6 +14,29 @@ type StructuredReview struct {
 	FilesReview       []FileReview `json:"files_review"`
 }
 
+// SessionMetrics captures detailed usage and execution metrics for an agent session.
+type SessionMetrics struct {
+	Tokens     TokenMetrics    `json:"tokens"`
+	Iterations int             `json:"iterations"`
+	ToolCalls  ToolCallMetrics `json:"tool_calls"`
+}
+
+// TokenMetrics breaks down token consumption by category.
+type TokenMetrics struct {
+	Input       int `json:"input"`
+	Output      int `json:"output"`
+	Thinking    int `json:"thinking"`
+	Cached      int `json:"cached"`
+	TotalInput  int `json:"total_input"`
+	TotalOutput int `json:"total_output"`
+}
+
+// ToolCallMetrics tracks how many times tools were invoked.
+type ToolCallMetrics struct {
+	Total  int            `json:"total"`
+	ByTool map[string]int `json:"by_tool"`
+}
+
 // Approval represents the overall decision on the code changes.
 type Approval struct {
 	Approved  bool   `json:"approved"`

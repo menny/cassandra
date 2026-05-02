@@ -57,7 +57,7 @@ func TestFetchGitDiff(t *testing.T) {
 	t.Run("Triple-dot diff", func(t *testing.T) {
 		// diff main...feature should ONLY show feature.txt
 		// NOT main_new.txt
-		diff, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature")
+		diff, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -98,7 +98,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "go.sum")
 		runGitCmd(t, tmpDir, "commit", "-m", "add go.sum")
 
-		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature")
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -120,7 +120,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "uncommitted.txt")
 
 		// head="HEAD" should include uncommitted changes
-		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD")
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD", DefaultLockFiles)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +136,7 @@ func TestFetchGitDiff(t *testing.T) {
 		}
 
 		// head="feature" should NOT include uncommitted changes (uses triple-dot)
-		_, files, err = FetchGitDiff(context.Background(), tmpDir, "main", "feature")
+		_, files, err = FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,11 +164,58 @@ func TestIsLockFile(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
-			if got := IsLockFile(c.path); got != c.want {
+			if got := IsLockFile(c.path, DefaultLockFiles); got != c.want {
 				t.Errorf("IsLockFile(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
 	}
+}
+
+func TestFetchGitDiff_CustomIgnore(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
+
+	// Create a branch so we have a diff
+	runGitCmd(t, tmpDir, "checkout", "-b", "custom-branch")
+
+	// Create a file that we want to ignore specifically
+	customPath := filepath.Join(tmpDir, "custom.ignore")
+	err := os.WriteFile(customPath, []byte("ignore me"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, tmpDir, "add", "custom.ignore")
+
+	// Also add go.sum, which should NOT be ignored since we override the list
+	sumPath := filepath.Join(tmpDir, "go.sum")
+	err = os.WriteFile(sumPath, []byte("some sum"), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGitCmd(t, tmpDir, "add", "go.sum")
+
+	runGitCmd(t, tmpDir, "commit", "-m", "add custom ignore and go.sum")
+
+	t.Run("Custom ignore list", func(t *testing.T) {
+		ignored := []string{"custom.ignore"}
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD", ignored)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		foundGoSum := false
+		for _, f := range files {
+			if f == "custom.ignore" {
+				t.Error("did NOT expect custom.ignore in files")
+			}
+			if f == "go.sum" {
+				foundGoSum = true
+			}
+		}
+		if !foundGoSum {
+			t.Error("expected go.sum in files because it was not in the custom ignore list")
+		}
+	})
 }
 
 func TestFetchGitCommits(t *testing.T) {

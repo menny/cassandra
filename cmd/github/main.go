@@ -33,6 +33,7 @@ func main() {
 	var metadataFile string
 	var allowReviewAction bool
 	var deleteOldComments bool
+	var ignoredLockFiles []string
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -44,6 +45,7 @@ func main() {
 	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
 	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
 	flag.BoolVar(&deleteOldComments, "delete-old-comments", true, "Whether to delete previous bot-authored inline comments before posting a new review.")
+	flag.StringSliceVar(&ignoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore (overrides default)")
 
 	flag.Parse()
 
@@ -129,14 +131,14 @@ func main() {
 		writeOutputOrStdout(outputFile, "metadata", bytes)
 
 	case "get-diff":
-		diff, err := getDiff(ctx, client, owner, repo, prNumber)
+		diff, err := getDiff(ctx, client, owner, repo, prNumber, ignoredLockFiles)
 		if err != nil {
 			log.Fatalf("Failed to get diff: %v", err)
 		}
 		writeOutputOrStdout(outputFile, "diff", []byte(diff))
 
 	case "get-files":
-		files, err := getFiles(ctx, client, owner, repo, prNumber)
+		files, err := getFiles(ctx, client, owner, repo, prNumber, ignoredLockFiles)
 		if err != nil {
 			log.Fatalf("Failed to get files: %v", err)
 		}
@@ -633,7 +635,7 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 	return nil
 }
 
-func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int) (string, error) {
+func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, ignoredLockFiles []string) (string, error) {
 	diff, _, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
 	if err != nil {
 		return "", err
@@ -652,7 +654,7 @@ func getDiff(ctx context.Context, client *github.Client, owner, repo string, prN
 			// split on " b/" from the right to correctly isolate the destination path.
 			skipping = false
 			if idx := strings.LastIndex(line, " b/"); idx != -1 {
-				skipping = tools.IsLockFile(line[idx+3:])
+				skipping = tools.IsLockFile(line[idx+3:], ignoredLockFiles)
 			}
 		}
 
@@ -664,7 +666,7 @@ func getDiff(ctx context.Context, client *github.Client, owner, repo string, prN
 	return strings.Join(filteredLines, "\n"), nil
 }
 
-func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
+func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int, ignoredLockFiles []string) ([]string, error) {
 	opts := &github.ListOptions{
 		PerPage: 100,
 	}
@@ -676,7 +678,7 @@ func getFiles(ctx context.Context, client *github.Client, owner, repo string, pr
 			return nil, err
 		}
 		for _, f := range files {
-			if path := f.GetFilename(); !tools.IsLockFile(path) {
+			if path := f.GetFilename(); !tools.IsLockFile(path, ignoredLockFiles) {
 				allFiles = append(allFiles, path)
 			}
 		}

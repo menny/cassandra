@@ -7,32 +7,46 @@ import (
 	"strings"
 )
 
-var LockFiles = []string{
+var DefaultLockFiles = []string{
 	"go.sum",
 	"package-lock.json",
 	"yarn.lock",
 	"pnpm-lock.yaml",
+	"bun.lockb",
+	"deno.lock",
 	"Cargo.lock",
 	"poetry.lock",
+	"uv.lock",
 	"Gemfile.lock",
+	"composer.lock",
+	"pubspec.lock",
+	"mix.lock",
+	"flake.lock",
+	"MODULE.bazel.lock",
 }
 
 // appendLockFileExcludes appends a git pathspec ":(exclude)*<name>" for each
-// entry in LockFiles to args, returning the grown slice. Used to suppress
+// entry in ignoredLockFiles to args, returning the grown slice. Used to suppress
 // noisy lockfile churn in diff and grep output.
-func appendLockFileExcludes(args []string) []string {
-	for _, lf := range LockFiles {
+func appendLockFileExcludes(args []string, ignoredLockFiles []string) []string {
+	for _, lf := range ignoredLockFiles {
+		if strings.TrimSpace(lf) == "" {
+			continue
+		}
 		args = append(args, fmt.Sprintf(":(exclude)*%s", lf))
 	}
 	return args
 }
 
-// IsLockFile reports whether path names a known dependency lockfile —
+// IsLockFile reports whether path names one of the ignored lockfiles —
 // either at the repository root (path == name) or in any subdirectory
 // (path ends in "/name"). Used by callers that operate on pre-computed
 // paths (e.g. PR file lists) rather than via git pathspec excludes.
-func IsLockFile(path string) bool {
-	for _, lf := range LockFiles {
+func IsLockFile(path string, ignoredLockFiles []string) bool {
+	for _, lf := range ignoredLockFiles {
+		if strings.TrimSpace(lf) == "" {
+			continue
+		}
 		if path == lf || strings.HasSuffix(path, "/"+lf) {
 			return true
 		}
@@ -53,7 +67,7 @@ func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-func FetchGitDiff(ctx context.Context, workingDir, base, head string) (string, []string, error) {
+func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLockFiles []string) (string, []string, error) {
 	var diffRange string
 	if head == "HEAD" {
 		// Use single-dot to include uncommitted changes in the working tree/index
@@ -65,7 +79,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string) (string, [
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
-	cmdArgs = appendLockFileExcludes(cmdArgs)
+	cmdArgs = appendLockFileExcludes(cmdArgs, ignoredLockFiles)
 
 	out, err := runGit(ctx, workingDir, cmdArgs...)
 	if err != nil {
@@ -78,7 +92,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string) (string, [
 	}
 
 	// Get file list
-	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."})
+	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."}, ignoredLockFiles)
 	nameOnlyOut, err := runGit(ctx, workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails

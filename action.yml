@@ -69,6 +69,10 @@ inputs:
     description: 'Path to an mcp.json file configuring custom tools for the reviewer'
     required: false
     default: ''
+  ignored_lock_files:
+    description: 'Multiline string where each line is a lock file to ignore (overrides default)'
+    required: false
+    default: ''
   max_tokens:
     description: 'Max tokens for the LLM response'
     required: false
@@ -85,6 +89,9 @@ outputs:
   review_rationale:
     description: 'The high-level rationale for the approval decision.'
     value: ${{ steps.set_outputs.outputs.review_rationale }}
+  metrics_file:
+    description: 'Path to the session metrics JSON file.'
+    value: ${{ steps.set_outputs.outputs.metrics_file }}
 runs:
   using: 'composite'
   steps:
@@ -230,13 +237,20 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ steps.prepare_token.outputs.token }}
+        IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
       run: |
         DIFF_FILE="${{ runner.temp }}/cassandra_diff.diff"
         FILES_LIST_FILE="${{ runner.temp }}/cassandra_files.txt"
         COMMITS_FILE="${{ runner.temp }}/cassandra_commits.txt"
 
-        "$GITHUB_BIN" get-diff --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$DIFF_FILE"
-        "$GITHUB_BIN" get-files --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$FILES_LIST_FILE"
+        GITHUB_ARGS=()
+        if [[ -n "$IGNORED_LOCK_FILES" ]]; then
+          JOINED_IGNORED_LOCK_FILES=$(echo "$IGNORED_LOCK_FILES" | tr -d '\r' | tr '\n' ',' | sed 's/,,*/,/g' | sed 's/^,//;s/,$//')
+          GITHUB_ARGS+=(--ignored-lock-files "$JOINED_IGNORED_LOCK_FILES")
+        fi
+
+        "$GITHUB_BIN" "${GITHUB_ARGS[@]}" get-diff --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$DIFF_FILE"
+        "$GITHUB_BIN" "${GITHUB_ARGS[@]}" get-files --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$FILES_LIST_FILE"
         "$GITHUB_BIN" get-commits --repo-full-name "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}" --output "$COMMITS_FILE"
 
         echo "DIFF_FILE=$DIFF_FILE" >> $GITHUB_ENV
@@ -257,15 +271,18 @@ runs:
         SUPPLEMENTAL_GUIDELINES: ${{ inputs.supplemental_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
         MCP_CONFIG: ${{ inputs.mcp_config }}
+        IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
         MAX_TOKENS: ${{ inputs.max_tokens }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
         JSON_FILE="${{ runner.temp }}/cassandra_review.json"
+        METRICS_FILE="${{ runner.temp }}/cassandra_metrics.json"
 
         ARGS=(
           --review-output-file "$REVIEW_FILE"
           --output-json "$JSON_FILE"
+          --metrics-json "$METRICS_FILE"
         )
 
         if [[ -n "$PROVIDER" ]]; then
@@ -327,6 +344,11 @@ runs:
           fi
         fi
 
+        if [[ -n "$IGNORED_LOCK_FILES" ]]; then
+          JOINED_IGNORED_LOCK_FILES=$(echo "$IGNORED_LOCK_FILES" | tr -d '\r' | tr '\n' ',' | sed 's/,,*/,/g' | sed 's/^,//;s/,$//')
+          ARGS+=(--ignored-lock-files "$JOINED_IGNORED_LOCK_FILES")
+        fi
+
         if [[ -f "$METADATA_FILE" ]]; then
           ARGS+=(--metadata-json "$METADATA_FILE")
         fi
@@ -371,6 +393,7 @@ runs:
         # Export the review file path for the next step
         echo "REVIEW_FILE=$REVIEW_FILE" >> $GITHUB_ENV
         echo "JSON_FILE=$JSON_FILE" >> $GITHUB_ENV
+        echo "METRICS_FILE=$METRICS_FILE" >> $GITHUB_ENV
     - name: Set Action Outputs
       id: set_outputs
       shell: bash
@@ -387,6 +410,9 @@ runs:
             jq -r '.approval.rationale // ""' "$JSON_FILE"
             echo "$DELIMITER"
           } >> $GITHUB_OUTPUT
+        fi
+        if [[ -f "$METRICS_FILE" ]]; then
+          echo "metrics_file=$METRICS_FILE" >> $GITHUB_OUTPUT
         fi
     - name: Post AI Review Comment
       if: github.event.pull_request.number != '' && inputs.use_inline_comments != 'true'
