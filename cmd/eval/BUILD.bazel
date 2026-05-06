@@ -9,7 +9,6 @@ go_library(
         "//core/eval",
         "//llm/factory",
         "@com_github_spf13_pflag//:pflag",
-        "@com_github_spf13_viper//:viper",
     ],
 )
 

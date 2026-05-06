@@ -30,18 +30,7 @@ func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 
 	// 2. Setup Agent (Subject)
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, nil) // No ignored lock files for now
-
-	// We need to change the working directory of the agent to the sandbox root.
-	// Since our tools use relative paths, we can just Chdir.
-	originalWD, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current working directory: %w", err)
-	}
-	if err := os.Chdir(sandbox.RootDir); err != nil {
-		return nil, fmt.Errorf("failed to change directory to sandbox: %w", err)
-	}
-	defer os.Chdir(originalWD)
+	tools.RegisterLocalTools(registry, sandbox.RootDir, nil) // No ignored lock files for now
 
 	agent := core.NewAgent(r.Subject, registry)
 

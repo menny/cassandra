@@ -13,7 +13,7 @@ import (
 	"github.com/menny/cassandra/llm"
 )
 
-func registerLocalReadFile(r *Registry) {
+func registerLocalReadFile(r *Registry, root string) {
 	def := llm.ToolDef{
 		Name:        "read_file",
 		Description: "Read the contents of a local file. For large files, use line_start/line_end or tail_lines to save tokens.",
@@ -52,7 +52,19 @@ func registerLocalReadFile(r *Registry) {
 			return "", err
 		}
 
-		b, err := os.ReadFile(args.FilePath)
+		fullPath := args.FilePath
+		if root != "" {
+			if !filepath.IsAbs(fullPath) {
+				fullPath = filepath.Join(root, fullPath)
+			}
+			// Security: Ensure the path is within the root directory.
+			rel, err := filepath.Rel(root, fullPath)
+			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+				return "", fmt.Errorf("read_file failed: path %q is outside the workspace root", args.FilePath)
+			}
+		}
+
+		b, err := os.ReadFile(fullPath)
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
@@ -105,7 +117,7 @@ func registerLocalReadFile(r *Registry) {
 	})
 }
 
-func registerLocalGlobFiles(r *Registry) {
+func registerLocalGlobFiles(r *Registry, root string) {
 	def := llm.ToolDef{
 		Name:        "glob_files",
 		Description: "Search for files within a directory matching an exact substring or simple glob suffix.",
@@ -138,6 +150,16 @@ func registerLocalGlobFiles(r *Registry) {
 		if dir == "" {
 			dir = "."
 		}
+		if root != "" {
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(root, dir)
+			}
+			// Security: Ensure the path is within the root directory.
+			rel, err := filepath.Rel(root, dir)
+			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+				return "", fmt.Errorf("glob_files failed: path %q is outside the workspace root", args.Directory)
+			}
+		}
 
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -147,7 +169,13 @@ func registerLocalGlobFiles(r *Registry) {
 			if !d.IsDir() {
 				// Simple substring match allows catching things like ".go" or "BUILD"
 				if strings.Contains(filepath.Base(path), args.Query) || strings.Contains(path, args.Query) {
-					matches = append(matches, path)
+					relPath := path
+					if root != "" {
+						if rel, err := filepath.Rel(root, path); err == nil {
+							relPath = rel
+						}
+					}
+					matches = append(matches, relPath)
 				}
 			}
 			return nil
@@ -163,7 +191,7 @@ func registerLocalGlobFiles(r *Registry) {
 	})
 }
 
-func registerLocalGrepFiles(r *Registry, ignoredLockFiles []string) {
+func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string) {
 	def := llm.ToolDef{
 		Name:        "grep_files",
 		Description: "Search for a pattern in the repository using git grep. This includes unstaged changes.",
@@ -221,7 +249,7 @@ func registerLocalGrepFiles(r *Registry, ignoredLockFiles []string) {
 		// Note: git grep already searches the working tree (unstaged changes) by default.
 		// We've also added --untracked to include newly created files.
 
-		out, err := runGit(ctx, "", cmdArgs...)
+		out, err := runGit(ctx, root, cmdArgs...)
 		if err != nil {
 			// git grep returns exit code 1 if no matches are found.
 			var exitErr *exec.ExitError

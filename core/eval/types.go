@@ -1,5 +1,9 @@
 package eval
 
+import (
+	"github.com/menny/cassandra/core"
+)
+
 // EvalCase represents a single evaluation scenario.
 type EvalCase struct {
 	ID          string `json:"id"`
@@ -28,11 +32,11 @@ type EvaluationResult struct {
 
 // CaseResult captures the outcome of running a single EvalCase.
 type CaseResult struct {
-	CaseID   string           `json:"case_id"`
-	CaseName string           `json:"case_name"`
-	Subject  EvaluationResult `json:"subject_result"`
-	Metrics  any              `json:"metrics"` // Subject metrics (core.SessionMetrics)
-	Error    string           `json:"error,omitempty"`
+	CaseID   string              `json:"case_id"`
+	CaseName string              `json:"case_name"`
+	Subject  EvaluationResult    `json:"subject_result"`
+	Metrics  core.SessionMetrics `json:"metrics"` // Subject metrics
+	Error    string              `json:"error,omitempty"`
 }
 
 // EvaluationResultSchema is the JSON Schema for the Judge's output.

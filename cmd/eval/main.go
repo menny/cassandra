@@ -3,35 +3,23 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	flag "github.com/spf13/pflag"
-	"github.com/spf13/viper"
 
 	"github.com/menny/cassandra/core/eval"
 	"github.com/menny/cassandra/llm/factory"
 )
 
-type config struct {
-	SubjectModel    string `mapstructure:"subject-model"`
-	SubjectProvider string `mapstructure:"subject-provider"`
-	SubjectAPIKey   string `mapstructure:"subject-api-key"`
-	SubjectURL      string `mapstructure:"subject-url"`
-
-	JudgeModel      string `mapstructure:"judge-model"`
-	JudgeProvider   string `mapstructure:"judge-provider"`
-	JudgeAPIKey     string `mapstructure:"judge-api-key"`
-	JudgeURL        string `mapstructure:"judge-url"`
-
-	CasesDir        string `mapstructure:"cases-dir"`
-	OutputFile      string `mapstructure:"output"`
-}
-
 func main() {
-	ctx := context.Background()
+	// Handle termination signals gracefully
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	stderr := log.New(os.Stderr, "", 0)
 	if err := run(ctx, os.Args[1:], stderr); err != nil {
 		stderr.Printf("Error: %v\n", err)
@@ -40,66 +28,75 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stderr *log.Logger) error {
-	var cfg config
+	var (
+		subjectModel    string
+		subjectProvider string
+		subjectAPIKey   string
+		subjectURL      string
+
+		judgeModel      string
+		judgeProvider   string
+		judgeAPIKey     string
+		judgeURL        string
+
+		casesDir   string
+		outputFile string
+	)
 
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 
-	fs.StringVar(&cfg.SubjectModel, "subject-model", "", "Subject model id")
-	fs.StringVar(&cfg.SubjectProvider, "subject-provider", "", "Subject provider")
-	fs.StringVar(&cfg.SubjectAPIKey, "subject-api-key", "", "Subject API key")
-	fs.StringVar(&cfg.SubjectURL, "subject-url", "", "Subject API URL")
+	fs.StringVar(&subjectModel, "subject-model", "", "Subject model id")
+	fs.StringVar(&subjectProvider, "subject-provider", "", "Subject provider")
+	fs.StringVar(&subjectAPIKey, "subject-api-key", "", "Subject API key")
+	fs.StringVar(&subjectURL, "subject-url", "", "Subject API URL")
 
-	fs.StringVar(&cfg.JudgeModel, "judge-model", "", "Judge model id")
-	fs.StringVar(&cfg.JudgeProvider, "judge-provider", "", "Judge provider")
-	fs.StringVar(&cfg.JudgeAPIKey, "judge-api-key", "", "Judge API key")
-	fs.StringVar(&cfg.JudgeURL, "judge-url", "", "Judge API URL")
+	fs.StringVar(&judgeModel, "judge-model", "", "Judge model id")
+	fs.StringVar(&judgeProvider, "judge-provider", "", "Judge provider")
+	fs.StringVar(&judgeAPIKey, "judge-api-key", "", "Judge API key")
+	fs.StringVar(&judgeURL, "judge-url", "", "Judge API URL")
 
-	fs.StringVar(&cfg.CasesDir, "cases-dir", "core/eval/testdata/cases", "Directory containing evaluation cases")
-	fs.StringVar(&cfg.OutputFile, "output", "", "Path to write the evaluation results (JSON)")
+	fs.StringVar(&casesDir, "cases-dir", "core/eval/testdata/cases", "Directory containing evaluation cases")
+	fs.StringVar(&outputFile, "output", "", "Path to write the evaluation results (JSON)")
 
 	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
+		if err == flag.ErrHelp {
 			return nil
 		}
 		return err
 	}
 
-	v := viper.New()
-	fs.VisitAll(func(f *flag.Flag) {
-		if f.Changed {
-			v.BindPFlag(f.Name, f)
-		}
-	})
-
-	if err := v.Unmarshal(&cfg); err != nil {
-		return err
-	}
-
 	// Validation
-	if cfg.SubjectProvider == "" || cfg.SubjectModel == "" || cfg.SubjectAPIKey == "" {
-		return fmt.Errorf("missing subject model configuration")
-	}
-	if cfg.JudgeProvider == "" || cfg.JudgeModel == "" || cfg.JudgeAPIKey == "" {
-		// Default judge to subject if not specified
-		if cfg.JudgeProvider == "" { cfg.JudgeProvider = cfg.SubjectProvider }
-		if cfg.JudgeModel == "" { cfg.JudgeModel = cfg.SubjectModel }
-		if cfg.JudgeAPIKey == "" { cfg.JudgeAPIKey = cfg.SubjectAPIKey }
-		if cfg.JudgeURL == "" { cfg.JudgeURL = cfg.SubjectURL }
+	if subjectProvider == "" || subjectModel == "" || subjectAPIKey == "" {
+		return fmt.Errorf("missing required subject flags: --subject-provider, --subject-model, --subject-api-key")
 	}
 
-	subject, err := factory.New(ctx, cfg.SubjectProvider, cfg.SubjectModel, cfg.SubjectAPIKey, cfg.SubjectURL)
+	// Default judge to subject if not specified
+	if judgeProvider == "" {
+		judgeProvider = subjectProvider
+	}
+	if judgeModel == "" {
+		judgeModel = subjectModel
+	}
+	if judgeAPIKey == "" {
+		judgeAPIKey = subjectAPIKey
+	}
+	if judgeURL == "" {
+		judgeURL = subjectURL
+	}
+
+	subject, err := factory.New(ctx, subjectProvider, subjectModel, subjectAPIKey, subjectURL)
 	if err != nil {
 		return fmt.Errorf("failed to init subject: %w", err)
 	}
 
-	judge, err := factory.New(ctx, cfg.JudgeProvider, cfg.JudgeModel, cfg.JudgeAPIKey, cfg.JudgeURL)
+	judge, err := factory.New(ctx, judgeProvider, judgeModel, judgeAPIKey, judgeURL)
 	if err != nil {
 		return fmt.Errorf("failed to init judge: %w", err)
 	}
 
-	cases, err := eval.LoadCases(cfg.CasesDir)
+	cases, err := eval.LoadCases(casesDir)
 	if err != nil {
-		return fmt.Errorf("failed to load cases: %w", err)
+		return fmt.Errorf("failed to load cases from %s: %w", casesDir, err)
 	}
 
 	runner := &eval.Runner{
@@ -109,31 +106,42 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	var results []eval.CaseResult
 	for _, c := range cases {
+		// Respect context cancellation between cases
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		stderr.Printf("Running case: %s (%s)...\n", c.Name, c.ID)
 		res, err := runner.RunCase(ctx, c)
 		if err != nil {
 			stderr.Printf("  Error running case %s: %v\n", c.ID, err)
 			results = append(results, eval.CaseResult{
-				CaseID: c.ID,
+				CaseID:   c.ID,
 				CaseName: c.Name,
-				Error: err.Error(),
+				Error:    err.Error(),
 			})
 			continue
 		}
 		results = append(results, *res)
 		stderr.Printf("  Score: %d/5\n", res.Subject.Score)
 		stderr.Printf("  Rationale: %s\n", res.Subject.Rationale)
+		if len(res.Subject.Findings) > 0 {
+			stderr.Printf("  Findings:\n")
+			for _, f := range res.Subject.Findings {
+				stderr.Printf("    - %s\n", f)
+			}
+		}
 	}
 
-	if cfg.OutputFile != "" {
+	if outputFile != "" {
 		b, err := json.MarshalIndent(results, "", "  ")
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to marshal results: %w", err)
 		}
-		if err := os.WriteFile(cfg.OutputFile, b, 0644); err != nil {
-			return err
+		if err := os.WriteFile(outputFile, b, 0644); err != nil {
+			return fmt.Errorf("failed to write output file: %w", err)
 		}
-		stderr.Printf("Results written to %s\n", cfg.OutputFile)
+		stderr.Printf("Results written to %s\n", outputFile)
 	}
 
 	return nil

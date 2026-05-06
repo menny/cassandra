@@ -42,8 +42,8 @@ func TestSandbox(t *testing.T) {
 	}
 
 	// 5. Verify git status
-	cmd := s.runGit(ctx, "log", "--oneline")
-	if cmd != nil {
-		t.Errorf("git log failed: %v", cmd)
+	err = s.runGit(ctx, "log", "--oneline")
+	if err != nil {
+		t.Errorf("git log failed: %v", err)
 	}
 }
