@@ -1,0 +1,9 @@
+--- math.go
++++ math.go
+@@ -1,5 +1,5 @@
+ package math
+ 
+ func Divide(a, b int) int {
+-	return a + b
++	return a / b
+ }

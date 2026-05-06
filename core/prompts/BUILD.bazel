@@ -15,6 +15,7 @@ go_library(
         "library/palantir.md",
         "library/security-first.md",
         "reviewer_prompt.md",
+        "library/eval_judge.md",
     ],
     importpath = "github.com/menny/cassandra/core/prompts",
     visibility = ["//visibility:public"],

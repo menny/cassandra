@@ -1,0 +1,24 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "eval",
+    srcs = [
+        "runner.go",
+        "sandbox.go",
+        "types.go",
+    ],
+    importpath = "github.com/menny/cassandra/core/eval",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "//core/prompts",
+        "//llm",
+        "//tools",
+    ],
+)
+
+go_test(
+    name = "eval_test",
+    srcs = ["sandbox_test.go"],
+    embed = [":eval"],
+)
