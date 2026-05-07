@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
-	"github.com/menny/cassandra/tools"
 )
 
 // Runner orchestrates the evaluation process.
 type Runner struct {
-	Subject llm.Model // The model being evaluated
-	Judge   llm.Model // The model doing the evaluation
+	SubjectConfig *config.Config // Configuration for the agent under test
+	Judge         llm.Model      // The model doing the evaluation
 }
 
 // RunCase executes a single evaluation case.
@@ -28,29 +28,24 @@ func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 	}
 	defer sandbox.Cleanup()
 
-	// 2. Setup Agent (Subject)
-	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, sandbox.RootDir, nil) // No ignored lock files for now
+	// 2. Setup Reviewer (Subject)
+	// We use the production factory to ensure parity.
+	reviewer, err := core.NewReviewer(ctx, r.SubjectConfig, sandbox.RootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup reviewer: %w", err)
+	}
+	defer reviewer.Close()
 
-	agent := core.NewAgent(r.Subject, registry)
-
+	// 3. Run Review (Subject)
 	// Build the request text
 	requestText := fmt.Sprintf("Review the following git diff for issues:\n\n%s", c.Diff)
 
-	// Use general guidelines for now
-	guidelines, err := prompts.GetLibraryPrompt("general")
-	if err != nil {
-		return nil, fmt.Errorf("failed to get general guidelines: %w", err)
-	}
-
-	// We don't have PR metadata or extra guidelines for eval cases yet
-	stable, dynamic, _, err := prompts.BuildSystemPrompt(sandbox.RootDir, nil, guidelines, nil, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to build system prompt: %w", err)
-	}
-
-	// 3. Run Review (Subject)
-	review, err := agent.RunReview(ctx, stable, dynamic, requestText, 0, 0)
+	// Since we are in a sandbox with a committed diff, we can let the reviewer
+	// determine changed files (or just pass the ones from the diff if we had them).
+	// For now, we'll pass an empty slice so it relies on the prompt building logic
+	// to find files in the sandbox if needed, or we could parse the diff.
+	// Most evaluations provide the diff directly in the request text anyway.
+	review, err := reviewer.Run(ctx, nil, requestText)
 	if err != nil {
 		return &CaseResult{
 			CaseID:   c.ID,
@@ -73,7 +68,7 @@ func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 		CaseID:   c.ID,
 		CaseName: c.Name,
 		Subject:  *judgeResult,
-		Metrics:  agent.GetMetrics(),
+		Metrics:  reviewer.Agent.GetMetrics(),
 	}, nil
 }
 
@@ -145,10 +140,15 @@ func LoadCases(fixturesDir string) ([]EvalCase, error) {
 		if c.BaseDir != "" {
 			c.BaseDir = filepath.Join(caseDir, c.BaseDir)
 		} else {
-			// Check if a default 'base' directory exists
-			defaultBase := filepath.Join(caseDir, "base")
-			if info, err := os.Stat(defaultBase); err == nil && info.IsDir() {
-				c.BaseDir = defaultBase
+			// Check for default 'base.tar.gz' first, then 'base' directory
+			defaultTar := filepath.Join(caseDir, "base.tar.gz")
+			if _, err := os.Stat(defaultTar); err == nil {
+				c.BaseDir = defaultTar
+			} else {
+				defaultBase := filepath.Join(caseDir, "base")
+				if info, err := os.Stat(defaultBase); err == nil && info.IsDir() {
+					c.BaseDir = defaultBase
+				}
 			}
 		}
 

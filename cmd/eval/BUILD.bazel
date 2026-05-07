@@ -6,6 +6,7 @@ go_library(
     importpath = "github.com/menny/cassandra/cmd/eval",
     visibility = ["//visibility:private"],
     deps = [
+        "//core/config",
         "//core/eval",
         "//llm/factory",
         "@com_github_spf13_pflag//:pflag",

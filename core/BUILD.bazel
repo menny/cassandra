@@ -7,11 +7,17 @@ go_library(
         "github.go",
         "io_util.go",
         "review_types.go",
+        "reviewer.go",
     ],
     importpath = "github.com/menny/cassandra/core",
     visibility = ["//visibility:public"],
     deps = [
+        "//core/config",
+        "//core/prompts",
         "//llm",
+        "//llm/factory",
+        "//tools",
+        "//tools/mcp",
     ],
 )
 

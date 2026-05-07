@@ -1,11 +1,15 @@
 package eval
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Sandbox provides a high-fidelity git environment for evaluating the agent.
@@ -14,20 +18,37 @@ type Sandbox struct {
 }
 
 // NewSandbox initializes a new git-backed sandbox.
-// It copies files from baseSourceDir (if non-empty), initializes git,
+// It copies or extracts files from baseSource (if non-empty), initializes git,
 // commits the base state, applies the diff, and commits the final state.
-func NewSandbox(ctx context.Context, baseSourceDir string, diff string) (*Sandbox, error) {
+// baseSource can be a directory path or a .tar.gz file path.
+func NewSandbox(ctx context.Context, baseSource string, diff string) (*Sandbox, error) {
 	tmp, err := os.MkdirTemp("", "cassandra-eval-sandbox-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	s := &Sandbox{RootDir: tmp}
 
-	// 1. Copy base files
-	if baseSourceDir != "" {
-		if err := copyDir(baseSourceDir, tmp); err != nil {
+	// 1. Setup base files
+	if baseSource != "" {
+		info, err := os.Stat(baseSource)
+		if err != nil {
 			s.Cleanup()
-			return nil, fmt.Errorf("failed to copy base files: %w", err)
+			return nil, fmt.Errorf("failed to stat base source %q: %w", baseSource, err)
+		}
+
+		if info.IsDir() {
+			if err := copyDir(baseSource, tmp); err != nil {
+				s.Cleanup()
+				return nil, fmt.Errorf("failed to copy base directory: %w", err)
+			}
+		} else if strings.HasSuffix(baseSource, ".tar.gz") {
+			if err := extractTarGz(baseSource, tmp); err != nil {
+				s.Cleanup()
+				return nil, fmt.Errorf("failed to extract base tarball: %w", err)
+			}
+		} else {
+			s.Cleanup()
+			return nil, fmt.Errorf("unsupported base source type (must be dir or .tar.gz): %s", baseSource)
 		}
 	}
 
@@ -115,4 +136,60 @@ func (s *Sandbox) runGit(ctx context.Context, args ...string) error {
 
 func copyDir(src string, dst string) error {
 	return os.CopyFS(dst, os.DirFS(src))
+}
+
+func extractTarGz(gzipPath, dst string) error {
+	f, err := os.Open(gzipPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		target := filepath.Join(dst, header.Name)
+
+		// Security: Prevent "Tar Slip" (directory traversal)
+		rel, err := filepath.Rel(dst, target)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return fmt.Errorf("tar slip detected: %s", header.Name)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, 0755); err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			// Use O_TRUNC to ensure existing files are completely overwritten.
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(f, tr); err != nil {
+				f.Close()
+				return err
+			}
+			f.Close()
+		}
+	}
+	return nil
 }

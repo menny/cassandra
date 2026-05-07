@@ -11,6 +11,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/eval"
 	"github.com/menny/cassandra/llm/factory"
 )
@@ -29,15 +30,13 @@ func main() {
 
 func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	var (
-		subjectModel    string
-		subjectProvider string
-		subjectAPIKey   string
-		subjectURL      string
+		subjectConfigPath string
+		subjectAPIKey     string
 
-		judgeModel      string
-		judgeProvider   string
-		judgeAPIKey     string
-		judgeURL        string
+		judgeModel    string
+		judgeProvider string
+		judgeAPIKey   string
+		judgeURL      string
 
 		casesDir   string
 		outputFile string
@@ -45,10 +44,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 
-	fs.StringVar(&subjectModel, "subject-model", "", "Subject model id")
-	fs.StringVar(&subjectProvider, "subject-provider", "", "Subject provider")
-	fs.StringVar(&subjectAPIKey, "subject-api-key", "", "Subject API key")
-	fs.StringVar(&subjectURL, "subject-url", "", "Subject API URL")
+	fs.StringVar(&subjectConfigPath, "subject-config", "", "Path to the subject's cassandra.toml")
+	fs.StringVar(&subjectAPIKey, "subject-api-key", "", "API key for the subject (overrides config if provided)")
 
 	fs.StringVar(&judgeModel, "judge-model", "", "Judge model id")
 	fs.StringVar(&judgeProvider, "judge-provider", "", "Judge provider")
@@ -65,28 +62,33 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return err
 	}
 
-	// Validation
-	if subjectProvider == "" || subjectModel == "" || subjectAPIKey == "" {
-		return fmt.Errorf("missing required subject flags: --subject-provider, --subject-model, --subject-api-key")
+	// 1. Load Subject Config
+	subjectCfg, err := config.Load(subjectConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to load subject config: %w", err)
+	}
+	if subjectAPIKey != "" {
+		subjectCfg.ProviderAPIKey = subjectAPIKey
 	}
 
+	// Validation
+	if subjectCfg.Provider == "" || subjectCfg.Model == "" || subjectCfg.ProviderAPIKey == "" {
+		return fmt.Errorf("subject configuration is incomplete (provider, model, and api-key are required)")
+	}
+
+	// 2. Setup Judge
 	// Default judge to subject if not specified
 	if judgeProvider == "" {
-		judgeProvider = subjectProvider
+		judgeProvider = subjectCfg.Provider
 	}
 	if judgeModel == "" {
-		judgeModel = subjectModel
+		judgeModel = subjectCfg.Model
 	}
 	if judgeAPIKey == "" {
-		judgeAPIKey = subjectAPIKey
+		judgeAPIKey = subjectCfg.ProviderAPIKey
 	}
 	if judgeURL == "" {
-		judgeURL = subjectURL
-	}
-
-	subject, err := factory.New(ctx, subjectProvider, subjectModel, subjectAPIKey, subjectURL)
-	if err != nil {
-		return fmt.Errorf("failed to init subject: %w", err)
+		judgeURL = subjectCfg.ProviderURL
 	}
 
 	judge, err := factory.New(ctx, judgeProvider, judgeModel, judgeAPIKey, judgeURL)
@@ -94,19 +96,19 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to init judge: %w", err)
 	}
 
+	// 3. Run Evaluations
 	cases, err := eval.LoadCases(casesDir)
 	if err != nil {
 		return fmt.Errorf("failed to load cases from %s: %w", casesDir, err)
 	}
 
 	runner := &eval.Runner{
-		Subject: subject,
-		Judge:   judge,
+		SubjectConfig: subjectCfg,
+		Judge:         judge,
 	}
 
 	var results []eval.CaseResult
 	for _, c := range cases {
-		// Respect context cancellation between cases
 		if err := ctx.Err(); err != nil {
 			return err
 		}

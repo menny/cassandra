@@ -11,9 +11,9 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        "//core/config",
         "//core/prompts",
         "//llm",
-        "//tools",
     ],
 )
 
