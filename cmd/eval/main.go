@@ -140,7 +140,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal results: %w", err)
 		}
-		if err := os.WriteFile(outputFile, b, 0644); err != nil {
+		if err := os.WriteFile(outputFile, b, 0o644); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
 		}
 		stderr.Printf("Results written to %s\n", outputFile)

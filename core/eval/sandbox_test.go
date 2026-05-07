@@ -16,7 +16,7 @@ func TestSandbox(t *testing.T) {
 
 	// 1. Setup base directory
 	baseDir := t.TempDir()
-	err := os.WriteFile(filepath.Join(baseDir, "hello.txt"), []byte("hello world\n"), 0644)
+	err := os.WriteFile(filepath.Join(baseDir, "hello.txt"), []byte("hello world\n"), 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 	// 1. Setup a clean destination and a parent directory we want to protect
 	parentDir := t.TempDir()
 	dstDir := filepath.Join(parentDir, "sandbox")
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,7 +71,7 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 
 	hdr := &tar.Header{
 		Name: maliciousPath,
-		Mode: 0644,
+		Mode: 0o644,
 		Size: int64(len(content)),
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
@@ -86,7 +86,7 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 
 	// 3. Write it to disk for the extractor to read
 	tarPath := filepath.Join(parentDir, "malicious.tar.gz")
-	if err := os.WriteFile(tarPath, buf.Bytes(), 0644); err != nil {
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,12 +111,12 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 func TestExtractTarGz_Truncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	dstDir := filepath.Join(tmpDir, "dst")
-	os.MkdirAll(dstDir, 0755)
+	os.MkdirAll(dstDir, 0o755)
 
 	// 1. Create an existing file with long content
 	targetFile := filepath.Join(dstDir, "data.txt")
 	originalContent := "This is a very long piece of content that should be overwritten completely."
-	if err := os.WriteFile(targetFile, []byte(originalContent), 0644); err != nil {
+	if err := os.WriteFile(targetFile, []byte(originalContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,7 +128,7 @@ func TestExtractTarGz_Truncation(t *testing.T) {
 
 	hdr := &tar.Header{
 		Name: "data.txt",
-		Mode: 0644,
+		Mode: 0o644,
 		Size: int64(len(shortContent)),
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
@@ -141,7 +141,7 @@ func TestExtractTarGz_Truncation(t *testing.T) {
 	gw.Close()
 
 	tarPath := filepath.Join(tmpDir, "update.tar.gz")
-	os.WriteFile(tarPath, buf.Bytes(), 0644)
+	os.WriteFile(tarPath, buf.Bytes(), 0o644)
 
 	// 3. Extract
 	if err := extractTarGz(tarPath, dstDir); err != nil {

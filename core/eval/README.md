@@ -28,8 +28,8 @@ Cases are stored in `core/eval/testdata/cases/`. Each case is a directory contai
 
 -   `metadata.json`: Defines the case name, description, and the evaluation **rubric**.
 -   `input.diff`: The Git diff that the agent will be asked to review.
--   `base.tar.gz` (Recommended): A tarball of the repository files *before* the diff is applied. Using `.tar.gz` prevents Bazel from indexing the files and interfering with builds.
--   `base/` (Alternative): A directory containing the base files. Useful for quick local iterations.
+-   `base.tar.gz` (Recommended): A tarball of the repository files *before* the diff is applied.
+-   `base/` (Alternative): A directory containing the base files.
 
 ### Example `metadata.json`
 
@@ -37,7 +37,8 @@ Cases are stored in `core/eval/testdata/cases/`. Each case is a directory contai
 {
   "name": "Security: Hardcoded API Key",
   "description": "Tests if the agent identifies a hardcoded secret in a config file.",
-  "rubric": "The agent MUST identify the hardcoded API key in config.go and recommend using environment variables."
+  "rubric": "The agent MUST identify the hardcoded API key in config.go and recommend using environment variables.",
+  "base_source": "base.tar.gz"
 }
 ```
 

@@ -11,9 +11,9 @@ type EvalCase struct {
 	Description string `json:"description"`
 	// Rubric is the specific criteria the Judge should use to score the review.
 	Rubric string `json:"rubric"`
-	// BaseDir is the path to the directory containing the "before" state.
+	// BaseSource is the path to the directory or .tar.gz containing the "before" state.
 	// This is relative to the fixture directory.
-	BaseDir string `json:"base_dir"`
+	BaseSource string `json:"base_source"`
 	// DiffPath is the path to the diff file (input.diff).
 	// This is relative to the fixture directory.
 	DiffPath string `json:"diff_path"`

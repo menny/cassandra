@@ -18,10 +18,10 @@ type Sandbox struct {
 }
 
 // NewSandbox initializes a new git-backed sandbox.
-// It copies or extracts files from baseSource (if non-empty), initializes git,
+// It copies or extracts files from baseState (if non-empty), initializes git,
 // commits the base state, applies the diff, and commits the final state.
-// baseSource can be a directory path or a .tar.gz file path.
-func NewSandbox(ctx context.Context, baseSource string, diff string) (*Sandbox, error) {
+// baseState can be a directory path or a .tar.gz file path.
+func NewSandbox(ctx context.Context, baseState string, diff string) (*Sandbox, error) {
 	tmp, err := os.MkdirTemp("", "cassandra-eval-sandbox-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp dir: %w", err)
@@ -29,26 +29,26 @@ func NewSandbox(ctx context.Context, baseSource string, diff string) (*Sandbox, 
 	s := &Sandbox{RootDir: tmp}
 
 	// 1. Setup base files
-	if baseSource != "" {
-		info, err := os.Stat(baseSource)
+	if baseState != "" {
+		info, err := os.Stat(baseState)
 		if err != nil {
 			s.Cleanup()
-			return nil, fmt.Errorf("failed to stat base source %q: %w", baseSource, err)
+			return nil, fmt.Errorf("failed to stat base state %q: %w", baseState, err)
 		}
 
 		if info.IsDir() {
-			if err := copyDir(baseSource, tmp); err != nil {
+			if err := copyDir(baseState, tmp); err != nil {
 				s.Cleanup()
 				return nil, fmt.Errorf("failed to copy base directory: %w", err)
 			}
-		} else if strings.HasSuffix(baseSource, ".tar.gz") {
-			if err := extractTarGz(baseSource, tmp); err != nil {
+		} else if strings.HasSuffix(baseState, ".tar.gz") {
+			if err := extractTarGz(baseState, tmp); err != nil {
 				s.Cleanup()
 				return nil, fmt.Errorf("failed to extract base tarball: %w", err)
 			}
 		} else {
 			s.Cleanup()
-			return nil, fmt.Errorf("unsupported base source type (must be dir or .tar.gz): %s", baseSource)
+			return nil, fmt.Errorf("unsupported base state type (must be dir or .tar.gz): %s", baseState)
 		}
 	}
 
@@ -90,7 +90,7 @@ func NewSandbox(ctx context.Context, baseSource string, diff string) (*Sandbox, 
 	// 4. Apply diff
 	if diff != "" {
 		diffFile := filepath.Join(tmp, "input.diff")
-		if err := os.WriteFile(diffFile, []byte(diff), 0644); err != nil {
+		if err := os.WriteFile(diffFile, []byte(diff), 0o644); err != nil {
 			s.Cleanup()
 			return nil, fmt.Errorf("failed to write diff file: %w", err)
 		}
@@ -172,11 +172,11 @@ func extractTarGz(gzipPath, dst string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0755); err != nil {
+			if err := os.MkdirAll(target, 0o755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
 			// Use O_TRUNC to ensure existing files are completely overwritten.

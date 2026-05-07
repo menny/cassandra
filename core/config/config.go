@@ -41,10 +41,10 @@ type Config struct {
 // NewDefaultConfig returns a Config with default values populated.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Base:           "main",
-		Head:           "HEAD",
-		MainGuidelines: "general",
-		MaxTokens:      llm.DefaultMaxTokens,
+		Base:             "main",
+		Head:             "HEAD",
+		MainGuidelines:   "general",
+		MaxTokens:        llm.DefaultMaxTokens,
 		IgnoredLockFiles: tools.DefaultLockFiles,
 	}
 }

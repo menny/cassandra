@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/menny/cassandra/core"
 	"github.com/menny/cassandra/core/config"
@@ -22,14 +23,13 @@ type Runner struct {
 // RunCase executes a single evaluation case.
 func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 	// 1. Create Sandbox
-	sandbox, err := NewSandbox(ctx, c.BaseDir, c.Diff)
+	sandbox, err := NewSandbox(ctx, c.BaseSource, c.Diff)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create sandbox: %w", err)
 	}
 	defer sandbox.Cleanup()
 
 	// 2. Setup Reviewer (Subject)
-	// We use the production factory to ensure parity.
 	reviewer, err := core.NewReviewer(ctx, r.SubjectConfig, sandbox.RootDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup reviewer: %w", err)
@@ -37,15 +37,10 @@ func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 	defer reviewer.Close()
 
 	// 3. Run Review (Subject)
-	// Build the request text
 	requestText := fmt.Sprintf("Review the following git diff for issues:\n\n%s", c.Diff)
+	changedFiles := extractChangedFiles(c.Diff)
 
-	// Since we are in a sandbox with a committed diff, we can let the reviewer
-	// determine changed files (or just pass the ones from the diff if we had them).
-	// For now, we'll pass an empty slice so it relies on the prompt building logic
-	// to find files in the sandbox if needed, or we could parse the diff.
-	// Most evaluations provide the diff directly in the request text anyway.
-	review, err := reviewer.Run(ctx, nil, requestText)
+	review, err := reviewer.Run(ctx, changedFiles, requestText)
 	if err != nil {
 		return &CaseResult{
 			CaseID:   c.ID,
@@ -130,24 +125,24 @@ func LoadCases(fixturesDir string) ([]EvalCase, error) {
 		if c.DiffPath == "" {
 			c.DiffPath = "input.diff"
 		}
-		
+
 		diffContent, err := os.ReadFile(filepath.Join(caseDir, c.DiffPath))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read diff for %s: %w", c.ID, err)
 		}
 		c.Diff = string(diffContent)
 
-		if c.BaseDir != "" {
-			c.BaseDir = filepath.Join(caseDir, c.BaseDir)
+		if c.BaseSource != "" {
+			c.BaseSource = filepath.Join(caseDir, c.BaseSource)
 		} else {
 			// Check for default 'base.tar.gz' first, then 'base' directory
 			defaultTar := filepath.Join(caseDir, "base.tar.gz")
 			if _, err := os.Stat(defaultTar); err == nil {
-				c.BaseDir = defaultTar
+				c.BaseSource = defaultTar
 			} else {
 				defaultBase := filepath.Join(caseDir, "base")
 				if info, err := os.Stat(defaultBase); err == nil && info.IsDir() {
-					c.BaseDir = defaultBase
+					c.BaseSource = defaultBase
 				}
 			}
 		}
@@ -156,4 +151,16 @@ func LoadCases(fixturesDir string) ([]EvalCase, error) {
 	}
 
 	return cases, nil
+}
+
+func extractChangedFiles(diff string) []string {
+	var files []string
+	lines := strings.Split(diff, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+++ b/") {
+			file := strings.TrimPrefix(line, "+++ b/")
+			files = append(files, file)
+		}
+	}
+	return files
 }
