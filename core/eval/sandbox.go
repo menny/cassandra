@@ -68,23 +68,15 @@ func NewSandbox(ctx context.Context, baseState string, diff string) (*Sandbox, e
 	}
 
 	// 3. Commit base state
-	// We need to check if there are any files to add
-	files, _ := os.ReadDir(tmp)
-	if len(files) > 0 {
-		if err := s.runGit(ctx, "add", "."); err != nil {
-			s.Cleanup()
-			return nil, err
-		}
-		if err := s.runGit(ctx, "commit", "-m", "base state"); err != nil {
-			s.Cleanup()
-			return nil, err
-		}
-	} else {
-		// Even if empty, create an initial commit to avoid "no branch" errors
-		if err := s.runGit(ctx, "commit", "--allow-empty", "-m", "initial empty commit"); err != nil {
-			s.Cleanup()
-			return nil, err
-		}
+	// Unconditionally add and commit with --allow-empty to avoid "nothing to commit"
+	// errors when there are no base files or only the .git directory exists.
+	if err := s.runGit(ctx, "add", "."); err != nil {
+		s.Cleanup()
+		return nil, err
+	}
+	if err := s.runGit(ctx, "commit", "--allow-empty", "-m", "base state"); err != nil {
+		s.Cleanup()
+		return nil, err
 	}
 
 	// 4. Apply diff
@@ -109,7 +101,8 @@ func NewSandbox(ctx context.Context, baseState string, diff string) (*Sandbox, e
 			s.Cleanup()
 			return nil, err
 		}
-		if err := s.runGit(ctx, "commit", "-m", "applied diff"); err != nil {
+		// Use --allow-empty in case the diff is functionally empty or ignored.
+		if err := s.runGit(ctx, "commit", "--allow-empty", "-m", "applied diff"); err != nil {
 			s.Cleanup()
 			return nil, err
 		}
@@ -188,7 +181,9 @@ func extractTarGz(gzipPath, dst string) error {
 				f.Close()
 				return err
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
