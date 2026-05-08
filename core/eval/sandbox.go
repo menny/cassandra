@@ -166,7 +166,7 @@ func extractTarGz(gzipPath, dst string) error {
 
 		// Security: Prevent "Tar Slip" (directory traversal)
 		rel, err := filepath.Rel(dst, target)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 			return fmt.Errorf("tar slip detected: %s", header.Name)
 		}
 
