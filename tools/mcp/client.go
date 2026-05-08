@@ -85,10 +85,21 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		// main application context is canceled.
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 
-		// Security: Unconditionally initialize Env to an empty slice to prevent
-		// silent inheritance of the host's full process environment.
-		// If Env is provided, ONLY those variables will be used.
-		cmd.Env = make([]string, 0, len(cfg.Env))
+		// Ensure the command runs in the workspace root or the process's current CWD.
+		if cwd, err := os.Getwd(); err == nil {
+			cmd.Dir = cwd
+		}
+
+		// Security: Prevent secret leakage by not inheriting the full host environment.
+		// However, we MUST inherit essential system variables for the command to execute.
+		essential := []string{"PATH", "HOME", "USER", "TMPDIR"}
+		for _, e := range essential {
+			if val, ok := os.LookupEnv(e); ok {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", e, val))
+			}
+		}
+
+		// Add explicitly configured environment variables.
 		for k, v := range cfg.Env {
 			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 		}
