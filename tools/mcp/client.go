@@ -85,7 +85,9 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		// main application context is canceled.
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
 		if cfg.Env != nil {
-			cmd.Env = os.Environ()
+			// Security: If Env is provided, ONLY use those variables.
+			// Do NOT inherit from os.Environ() to prevent secret leakage.
+			cmd.Env = make([]string, 0, len(cfg.Env))
 			for k, v := range cfg.Env {
 				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 			}
