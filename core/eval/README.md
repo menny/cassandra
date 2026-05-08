@@ -48,7 +48,7 @@ The `eval` CLI is the primary entry point for batch processing. It leverages the
 
 ```bash
 bazel run //cmd/eval -- \
-  --subject-config cassandra.toml \
+  --subject-config "$PWD/cassandra.toml" \
   --subject-api-key $GOOGLE_API_KEY \
   --judge-model gemini-1.5-pro \
   --output results.json

@@ -62,6 +62,13 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return err
 	}
 
+	// Move to the intended working directory if executing via bazel
+	if workspaceDir := os.Getenv("BUILD_WORKSPACE_DIRECTORY"); workspaceDir != "" {
+		if err := os.Chdir(workspaceDir); err != nil {
+			return fmt.Errorf("failed to change directory to %s: %w", workspaceDir, err)
+		}
+	}
+
 	// 1. Load Subject Config
 	subjectCfg, err := config.Load(subjectConfigPath)
 	if err != nil {
