@@ -282,7 +282,9 @@ Cassandra supports the [Model Context Protocol (MCP)](https://modelcontextprotoc
 
 #### Configuration (`mcp.json`)
 
-Create an `mcp.json` file to define your MCP servers. Cassandra supports both local `stdio` servers and remote `sse` (HTTP) servers. Environment variables in the configuration are automatically expanded using `os.ExpandEnv`.
+Create an `mcp.json` file to define your MCP servers. Cassandra supports both local `stdio` servers and remote `sse` (HTTP) servers.
+
+Environment variables in the configuration are automatically expanded using `os.ExpandEnv`. Ensure you declare each required environment variable required by the MCP - only declared environments are passed to the MCP server to prevent leaking secrets.
 
 ```json
 {

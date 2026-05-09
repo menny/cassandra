@@ -14,7 +14,7 @@ import (
 
 func TestLocalReadFile(t *testing.T) {
 	r := NewRegistry()
-	registerLocalReadFile(r)
+	registerLocalReadFile(r, "")
 
 	// Create a temp file with multiple lines
 	tmpDir := t.TempDir()
@@ -130,10 +130,10 @@ func TestLocalReadFile(t *testing.T) {
 }
 
 func TestLocalGlobFiles(t *testing.T) {
-	r := NewRegistry()
-	registerLocalGlobFiles(r)
-
 	tmpDir := t.TempDir()
+	r := NewRegistry()
+	registerLocalGlobFiles(r, tmpDir)
+
 	err := os.WriteFile(filepath.Join(tmpDir, "file1.go"), []byte(""), 0o644)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestLocalGlobFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args, _ := json.Marshal(map[string]any{"directory": tmpDir, "query": ".go"})
+	args, _ := json.Marshal(map[string]any{"directory": ".", "query": ".go"})
 	result, err := r.HandleCall(context.Background(), llm.ToolCall{
 		Name:      "glob_files",
 		Arguments: string(args),
@@ -162,7 +162,7 @@ func TestLocalGlobFiles(t *testing.T) {
 
 func TestLocalReadFile_Errors(t *testing.T) {
 	r := NewRegistry()
-	registerLocalReadFile(r)
+	registerLocalReadFile(r, "")
 
 	t.Run("missing file", func(t *testing.T) {
 		_, err := r.HandleCall(context.Background(), llm.ToolCall{
@@ -187,7 +187,7 @@ func TestLocalReadFile_Errors(t *testing.T) {
 
 func TestLocalGlobFiles_Errors(t *testing.T) {
 	r := NewRegistry()
-	registerLocalGlobFiles(r)
+	registerLocalGlobFiles(r, "")
 
 	t.Run("invalid directory", func(t *testing.T) {
 		// filepath.WalkDir doesn't necessarily error if the root doesn't exist depending on OS,
@@ -203,10 +203,10 @@ func TestLocalGlobFiles_Errors(t *testing.T) {
 }
 
 func TestLocalGrepFiles(t *testing.T) {
-	r := NewRegistry()
-	registerLocalGrepFiles(r, DefaultLockFiles)
-
 	tmpDir := t.TempDir()
+	r := NewRegistry()
+	registerLocalGrepFiles(r, tmpDir, DefaultLockFiles)
+
 	setupGitRepo(t, tmpDir)
 
 	// Create a file with some content
@@ -216,9 +216,6 @@ func TestLocalGrepFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGitCmd(t, tmpDir, "add", "grep_test.txt")
-
-	// We need to change the working directory for git grep to work in the temp repo
-	t.Chdir(tmpDir)
 
 	t.Run("basic grep", func(t *testing.T) {
 		args, _ := json.Marshal(map[string]any{"query": "Cassandra"})

@@ -84,12 +84,26 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		// Use CommandContext to ensure that the subprocess is reaped if the
 		// main application context is canceled.
 		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
-		if cfg.Env != nil {
-			cmd.Env = os.Environ()
-			for k, v := range cfg.Env {
-				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+
+		// Ensure the command runs in the workspace root or the process's current CWD.
+		if cwd, err := os.Getwd(); err == nil {
+			cmd.Dir = cwd
+		}
+
+		// Security: Prevent secret leakage by not inheriting the full host environment.
+		// However, we MUST inherit essential system variables for the command to execute.
+		essential := []string{"PATH", "HOME", "USER", "TMPDIR"}
+		for _, e := range essential {
+			if val, ok := os.LookupEnv(e); ok {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", e, val))
 			}
 		}
+
+		// Add explicitly configured environment variables.
+		for k, v := range cfg.Env {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		}
+
 		transport = &mcp.CommandTransport{
 			Command: cmd,
 		}

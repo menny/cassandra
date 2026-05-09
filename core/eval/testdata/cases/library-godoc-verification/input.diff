@@ -1,0 +1,15 @@
+diff --git a/app.go b/app.go
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/app.go
+@@ -0,0 +1,9 @@
++package main
++
++import "lib/db"
++
++func RunQuery(conn *db.DB) error {
++	// BUG: ExecuteAsync does not exist in the 'db' package.
++	// The agent should verify this using tools.
++	return conn.ExecuteAsync("SELECT 1")
++}

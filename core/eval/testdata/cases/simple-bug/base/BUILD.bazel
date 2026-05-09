@@ -1,0 +1,8 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "base",
+    srcs = ["math.go"],
+    importpath = "github.com/menny/cassandra/core/eval/testdata/cases/simple-bug/base",
+    visibility = ["//visibility:public"],
+)

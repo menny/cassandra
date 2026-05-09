@@ -1,0 +1,20 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "eval_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/menny/cassandra/cmd/eval",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//core/config",
+        "//core/eval",
+        "//llm/factory",
+        "@com_github_spf13_pflag//:pflag",
+    ],
+)
+
+go_binary(
+    name = "eval",
+    embed = [":eval_lib"],
+    visibility = ["//visibility:public"],
+)

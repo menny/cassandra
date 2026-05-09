@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/core/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -212,19 +213,19 @@ func TestResolveGuidelinesContent(t *testing.T) {
 	require.NoError(t, os.WriteFile(localFile, []byte(localContent), 0o644))
 
 	t.Run("resolves local file path", func(t *testing.T) {
-		content, err := resolveGuidelinesContent(localFile)
+		content, err := config.ResolveGuidelinesContent(localFile)
 		require.NoError(t, err)
 		require.Equal(t, localContent, content)
 	})
 
 	t.Run("resolves named prompt from embedded library", func(t *testing.T) {
-		content, err := resolveGuidelinesContent("google")
+		content, err := config.ResolveGuidelinesContent("google")
 		require.NoError(t, err)
 		require.Contains(t, content, "Google Engineering Practices")
 	})
 
 	t.Run("fails on non-existent path and name", func(t *testing.T) {
-		_, err := resolveGuidelinesContent("non-existent-at-all")
+		_, err := config.ResolveGuidelinesContent("non-existent-at-all")
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "prompt \"non-existent-at-all\" not found in library")
 	})

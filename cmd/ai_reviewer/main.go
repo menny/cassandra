@@ -13,37 +13,11 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
-	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
-	"github.com/menny/cassandra/tools/mcp"
 )
-
-type config struct {
-	Base                         string   `mapstructure:"base"`
-	Head                         string   `mapstructure:"head"`
-	Model                        string   `mapstructure:"model"`
-	Provider                     string   `mapstructure:"provider"`
-	ProviderAPIKey               string   `mapstructure:"provider-api-key"`
-	ProviderURL                  string   `mapstructure:"provider-url"`
-	WorkingDir                   string   `mapstructure:"-"`
-	MainGuidelines               string   `mapstructure:"main-guidelines"`
-	SupplementalGuidelines       []string `mapstructure:"supplemental-guidelines"`
-	MaxTokens                    int      `mapstructure:"max-tokens"`
-	ReviewOutputFile             string   `mapstructure:"review-output-file"`
-	OutputJSONFile               string   `mapstructure:"output-json"`
-	MetricsJSONFile              string   `mapstructure:"metrics-json"`
-	ExtractionModel              string   `mapstructure:"extraction-model"`
-	MetadataJSONFile             string   `mapstructure:"metadata-json"`
-	ApprovalEvaluationPromptFile string   `mapstructure:"approval-evaluation-prompt-file"`
-	DiffFile                     string   `mapstructure:"diff-file"`
-	FilesListFile                string   `mapstructure:"files-list-file"`
-	CommitsFile                  string   `mapstructure:"commits-file"`
-	MCPConfigFile                string   `mapstructure:"mcp-config"`
-	IgnoredLockFiles             []string `mapstructure:"ignored-lock-files"`
-	ConfigFile                   string   `mapstructure:"config"`
-}
 
 func main() {
 	ctx := context.Background()
@@ -55,7 +29,7 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stderr *log.Logger) error {
-	var cfg config
+	cfg := config.NewDefaultConfig()
 
 	fs := flag.NewFlagSet("cassandra", flag.ContinueOnError)
 
@@ -107,19 +81,15 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	v := viper.New()
-	// Note: We set defaults in viper instead of pflag.
-	// We only bind flags that were explicitly set by the user (Changed).
-	// This ensures that pflag's zero-value defaults do not override
-	// values from the configuration file or viper's own defaults.
 	v.SetDefault("main-guidelines", "general")
 	v.SetDefault("base", "main")
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
+	v.SetDefault("ignored-lock-files", tools.DefaultLockFiles)
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Changed {
 			if err := v.BindPFlag(f.Name, f); err != nil {
-				// This is highly unlikely to fail as we are iterating over our own flags
 				stderr.Printf("Warning: failed to bind flag %s to viper: %v\n", f.Name, err)
 			}
 		}
@@ -143,7 +113,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 	}
 
-	// Sync flag variables with viper (precedence: CLI > Config > Defaults)
 	if err := v.Unmarshal(&cfg); err != nil {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
@@ -161,30 +130,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required arguments:\n  - %s", strings.Join(missing, "\n  - "))
-	}
-
-	// Resolve main guidelines content
-	mainGuidelinesContent, err := resolveGuidelinesContent(cfg.MainGuidelines)
-	if err != nil {
-		return fmt.Errorf("failed to resolve main guidelines: %w", err)
-	}
-
-	var supplementalGuidelinesContent []string
-	for _, sg := range cfg.SupplementalGuidelines {
-		content, err := resolveGuidelinesContent(sg)
-		if err != nil {
-			return fmt.Errorf("failed to resolve supplemental guideline %q: %w", sg, err)
-		}
-		supplementalGuidelinesContent = append(supplementalGuidelinesContent, content)
-	}
-
-	var approvalEvaluationContent string
-	if cfg.ApprovalEvaluationPromptFile != "" {
-		content, err := os.ReadFile(cfg.ApprovalEvaluationPromptFile)
-		if err != nil {
-			return fmt.Errorf("failed to read approval evaluation prompt file: %w", err)
-		}
-		approvalEvaluationContent = string(content)
 	}
 
 	stderr.Println("=== Cassandra Configuration ===")
@@ -221,48 +166,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
-	// Initialize LLM Client
-	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL)
+	// Initialize Reviewer
+	reviewer, err := core.NewReviewer(ctx, cfg, targetDir)
 	if err != nil {
-		return fmt.Errorf("failed to initialize LLM: %w", err)
+		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
-
-	// Initialize Agent and Tool Registry
-	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, cfg.IgnoredLockFiles)
-
-	if cfg.MCPConfigFile != "" {
-		mcpData, err := os.ReadFile(cfg.MCPConfigFile)
-		if err != nil {
-			return fmt.Errorf("failed to read MCP config file %s: %w", cfg.MCPConfigFile, err)
-		}
-		var mcpConfig mcp.Config
-		if err := json.Unmarshal(mcpData, &mcpConfig); err != nil {
-			return fmt.Errorf("failed to parse MCP config file %s: %w", cfg.MCPConfigFile, err)
-		}
-		mcpConfig.ExpandEnv()
-
-		mcpManager := mcp.NewManager()
-		defer func() {
-			if err := mcpManager.Close(); err != nil {
-				stderr.Printf("Warning: failed to close MCP manager: %v\n", err)
-			}
-		}()
-
-		stderr.Printf("Initializing MCP servers from %s...\n", cfg.MCPConfigFile)
-		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
-			registry.RegisterTool(def, handler)
-		}); err != nil {
-			return fmt.Errorf("failed to register MCP servers: %w", err)
-		}
-	}
-
-	agent := core.NewAgent(client, registry)
+	defer reviewer.Close()
 
 	// Ensure metrics are written even on failure
 	if cfg.MetricsJSONFile != "" {
 		defer func() {
-			metrics := agent.GetMetrics()
+			metrics := reviewer.Agent.GetMetrics()
 			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
 			if err != nil {
 				stderr.Printf("Warning: failed to marshal metrics: %v\n", err)
@@ -321,7 +235,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		stderr.Println("Fetching git commits locally...")
 		commits, err := tools.FetchGitCommits(ctx, targetDir, cfg.Base, cfg.Head)
 		if err != nil {
-			// Don't fail if commits fetching fails (e.g. shallow clone), just log it
 			stderr.Printf("Warning: failed to fetch git commits: %v\n", err)
 		} else {
 			commitsOutput = commits
@@ -358,28 +271,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 	}
 
-	// Compute max ReAct iterations based on changed files.
-	maxIterations := core.CalculateMaxIterations(len(changedFiles))
-
-	systemStable, systemDynamic, promptSummary, err := prompts.BuildSystemPrompt(targetDir, changedFiles, mainGuidelinesContent, supplementalGuidelinesContent, approvalEvaluationContent)
-	if err != nil {
-		return fmt.Errorf("failed to build system prompt: %w", err)
-	}
-
-	stderr.Println("=== Prompt Summary ===")
-	stderr.Printf("  Stable zone:  %d chars\n", promptSummary.StableLen)
-	stderr.Printf("  Dynamic zone: %d chars\n", promptSummary.DynamicLen)
-	stderr.Printf("  Total:        %d chars\n", promptSummary.StableLen+promptSummary.DynamicLen)
-	if len(promptSummary.LoadedFiles) > 0 {
-		for _, f := range promptSummary.LoadedFiles {
-			stderr.Printf("  [%s] %s\n", f.Type, f.Path)
-		}
-	} else {
-		stderr.Println("  No additional files loaded.")
-	}
-	stderr.Println("======================")
-
-	result, err := agent.RunReview(ctx, systemStable, systemDynamic, requestText, maxIterations, cfg.MaxTokens)
+	result, err := reviewer.Run(ctx, changedFiles, requestText)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
@@ -396,7 +288,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if cfg.OutputJSONFile != "" {
 		extractionPrompt := prompts.BuildExtractionPrompt()
-		structured, err := agent.ExtractStructuredReview(ctx, extractionPrompt, result, llm.StructuredConfig{
+		structured, err := reviewer.Agent.ExtractStructuredReview(ctx, extractionPrompt, result, llm.StructuredConfig{
 			ModelOverride: cfg.ExtractionModel,
 			MaxTokens:     cfg.MaxTokens,
 		})
@@ -404,7 +296,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return fmt.Errorf("structured extraction failed: %w", err)
 		}
 
-		// Populate the raw text manually to save tokens during extraction
 		structured.RawFreeText = result
 
 		jsonBytes, err := json.MarshalIndent(structured, "", "  ")
@@ -419,16 +310,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	return nil
-}
-
-func resolveGuidelinesContent(guidelinesPath string) (string, error) {
-	// Try the path as provided first
-	if content, err := os.ReadFile(guidelinesPath); err == nil {
-		return string(content), nil
-	}
-
-	// Try as a named prompt in the library (embedded)
-	return prompts.GetLibraryPrompt(guidelinesPath)
 }
 
 func formatMetadata(metadata core.PRMetadata) string {
@@ -464,7 +345,6 @@ func formatMetadata(metadata core.PRMetadata) string {
 				}
 			}
 			fmt.Fprintf(&sb, "- **%s** (%s)%s:\n", author, c.Date.Format("2006-01-02 15:04"), location)
-			// Indent body and wrap in blockquote to maintain Markdown structure
 			lines := strings.Split(c.Body, "\n")
 			for _, line := range lines {
 				fmt.Fprintf(&sb, "  > %s\n", line)
