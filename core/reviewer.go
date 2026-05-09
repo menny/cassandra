@@ -28,7 +28,7 @@ type Reviewer struct {
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
 // targetDir is the directory where local tools (like grep) will operate.
-func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (*Reviewer, error) {
+func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (r *Reviewer, err error) {
 	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize LLM: %w", err)
@@ -38,6 +38,13 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (*Re
 	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles)
 
 	var mcpManager *mcp.Manager
+	// Ensure we close the MCP manager if we encounter an error later in this function.
+	defer func() {
+		if err != nil && mcpManager != nil {
+			_ = mcpManager.Close()
+		}
+	}()
+
 	if cfg.MCPConfigFile != "" {
 		mcpData, err := os.ReadFile(cfg.MCPConfigFile)
 		if err != nil {
@@ -53,7 +60,6 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (*Re
 		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
-			mcpManager.Close()
 			return nil, fmt.Errorf("failed to register MCP servers: %w", err)
 		}
 	}
