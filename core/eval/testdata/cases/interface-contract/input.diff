@@ -1,0 +1,18 @@
+diff --git a/service.go b/service.go
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/service.go
+@@ -0,0 +1,11 @@
++package user
++
++import "context"
++
++func CreateAndSave(ctx context.Context, name string) error {
++	var u *User
++	if name != "" {
++		u = &User{Name: name}
++	}
++	// BUG: SaveUser requires a non-nil User, but 'u' can be nil here.
++	return SaveUser(ctx, u)
++}

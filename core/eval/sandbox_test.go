@@ -111,7 +111,9 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 func TestExtractTarGz_Truncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	dstDir := filepath.Join(tmpDir, "dst")
-	os.MkdirAll(dstDir, 0o755)
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. Create an existing file with long content
 	targetFile := filepath.Join(dstDir, "data.txt")
@@ -141,7 +143,9 @@ func TestExtractTarGz_Truncation(t *testing.T) {
 	gw.Close()
 
 	tarPath := filepath.Join(tmpDir, "update.tar.gz")
-	os.WriteFile(tarPath, buf.Bytes(), 0o644)
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// 3. Extract
 	if err := extractTarGz(tarPath, dstDir); err != nil {

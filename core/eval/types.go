@@ -4,6 +4,13 @@ import (
 	"github.com/menny/cassandra/core"
 )
 
+// TestSuite represents a collection of evaluation cases.
+type TestSuite struct {
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Cases       []EvalCase `json:"cases"`
+}
+
 // EvalCase represents a single evaluation scenario.
 type EvalCase struct {
 	ID          string `json:"id"`
@@ -11,14 +18,19 @@ type EvalCase struct {
 	Description string `json:"description"`
 	// Rubric is the specific criteria the Judge should use to score the review.
 	Rubric string `json:"rubric"`
-	// BaseSource is the path to the directory or .tar.gz containing the "before" state.
-	// This is relative to the fixture directory.
-	BaseSource string `json:"base_source"`
-	// DiffPath is the path to the diff file (input.diff).
-	// This is relative to the fixture directory.
-	DiffPath string `json:"diff_path"`
 
-	// Loaded data
+	// FixturePath is the relative path to the directory containing input.diff and base state.
+	// This is resolved relative to the suite manifest file.
+	FixturePath string `json:"fixture_path"`
+
+	// BaseSource optionally overrides the default 'base.tar.gz' or 'base/' directory
+	// resolution inside FixturePath.
+	BaseSource string `json:"base_source,omitempty"`
+
+	// DiffPath optionally overrides the default 'input.diff' inside FixturePath.
+	DiffPath string `json:"diff_path,omitempty"`
+
+	// Loaded data (not in manifest)
 	Diff string `json:"-"`
 }
 
@@ -26,7 +38,7 @@ type EvalCase struct {
 type EvaluationResult struct {
 	Score     int      `json:"score"`      // 1-5 Scale
 	Rationale string   `json:"rationale"`  // Detailed explanation of the score
-	Findings  []string `json:"findings"`   // Specific observations (e.g., "Missed a bug in X", "Great catch on Y")
+	Findings  []string `json:"findings"`   // Specific observations
 	MetRubric bool     `json:"met_rubric"` // Whether the review satisfied the core rubric
 }
 

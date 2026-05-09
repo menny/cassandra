@@ -1,5 +1,0 @@
-{
-  "name": "Simple Bug Fix",
-  "description": "Tests if the agent can find a simple logic bug in a Go function.",
-  "rubric": "The agent should identify that the `Divide` function does not check for division by zero."
-}

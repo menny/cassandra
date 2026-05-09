@@ -1,0 +1,26 @@
+--- a/server.go
++++ b/server.go
+@@ -1,6 +1,8 @@
+ package main
+ 
+ import (
++	"os"
++	"path/filepath"
+ 	"net/http"
+ )
+ 
+@@ -8,5 +10,13 @@
+ 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+ 		w.Write([]byte("OK"))
+ 	})
++
++	http.HandleFunc("/file", func(w http.ResponseWriter, r *http.Request) {
++		name := r.URL.Query().Get("name")
++		// VULNERABILITY: Path traversal. Missing filepath.Clean or boundary check.
++		path := filepath.Join("/var/www/static", name)
++		data, _ := os.ReadFile(path)
++		w.Write(data)
++	})
++
+ 	http.ListenAndServe(":8080", nil)
+ }

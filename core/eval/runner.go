@@ -93,64 +93,63 @@ func (r *Runner) evaluate(ctx context.Context, c EvalCase, review string) (*Eval
 	return &result, nil
 }
 
-// LoadCases loads all evaluation cases from the given directory.
-func LoadCases(fixturesDir string) ([]EvalCase, error) {
-	entries, err := os.ReadDir(fixturesDir)
+// LoadSuite loads a test suite from a JSON manifest file.
+func LoadSuite(suitePath string) (*TestSuite, error) {
+	data, err := os.ReadFile(suitePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read suite file: %w", err)
 	}
 
-	var cases []EvalCase
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	var suite TestSuite
+	if err := json.Unmarshal(data, &suite); err != nil {
+		return nil, fmt.Errorf("failed to parse suite file %s: %w", suitePath, err)
+	}
+
+	suiteDir := filepath.Dir(suitePath)
+
+	for i := range suite.Cases {
+		c := &suite.Cases[i]
+		if c.FixturePath == "" {
+			return nil, fmt.Errorf("case %s missing fixture_path", c.ID)
 		}
 
-		caseDir := filepath.Join(fixturesDir, entry.Name())
-		metadataPath := filepath.Join(caseDir, "metadata.json")
-		b, err := os.ReadFile(metadataPath)
-		if err != nil {
-			continue // Skip directories without metadata.json
+		// Resolve physical directory containing files
+		absFixturePath := c.FixturePath
+		if !filepath.IsAbs(absFixturePath) {
+			absFixturePath = filepath.Join(suiteDir, absFixturePath)
 		}
 
-		var c EvalCase
-		if err := json.Unmarshal(b, &c); err != nil {
-			return nil, fmt.Errorf("failed to parse %s: %w", metadataPath, err)
+		// 1. Load Diff
+		diffName := c.DiffPath
+		if diffName == "" {
+			diffName = "input.diff"
 		}
-
-		// Fill in defaults and absolute paths
-		if c.ID == "" {
-			c.ID = entry.Name()
-		}
-		if c.DiffPath == "" {
-			c.DiffPath = "input.diff"
-		}
-
-		diffContent, err := os.ReadFile(filepath.Join(caseDir, c.DiffPath))
+		diffContent, err := os.ReadFile(filepath.Join(absFixturePath, diffName))
 		if err != nil {
 			return nil, fmt.Errorf("failed to read diff for %s: %w", c.ID, err)
 		}
 		c.Diff = string(diffContent)
 
+		// 2. Resolve Base State
 		if c.BaseSource != "" {
-			c.BaseSource = filepath.Join(caseDir, c.BaseSource)
+			if !filepath.IsAbs(c.BaseSource) {
+				c.BaseSource = filepath.Join(absFixturePath, c.BaseSource)
+			}
 		} else {
-			// Check for default 'base.tar.gz' first, then 'base' directory
-			defaultTar := filepath.Join(caseDir, "base.tar.gz")
+			// Auto-detect base.tar.gz or base/
+			defaultTar := filepath.Join(absFixturePath, "base.tar.gz")
 			if _, err := os.Stat(defaultTar); err == nil {
 				c.BaseSource = defaultTar
 			} else {
-				defaultBase := filepath.Join(caseDir, "base")
+				defaultBase := filepath.Join(absFixturePath, "base")
 				if info, err := os.Stat(defaultBase); err == nil && info.IsDir() {
 					c.BaseSource = defaultBase
 				}
 			}
 		}
-
-		cases = append(cases, c)
 	}
 
-	return cases, nil
+	return &suite, nil
 }
 
 func extractChangedFiles(diff string) []string {

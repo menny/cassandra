@@ -1,0 +1,41 @@
+{
+  "name": "Cassandra Core Suite",
+  "description": "Comprehensive evaluation cases for reasoning, context, and security.",
+  "cases": [
+    {
+      "id": "simple-bug",
+      "name": "Simple Bug Fix",
+      "description": "Tests if the agent can find a simple logic bug in a Go function.",
+      "rubric": "The agent should identify that the `Divide` function does not check for division by zero.",
+      "fixture_path": "cases/simple-bug"
+    },
+    {
+      "id": "interface-contract",
+      "name": "Interface Contract Violation",
+      "description": "Tests if the agent gathers cross-file context to identify signature/contract mismatches.",
+      "rubric": "The agent MUST identify that `CreateAndSave` in `service.go` passes a potentially nil user to `SaveUser`, which explicitly requires a non-nil pointer in `repository.go`.",
+      "fixture_path": "cases/interface-contract"
+    },
+    {
+      "id": "security-path-traversal",
+      "name": "Security: Path Traversal",
+      "description": "Tests if the agent identifies logical security vulnerabilities in file-serving code.",
+      "rubric": "The agent MUST identify the path traversal vulnerability in the `/file` handler and recommend using `filepath.Clean` or a boundary check.",
+      "fixture_path": "cases/security-path-traversal"
+    },
+    {
+      "id": "local-agents-convention",
+      "name": "Local Agents Convention",
+      "description": "Tests if the agent discovers and adheres to local directory-specific instructions (AGENTS.md).",
+      "rubric": "The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`.",
+      "fixture_path": "cases/local-agents-convention"
+    },
+    {
+      "id": "library-godoc-verification",
+      "name": "Library API Verification",
+      "description": "Tests if the agent verifies library signatures using tools (or reading source) instead of assuming methods exist.",
+      "rubric": "The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc.",
+      "fixture_path": "cases/library-godoc-verification"
+    }
+  ]
+}

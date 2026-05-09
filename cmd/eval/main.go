@@ -38,7 +38,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		judgeAPIKey   string
 		judgeURL      string
 
-		casesDir   string
+		suitePath  string
 		outputFile string
 	)
 
@@ -52,7 +52,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&judgeAPIKey, "judge-api-key", "", "Judge API key")
 	fs.StringVar(&judgeURL, "judge-url", "", "Judge API URL")
 
-	fs.StringVar(&casesDir, "cases-dir", "core/eval/testdata/cases", "Directory containing evaluation cases")
+	fs.StringVar(&suitePath, "suite", "core/eval/testdata/evaluations.json", "Path to the evaluation suite manifest (JSON)")
 	fs.StringVar(&outputFile, "output", "", "Path to write the evaluation results (JSON)")
 
 	if err := fs.Parse(args); err != nil {
@@ -103,10 +103,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to init judge: %w", err)
 	}
 
-	// 3. Run Evaluations
-	cases, err := eval.LoadCases(casesDir)
+	// 3. Load Evaluation Suite
+	suite, err := eval.LoadSuite(suitePath)
 	if err != nil {
-		return fmt.Errorf("failed to load cases from %s: %w", casesDir, err)
+		return fmt.Errorf("failed to load suite from %s: %w", suitePath, err)
 	}
 
 	runner := &eval.Runner{
@@ -114,8 +114,14 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		Judge:         judge,
 	}
 
+	stderr.Printf("Running Suite: %s\n", suite.Name)
+	if suite.Description != "" {
+		stderr.Printf("Description: %s\n", suite.Description)
+	}
+	stderr.Println("===============================")
+
 	var results []eval.CaseResult
-	for _, c := range cases {
+	for _, c := range suite.Cases {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
