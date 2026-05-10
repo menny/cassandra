@@ -19,13 +19,6 @@ This configuration uses the standard Cassandra settings without any supplemental
 
 <!-- EVAL_RESULTS_END:baseline -->
 
-## MCP-Enhanced Evaluation
-
-In this run, we enabled the `godoc` MCP server to see if the agent can better verify library signatures and API contracts.
-
-<!-- EVAL_RESULTS_START:mcp-godoc -->
-<!-- EVAL_RESULTS_END:mcp-godoc -->
-
 ## Evaluation Methodology
 
 The evaluations are performed using an **LLM-as-a-Judge** strategy. Each evaluation case consists of:
