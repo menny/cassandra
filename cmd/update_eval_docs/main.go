@@ -101,7 +101,10 @@ func main() {
 	endIndex := strings.Index(content, endMarker)
 
 	if startIndex == -1 || endIndex == -1 {
-		log.Fatalf("could not find markers for ID %s in %s", id, evaluationsFile)
+		log.Fatalf("could not find markers for ID %s in %s. Please ensure both <!-- EVAL_RESULTS_START:%s --> and <!-- EVAL_RESULTS_END:%s --> are present.", id, evaluationsFile, id, id)
+	}
+	if startIndex >= endIndex {
+		log.Fatalf("invalid marker positions for ID %s in %s: start marker must appear before end marker", id, evaluationsFile)
 	}
 
 	finalContent := content[:startIndex+len(startMarker)] + "\n" + newContent + content[endIndex:]
@@ -110,5 +113,5 @@ func main() {
 		log.Fatalf("failed to write evaluations file: %v", err)
 	}
 
-	fmt.Printf("Successfully updated %s section '%s' with results from %s\n", evaluationsFile, id, resultsPath)
+	fmt.Fprintf(os.Stderr, "Successfully updated %s section '%s' with results from %s\n", evaluationsFile, id, resultsPath)
 }
