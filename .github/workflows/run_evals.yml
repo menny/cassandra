@@ -14,7 +14,6 @@ on:
         description: 'Number of evaluation runs'
         required: true
         default: '5'
-
 jobs:
   evaluate:
     name: Run and Report
@@ -25,14 +24,12 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-
       - name: Run Evaluations
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -45,7 +42,6 @@ jobs:
             "gemini-3.1-flash-lite" \
             "$GEMINI_API_KEY" \
             "${{ github.event.inputs.repeats }}"
-
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:

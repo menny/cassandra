@@ -1,0 +1,157 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the missing division-by-zero check, explained why it is critical (panic risk), and suggested a professional and idiomatic Go solution (returning an error).",
+      "findings": [
+        "Identified the missing zero check correctly.",
+        "Provided a clear explanation of the runtime risk (panic).",
+        "Suggested a robust Go-idiomatic fix (returning an error).",
+        "Maintained a professional and constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3053,
+        "output": 102,
+        "thinking": 524,
+        "cached": 0,
+        "total_input": 3053,
+        "total_output": 626
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the core issue specified in the rubric, correctly pinpointed the line number, explained the potential impact, and suggested a clear, professional path for remediation.",
+      "findings": [
+        "Accurately identified the null pointer dereference risk in service.go.",
+        "Properly acknowledged the existing code comment while calling out the structural issue.",
+        "Provided a clear, constructive suggestion to return an error instead of continuing with a nil pointer.",
+        "Professional and helpful tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3166,
+        "output": 117,
+        "thinking": 654,
+        "cached": 0,
+        "total_input": 3166,
+        "total_output": 771
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The reviewer correctly identified the critical path traversal vulnerability as requested by the rubric. Furthermore, the review provided additional, highly relevant security and maintenance feedback (error handling, memory safety, server timeouts) that goes beyond the prompt but is essential for production-grade code. The feedback is professional, actionable, and accurate.",
+      "findings": [
+        "Correctly identified the path traversal vulnerability in /file handler.",
+        "Provided a clear and correct recommendation for addressing the vulnerability.",
+        "Identified poor error handling practices regarding os.ReadFile.",
+        "Suggested more robust alternatives like http.ServeFile to prevent memory exhaustion.",
+        "Added valuable infrastructure security feedback regarding HTTP timeouts."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3234,
+        "output": 468,
+        "thinking": 3067,
+        "cached": 0,
+        "total_input": 3234,
+        "total_output": 3535
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review successfully identified the violation of the project's internal coding standard (using raw db.Query instead of SafeQuery) as specified in the rubric. Additionally, the reviewer proactively identified a functional bug regarding the empty query result processing, which demonstrates high-quality code review standards.",
+      "findings": [
+        "Correctly identified the violation of internal convention regarding SafeQuery.",
+        "Identified a critical functional bug where the query results are not being read.",
+        "Provided actionable and constructive feedback for the developer.",
+        "The tone is professional and encourages best practices."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3253,
+        "output": 195,
+        "thinking": 3511,
+        "cached": 0,
+        "total_input": 3253,
+        "total_output": 3706
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the compilation error requested in the rubric. It explicitly mentioned that the method ExecuteAsync does not exist in the db.DB type after inspecting the package source, provided a clear path to resolution, and noted the unnecessary code comments as a secondary improvement.",
+      "findings": [
+        "Correctly identified the non-existent method call as a compilation error.",
+        "Correctly referenced the file path to verify the DB implementation.",
+        "Provided actionable advice to fix the issue.",
+        "Identified minor clean-up tasks regarding code comments."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 10716,
+        "output": 236,
+        "thinking": 1686,
+        "cached": 0,
+        "total_input": 10716,
+        "total_output": 1922
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "glob_files": 1,
+          "godoc_package": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]

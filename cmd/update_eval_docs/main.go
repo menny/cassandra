@@ -88,7 +88,7 @@ func main() {
 		count := 0
 		hasError := false
 
-		for i, res := range results {
+		for _, res := range results {
 			if res.Error != "" {
 				hasError = true
 				continue
