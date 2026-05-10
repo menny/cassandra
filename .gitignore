@@ -29,6 +29,7 @@ bazel-testlogs
 
 # temp stuff
 scratch/
+core/eval/results/
 
 # Conductor
 conductor/plan.md

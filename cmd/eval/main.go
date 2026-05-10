@@ -84,18 +84,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	// 2. Setup Judge
-	// Default judge to subject if not specified
-	if judgeProvider == "" {
-		judgeProvider = subjectCfg.Provider
-	}
-	if judgeModel == "" {
-		judgeModel = subjectCfg.Model
-	}
-	if judgeAPIKey == "" {
-		judgeAPIKey = subjectCfg.ProviderAPIKey
-	}
-	if judgeURL == "" {
-		judgeURL = subjectCfg.ProviderURL
+	if judgeProvider == "" || judgeModel == "" || judgeAPIKey == "" {
+		return fmt.Errorf("judge configuration is incomplete (judge-provider, judge-model, and judge-api-key are required)")
 	}
 
 	judge, err := factory.New(ctx, judgeProvider, judgeModel, judgeAPIKey, judgeURL)
