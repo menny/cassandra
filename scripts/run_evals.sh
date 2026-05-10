@@ -49,15 +49,15 @@ shift
 REPEATS=${1:-1}
 
 RESULTS_DIR="core/eval/results"
-CONFIG_NAME=$(basename "$CONFIG_PATH" .toml)
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+TIMESTAMP=$(date -u +%Y%m%d_%H%M%SZ)
 
 mkdir -p "$RESULTS_DIR"
 
 RESULTS_FILES=()
 
 for ((i=1; i<=REPEATS; i++)); do
-  RESULTS_FILE="$RESULTS_DIR/${CONFIG_NAME}_${TIMESTAMP}_run${i}.json"
+  # Filename format: <ID>_<TIMESTAMP>_run<i].json
+  RESULTS_FILE="$RESULTS_DIR/${ID}_${TIMESTAMP}_run${i}.json"
   echo "===> [Run $i/$REPEATS] Running evaluations for $CONFIG_PATH (ID: $ID)..."
   bazel run //cmd/eval -- \
     --subject-config "$CONFIG_PATH" \
