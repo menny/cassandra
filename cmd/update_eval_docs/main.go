@@ -96,39 +96,33 @@ func main() {
 
 		var minScore, maxScore int
 		var sum int
-		count := 0
-		hasError := false
+		count := len(results)
 
-		for _, res := range results {
-			if res.Error != "" {
-				hasError = true
-				continue
+		for i, res := range results {
+			score := 0
+			if res.Error == "" {
+				score = res.Subject.Score
 			}
-			score := res.Subject.Score
-			if count == 0 || score < minScore {
+
+			if i == 0 || score < minScore {
 				minScore = score
 			}
-			if count == 0 || score > maxScore {
+			if i == 0 || score > maxScore {
 				maxScore = score
 			}
 			sum += score
-			count++
 		}
 
 		rubric := strings.ReplaceAll(c.Rubric, "\n", " ")
 		rubric = strings.ReplaceAll(rubric, "|", "\\|")
 
-		if hasError && count == 0 {
-			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | ERROR | ERROR | ERROR |\n", c.ID, c.Name, rubric))
-		} else {
-			mean := float64(sum) / float64(count)
-			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %d | %d | %.2f |\n", c.ID, c.Name, rubric, minScore, maxScore, mean))
+		mean := float64(sum) / float64(count)
+		sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %d | %d | %.2f |\n", c.ID, c.Name, rubric, minScore, maxScore, mean))
 
-			totalMin += float64(minScore)
-			totalMax += float64(maxScore)
-			totalMean += mean
-			caseCount++
-		}
+		totalMin += float64(minScore)
+		totalMax += float64(maxScore)
+		totalMean += mean
+		caseCount++
 	}
 
 	if caseCount > 0 {

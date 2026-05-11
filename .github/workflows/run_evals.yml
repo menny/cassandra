@@ -39,7 +39,7 @@ jobs:
         run: |
           ./scripts/run_evals.sh \
             "$EVAL_ID" \
-            "$GITHUB_WORKSPACE/$EVAL_CONFIG" \
+            "$EVAL_CONFIG" \
             "$GEMINI_API_KEY" \
             "google" \
             "gemini-3.1-flash-lite" \
