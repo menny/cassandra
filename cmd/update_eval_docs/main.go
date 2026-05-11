@@ -17,6 +17,8 @@ func main() {
 		configPath      string
 		suitePath       string
 		id              string
+		sha             string
+		repo            string
 		evaluationsFile string
 	)
 
@@ -27,6 +29,8 @@ func main() {
 	flag.StringVar(&configPath, "config", "cassandra.toml", "Path to the subject's cassandra.toml")
 	flag.StringVar(&suitePath, "suite", "core/eval/testdata/evaluations.json", "Path to the evaluation suite manifest (JSON)")
 	flag.StringVar(&id, "id", "", "The ID of the injection site in EVALUATIONS.md")
+	flag.StringVar(&sha, "sha", "", "The commit SHA being evaluated")
+	flag.StringVar(&repo, "repo", "menny/cassandra", "The GitHub repository (owner/repo)")
 	flag.StringVar(&evaluationsFile, "md", "core/eval/EVALUATIONS.md", "Path to the EVALUATIONS.md file")
 	flag.Parse()
 
@@ -69,6 +73,13 @@ func main() {
 	// 3. Generate Markdown
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("**Config**: `%s`  \n", configPath))
+	if sha != "" {
+		displaySha := sha
+		if len(sha) > 7 {
+			displaySha = sha[:7]
+		}
+		sb.WriteString(fmt.Sprintf("**Commit**: [`%s`](https://github.com/%s/commit/%s)  \n", displaySha, repo, sha))
+	}
 	sb.WriteString(fmt.Sprintf("**Runs**: %d  \n\n", len(resultsPaths)))
 
 	sb.WriteString("| Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |\n")

@@ -48,6 +48,9 @@ shift
 
 REPEATS=${1:-1}
 
+# Capture current commit SHA for reporting
+CURRENT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+
 RESULTS_DIR="core/eval/results"
 TIMESTAMP=$(date -u +%Y%m%d_%H%M%SZ)
 
@@ -73,6 +76,7 @@ echo "===> Updating EVALUATIONS.md with ${#RESULTS_FILES[@]} results..."
 bazel run //cmd/update_eval_docs -- \
   "${RESULTS_FILES[@]}" \
   --config "$CONFIG_PATH" \
-  --id "$ID"
+  --id "$ID" \
+  --sha "$CURRENT_SHA"
 
 echo "===> Done! EVALUATIONS.md updated."
