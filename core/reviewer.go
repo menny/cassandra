@@ -45,17 +45,29 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (r *
 		}
 	}()
 
+	var mcpConfig mcp.Config
 	if cfg.MCPConfigFile != "" {
 		mcpData, err := os.ReadFile(cfg.MCPConfigFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read MCP config file %s: %w", cfg.MCPConfigFile, err)
 		}
-		var mcpConfig mcp.Config
 		if err := json.Unmarshal(mcpData, &mcpConfig); err != nil {
 			return nil, fmt.Errorf("failed to parse MCP config file %s: %w", cfg.MCPConfigFile, err)
 		}
-		mcpConfig.ExpandEnv()
+	}
 
+	if cfg.AllowURLFetch {
+		if mcpConfig.MCPServers == nil {
+			mcpConfig.MCPServers = make(map[string]mcp.ServerConfig)
+		}
+		mcpConfig.MCPServers["mcp-server-fetch"] = mcp.ServerConfig{
+			Command: "uvx",
+			Args:    []string{"mcp-server-fetch"},
+		}
+	}
+
+	if len(mcpConfig.MCPServers) > 0 {
+		mcpConfig.ExpandEnv()
 		mcpManager = mcp.NewManager()
 		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)

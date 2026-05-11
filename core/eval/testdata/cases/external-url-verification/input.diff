@@ -1,0 +1,17 @@
+diff --git a/api.go b/api.go
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/api.go
+@@ -0,0 +1,11 @@
++package main
++
++import "fmt"
++
++func main() {
++	// We are using the new Gemini API.
++	// According to the documentation at https://ai.google.dev/api/rest/v1beta/models/generateContent
++	// the 'model' parameter should be a string.
++	fmt.Println("Calling Gemini API...")
++	// BUG: The user is assuming the API endpoint is /v1/models but the doc says /v1beta/models.
++}

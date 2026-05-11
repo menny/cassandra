@@ -66,6 +66,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--output-json` | Path to a file where the structured JSON review will be written | |
 | `--metrics-json` | Path to a file where the session metrics (tokens, tool calls, iterations) will be written | |
 | `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | |
+| `--allow-url-fetch` | Enable the mcp-server-fetch tool (requires `uvx` to be installed) | `false` |
 | `--ignored-lock-files` | Comma-separated list of lock files to ignore in diffs (overrides default) | (many) |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | |
 | `--max-tokens` | Max tokens for the LLM response | `8192` |
@@ -93,6 +94,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `submit_review_action` | Whether to allow formal "approve/reject" actions or force neutral "comment" | `false` | No |
 | `delete_old_comments` | Whether to delete previous bot-authored inline comments before posting a new review | `true` | No |
 | `mcp_config` | Path to an `mcp.json` file configuring custom tools for the reviewer | | No |
+| `allow_url_fetch` | Whether to allow the AI to fetch external URLs using the mcp-server-fetch tool (requires `uvx` to be installed). | `false` | No |
 | `ignored_lock_files` | Multiline string where each line is a lock file to ignore (overrides default) | | No |
 
 ## GitHub Action Outputs

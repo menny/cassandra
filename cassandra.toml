@@ -4,6 +4,7 @@
 
 provider = "google"
 model = "gemini-3.1-pro-preview"
+allow-url-fetch = true
 
 # Path to an MCP configuration file.
 mcp-config = "mcp.json"

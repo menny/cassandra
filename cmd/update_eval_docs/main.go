@@ -72,15 +72,15 @@ func main() {
 
 	// 3. Generate Markdown
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**Config**: `%s`  \n", configPath))
+	sb.WriteString(fmt.Sprintf("**Config**: `%s`\n", configPath))
 	if sha != "" {
 		displaySha := sha
 		if len(sha) > 7 {
 			displaySha = sha[:7]
 		}
-		sb.WriteString(fmt.Sprintf("**Commit**: [`%s`](https://github.com/%s/commit/%s)  \n", displaySha, repo, sha))
+		sb.WriteString(fmt.Sprintf("**Commit**: [`%s`](https://github.com/%s/commit/%s)\n", displaySha, repo, sha))
 	}
-	sb.WriteString(fmt.Sprintf("**Runs**: %d  \n\n", len(resultsPaths)))
+	sb.WriteString("\n")
 
 	sb.WriteString("| Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |\n")
 	sb.WriteString("| --- | --- | --- | --- | --- | --- |\n")
