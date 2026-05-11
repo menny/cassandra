@@ -33,15 +33,18 @@ jobs:
       - name: Run Evaluations
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EVAL_ID: ${{ github.event.inputs.id }}
+          EVAL_CONFIG: ${{ github.event.inputs.config }}
+          EVAL_REPEATS: ${{ github.event.inputs.repeats }}
         run: |
           ./scripts/run_evals.sh \
-            "${{ github.event.inputs.id }}" \
-            "$GITHUB_WORKSPACE/${{ github.event.inputs.config }}" \
+            "$EVAL_ID" \
+            "$GITHUB_WORKSPACE/$EVAL_CONFIG" \
             "$GEMINI_API_KEY" \
             "google" \
             "gemini-3.1-flash-lite" \
             "$GEMINI_API_KEY" \
-            "${{ github.event.inputs.repeats }}"
+            "$EVAL_REPEATS"
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
