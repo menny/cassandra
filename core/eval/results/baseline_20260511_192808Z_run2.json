@@ -1,0 +1,121 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical issue (division by zero) as required by the rubric. It provided a clear explanation of the potential impact (runtime panic) and suggested an industry-standard solution (returning an error). The tone is professional and constructive.",
+      "findings": [
+        "Identified the missing zero-check as a major risk.",
+        "Correctly identified that the operation will cause a runtime panic.",
+        "Suggested a pragmatic refactoring path (updating the function signature to include error return).",
+        "Balanced positive reinforcement for the logic change with necessary safety concerns."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3271,
+        "output": 102,
+        "thinking": 710,
+        "cached": 0,
+        "total_input": 3271,
+        "total_output": 812
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the nil pointer dereference vulnerability mentioned in the rubric. It explains the risk clearly and provides a constructive recommendation for how to resolve it by validating input early.",
+      "findings": [
+        "Correctly identified the nil pointer issue in service.go",
+        "Proposed a clear and professional fix for input validation",
+        "The review was concise and accurate"
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3384,
+        "output": 111,
+        "thinking": 1046,
+        "cached": 0,
+        "total_input": 3384,
+        "total_output": 1157
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability as requested by the rubric. It also provided excellent supplementary feedback regarding error handling and server lifecycle management, which improves the overall quality of the code beyond the minimum requirements.",
+      "findings": [
+        "Identified the path traversal vulnerability in the /file handler.",
+        "Suggested robust mitigation strategies (boundary check or using standard library alternatives like http.ServeFile).",
+        "Pointed out dangerous error suppression with os.ReadFile.",
+        "Correctly identified an improvement for server startup error handling."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3452,
+        "output": 266,
+        "thinking": 3540,
+        "cached": 0,
+        "total_input": 3452,
+        "total_output": 3806
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the violation of the project's internal coding standard (using SafeQuery instead of raw db.Query) as required by the rubric. Furthermore, it caught an additional functional logic error regarding the failure to scan rows, demonstrating high attention to detail and professional, constructive feedback.",
+      "findings": [
+        "Correctly identified the mandatory use of the SafeQuery wrapper.",
+        "Detected a critical functional bug where the query results were ignored.",
+        "Provided actionable advice for code cleanup.",
+        "Maintained a professional and constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3471,
+        "output": 234,
+        "thinking": 1742,
+        "cached": 0,
+        "total_input": 3471,
+        "total_output": 1976
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]

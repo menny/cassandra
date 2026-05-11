@@ -7,8 +7,8 @@ This document tracks the performance of various Cassandra configurations against
 This configuration uses the standard Cassandra settings without any supplemental guidelines or MCP servers. It represents the "out-of-the-box" experience.
 
 <!-- EVAL_RESULTS_START:baseline -->
-**Config**: `cassandra.toml`  
-**Commit**: [`93cb7e5`](https://github.com/menny/cassandra/commit/93cb7e55c32ebc4f988220ae3060864206c80821)  
+**Config**: `cassandra.toml`
+**Commit**: [`ccc39bb`](https://github.com/menny/cassandra/commit/ccc39bb27ecd2223c98aeaf7afd955a3cdd2cd6b)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
@@ -25,14 +25,14 @@ This configuration uses the standard Cassandra settings without any supplemental
 This suite evaluates the agent's ability to discover, understand, and correctly invoke tools provided via the Model Context Protocol (MCP).
 
 <!-- EVAL_RESULTS_START:baseline_mcp_invoking -->
-**Config**: `cassandra.toml`  
-**Commit**: [`93cb7e5`](https://github.com/menny/cassandra/commit/93cb7e55c32ebc4f988220ae3060864206c80821)  
+**Config**: `cassandra.toml`
+**Commit**: [`ccc39bb`](https://github.com/menny/cassandra/commit/ccc39bb27ecd2223c98aeaf7afd955a3cdd2cd6b)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
-| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 3 | 1.67 |
-| **OVERALL** | | | **3.00** | **4.00** | **3.33** |
+| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 5 | 3.67 |
+| **OVERALL** | | | **3.00** | **5.00** | **4.33** |
 
 <!-- EVAL_RESULTS_END:baseline_mcp_invoking -->
 

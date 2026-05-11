@@ -1,0 +1,121 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical flaw of missing division by zero protection. It provided a constructive solution by suggesting a signature change and explaining the impact of a runtime panic. The tone is professional and the feedback is accurate based on the provided diff.",
+      "findings": [
+        "Identified the missing division by zero check.",
+        "Explained the consequence of the missing check (runtime panic).",
+        "Suggested a concrete and standard Go idiom for error handling."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3271,
+        "output": 117,
+        "thinking": 387,
+        "cached": 0,
+        "total_input": 3271,
+        "total_output": 504
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the nil-pointer vulnerability described in the rubric. It explicitly pointed to the exact line in service.go, explained the root cause (name being empty leading to a nil pointer), and provided a constructive, actionable recommendation to fix the issue with early validation.",
+      "findings": [
+        "Correctly identified that 'u' can be nil if name is empty.",
+        "Correctly identified that passing 'u' to SaveUser leads to a potential nil pointer dereference.",
+        "Provided a clear and helpful recommendation for input validation.",
+        "Maintained a professional and encouraging tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3384,
+        "output": 149,
+        "thinking": 778,
+        "cached": 0,
+        "total_input": 3384,
+        "total_output": 927
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the path traversal vulnerability as requested by the rubric. It provided a clear explanation of why the vulnerability exists and explicitly noted the need for validation. Furthermore, it went above and beyond by identifying secondary issues such as ignored error handling in file reading and server startup, providing additional value to the developer.",
+      "findings": [
+        "Successfully identified the path traversal vulnerability in the /file handler.",
+        "Correctly highlighted the risk of using user input directly in filepath.Join.",
+        "Provided helpful feedback on error handling, which improves the overall robustness of the code.",
+        "Professional tone and constructive suggestions for improvement."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3452,
+        "output": 313,
+        "thinking": 2516,
+        "cached": 0,
+        "total_input": 3452,
+        "total_output": 2829
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review is excellent. It correctly identified the mandatory use of the 'SafeQuery' wrapper as specified in the rubric, provided a clear explanation of why it is required (observability), and also caught a significant logical error in the implementation (failing to scan the result).",
+      "findings": [
+        "Correctly identified violation of internal architecture guidelines regarding SafeQuery.",
+        "Identified a functional bug where the query result was ignored.",
+        "Provided actionable feedback for correcting the code.",
+        "Professional and constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3471,
+        "output": 178,
+        "thinking": 1125,
+        "cached": 0,
+        "total_input": 3471,
+        "total_output": 1303
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]
