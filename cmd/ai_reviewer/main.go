@@ -169,7 +169,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	stderr.Println("===============================")
 
 	// Initialize Reviewer
-	reviewer, err := core.NewReviewer(ctx, cfg, targetDir)
+	reporter := core.NewDefaultReporter(stderr.Writer())
+	reviewer, err := core.NewReviewer(ctx, cfg, targetDir, reporter)
 	if err != nil {
 		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
@@ -181,15 +182,15 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			metrics := reviewer.Agent.GetMetrics()
 			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
 			if err != nil {
-				stderr.Printf("Warning: failed to marshal metrics: %v\n", err)
+				stderr.Printf("⚠️  Failed to marshal metrics: %v\n", err)
 				return
 			}
 
 			if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
-				stderr.Printf("Warning: failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
+				stderr.Printf("⚠️  Failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
 				return
 			}
-			stderr.Printf("Session metrics written to %s\n", cfg.MetricsJSONFile)
+			stderr.Printf("📈 Metrics written to %s\n", cfg.MetricsJSONFile)
 		}()
 	}
 
@@ -219,7 +220,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			}
 		}
 	} else {
-		stderr.Println("Fetching git diff locally...")
+		stderr.Println("🌿 Fetching git diff...")
 		var err error
 		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head, cfg.IgnoredLockFiles)
 		if err != nil {
@@ -234,17 +235,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 		commitsOutput = string(commitsBytes)
 	} else {
-		stderr.Println("Fetching git commits locally...")
+		stderr.Println("🌿 Fetching git commits...")
 		commits, err := tools.FetchGitCommits(ctx, targetDir, cfg.Base, cfg.Head)
 		if err != nil {
-			stderr.Printf("Warning: failed to fetch git commits: %v\n", err)
+			stderr.Printf("⚠️  Failed to fetch git commits: %v\n", err)
 		} else {
 			commitsOutput = commits
 		}
 	}
 
 	if len(changedFiles) == 0 {
-		stderr.Println("No changes found to review.")
+		stderr.Println("⚪ No changes found.")
 		return nil
 	}
 
@@ -262,11 +263,11 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	if cfg.MetadataJSONFile != "" {
 		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
 		if err != nil {
-			stderr.Printf("Warning: failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
+			stderr.Printf("⚠️  Failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
 		} else {
 			var metadata core.PRMetadata
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				stderr.Printf("Warning: failed to parse metadata JSON: %v. Proceeding without metadata.\n", err)
+				stderr.Printf("⚠️  Failed to parse metadata JSON: %v. Proceeding without metadata.\n", err)
 			} else {
 				requestText = formatMetadata(metadata) + "\n\n" + requestText
 			}
@@ -278,6 +279,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("review failed: %w", err)
 	}
 
+	reviewer.Agent.Reporter().ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
+
 	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 
@@ -285,7 +288,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if err := core.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
 			return fmt.Errorf("failed to write review to %s: %w", cfg.ReviewOutputFile, err)
 		}
-		stderr.Printf("Review written to %s\n", cfg.ReviewOutputFile)
+		stderr.Printf("📝 Review written to %s\n", cfg.ReviewOutputFile)
 	}
 
 	if cfg.OutputJSONFile != "" {
@@ -308,7 +311,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if err := core.WriteFileWithDirs(cfg.OutputJSONFile, jsonBytes); err != nil {
 			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
-		stderr.Printf("Structured review written to %s\n", cfg.OutputJSONFile)
+		stderr.Printf("📦 Structured review written to %s\n", cfg.OutputJSONFile)
 	}
 
 	return nil
