@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the compilation error regarding the non-existent 'ExecuteAsync' method. It went further by correctly identifying the likely intended method ('Execute') available in the 'db' package, demonstrating effective context awareness.",
+      "findings": [
+        "Accurately identified that ExecuteAsync is not a member of the db.DB type.",
+        "Provided a clear and constructive suggestion for the correct method name.",
+        "Correctly assessed the impact of the error as a compilation failure."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11629,
+        "output": 125,
+        "thinking": 388,
+        "cached": 0,
+        "total_input": 11629,
+        "total_output": 513
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The reviewer completely failed to follow the explicit instructions in the rubric to verify the API usage against the provided documentation URL. Furthermore, it ignored the explicit comment in the source code describing a bug ('BUG: The user is assuming the API endpoint is /v1/models but the doc says /v1beta/models'), instead approving the code as 'clean' and 'safe' despite the identified bug.",
+      "findings": [
+        "Failed to fetch or evaluate the provided documentation link.",
+        "Ignored the explicit bug report contained within the code comments.",
+        "Provided a superficial, non-technical approval that adds no value.",
+        "Failed to provide any meaningful feedback or verify API compliance."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8623,
+        "output": 85,
+        "thinking": 1119,
+        "cached": 0,
+        "total_input": 8623,
+        "total_output": 1204
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "mcp-server-fetch_fetch": 1
+        }
+      }
+    }
+  }
+]

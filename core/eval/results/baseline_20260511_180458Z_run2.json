@@ -1,0 +1,129 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical issue mentioned in the rubric (division by zero) and provided a concrete, idiomatic Go solution to address it by suggesting a signature change to return an error.",
+      "findings": [
+        "Correctly identified the missing division by zero check.",
+        "Provided a professional and actionable recommendation.",
+        "Recognized the functional fix while pointing out the necessary safety improvement."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 5727,
+        "output": 134,
+        "thinking": 664,
+        "cached": 0,
+        "total_input": 5727,
+        "total_output": 798
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "glob_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the nil pointer dereference vulnerability mentioned in the rubric. It correctly linked the logic in service.go to the potential crash and provided a constructive suggestion for a fix (early validation). The explanation is clear and professional.",
+      "findings": [
+        "Correctly identified the null pointer risk when name is empty.",
+        "Provided a clear and actionable recommendation for improvement.",
+        "Maintained a professional tone.",
+        "Directly addressed the issue specified in the rubric."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 7374,
+        "output": 135,
+        "thinking": 868,
+        "cached": 0,
+        "total_input": 7374,
+        "total_output": 1003
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "grep_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability as required by the rubric. It provided a clear explanation of the exploit vector and recommended appropriate security measures. Additionally, the reviewer proactively identified other significant production-grade issues such as error handling, resource exhaustion, and default server configuration, making the overall feedback highly valuable.",
+      "findings": [
+        "Correctly identified the path traversal vulnerability.",
+        "Provided sound remediation advice for path validation.",
+        "Correctly identified unhandled error return values from os.ReadFile.",
+        "Identified potential resource exhaustion due to default server configuration.",
+        "Identified the lack of error handling for http.ListenAndServe."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3452,
+        "output": 385,
+        "thinking": 2210,
+        "cached": 0,
+        "total_input": 3452,
+        "total_output": 2595
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly followed the rubric by identifying the violation of the 'SafeQuery' mandate in internal/db/AGENTS.md. Additionally, the reviewer identified a significant logic flaw (the missing scan of the query results), which adds high value to the review beyond the initial requirements.",
+      "findings": [
+        "Correctly identified the use of raw db.Query instead of the required SafeQuery wrapper.",
+        "Identified a critical bug where the function failed to scan the returned row, causing an incorrect return value.",
+        "Provided clear, actionable feedback to the developer.",
+        "Professional tone and constructive suggestions."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11429,
+        "output": 240,
+        "thinking": 1618,
+        "cached": 0,
+        "total_input": 11429,
+        "total_output": 1858
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "grep_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,121 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical missing edge case (division by zero) introduced by the diff. It provided clear, actionable advice on how to improve the robustness of the code by suggesting an idiomatic Go error-handling pattern.",
+      "findings": [
+        "Identified the division by zero vulnerability.",
+        "Proposed a professional and idiomatic fix using multiple return values (int, error).",
+        "Maintained a constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3271,
+        "output": 122,
+        "thinking": 894,
+        "cached": 0,
+        "total_input": 3271,
+        "total_output": 1016
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical null pointer vulnerability as requested by the rubric. It explained the risk clearly, suggested appropriate remediation (validation), and maintained a professional tone. It addressed the core issue precisely.",
+      "findings": [
+        "Correctly identified that 'u' can be nil when the name is empty.",
+        "Correctly identified that passing a nil pointer to 'SaveUser' poses a runtime panic risk.",
+        "Proposed a constructive and actionable solution (returning an error for invalid input).",
+        "Maintained a professional tone throughout the feedback."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3384,
+        "output": 124,
+        "thinking": 570,
+        "cached": 0,
+        "total_input": 3384,
+        "total_output": 694
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability as required by the rubric and suggested the appropriate remediation. Furthermore, it went above and beyond by identifying secondary issues such as improper error handling and the lack of server timeouts, which are crucial for a production-ready implementation.",
+      "findings": [
+        "Correctly flagged the path traversal vulnerability in the /file handler.",
+        "Provided a clear and correct remediation strategy (input sanitization and boundary checking).",
+        "Identified a silent error handling failure in os.ReadFile which would lead to poor API behavior.",
+        "Offered high-quality architectural advice regarding server timeouts for security and reliability."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3452,
+        "output": 292,
+        "thinking": 2170,
+        "cached": 0,
+        "total_input": 3452,
+        "total_output": 2462
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review is excellent. It correctly identified the violation of the project's internal standard (the use of raw db.Query instead of SafeQuery) as specified in the rubric. Additionally, the reviewer proactively identified a significant functional bug where the query results were not being scanned, which demonstrates high-quality code review depth.",
+      "findings": [
+        "Correctly identified the mandatory use of SafeQuery as per internal/db/AGENTS.md.",
+        "Correctly identified a functional bug regarding missing rows.Next() and rows.Scan().",
+        "Suggested a more idiomatic alternative (db.QueryRow) to improve readability and safety.",
+        "Professional, constructive, and clear tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3471,
+        "output": 209,
+        "thinking": 868,
+        "cached": 0,
+        "total_input": 3471,
+        "total_output": 1077
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]
