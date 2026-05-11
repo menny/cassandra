@@ -73,6 +73,10 @@ inputs:
     description: 'Multiline string where each line is a lock file to ignore (overrides default)'
     required: false
     default: ''
+  allow_url_fetch:
+    description: 'Whether to allow the AI to fetch external URLs using the mcp-server-fetch tool (requires uvx to be installed).'
+    required: false
+    default: 'false'
   max_tokens:
     description: 'Max tokens for the LLM response'
     required: false
@@ -180,6 +184,9 @@ runs:
         bazelisk-cache: true
         disk-cache: cassandra-ai-review
         repository-cache: true
+    - name: Setup uv
+      if: inputs.allow_url_fetch == 'true'
+      uses: astral-sh/setup-uv@v5
     - name: Setup Execution Environment
       id: setup_env
       shell: bash
@@ -271,6 +278,7 @@ runs:
         SUPPLEMENTAL_GUIDELINES: ${{ inputs.supplemental_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
         MCP_CONFIG: ${{ inputs.mcp_config }}
+        ALLOW_URL_FETCH: ${{ inputs.allow_url_fetch }}
         IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
         MAX_TOKENS: ${{ inputs.max_tokens }}
       run: |
@@ -284,6 +292,10 @@ runs:
           --output-json "$JSON_FILE"
           --metrics-json "$METRICS_FILE"
         )
+
+        if [[ "$ALLOW_URL_FETCH" == "true" ]]; then
+          ARGS+=(--allow-url-fetch)
+        fi
 
         if [[ -n "$PROVIDER" ]]; then
           ARGS+=(--provider "$PROVIDER")

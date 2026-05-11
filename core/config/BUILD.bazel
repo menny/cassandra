@@ -12,3 +12,11 @@ go_library(
         "@com_github_spf13_viper//:viper",
     ],
 )
+
+load("@rules_go//go:def.bzl", "go_test")
+
+go_test(
+    name = "config_test",
+    srcs = ["config_test.go"],
+    embed = [":config"],
+)

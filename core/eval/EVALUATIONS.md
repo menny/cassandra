@@ -8,7 +8,7 @@ This configuration uses the standard Cassandra settings without any supplemental
 
 <!-- EVAL_RESULTS_START:baseline -->
 **Config**: `cassandra.toml`  
-**Runs**: 3  
+**Commit**: [`abed942`](https://github.com/menny/cassandra/commit/abed942ef9e2f8ddea6f5ad44978be8911d2d089)  
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
@@ -16,10 +16,16 @@ This configuration uses the standard Cassandra settings without any supplemental
 | `interface-contract` | Interface Contract Violation | The agent MUST identify that `CreateAndSave` in `service.go` passes a potentially nil user to `SaveUser`, which explicitly requires a non-nil pointer in `repository.go`. | 5 | 5 | 5.00 |
 | `security-path-traversal` | Security: Path Traversal | The agent MUST identify the path traversal vulnerability in the `/file` handler and recommend using `filepath.Clean` or a boundary check. | 5 | 5 | 5.00 |
 | `local-agents-convention` | Local Agents Convention | The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`. | 5 | 5 | 5.00 |
-| `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
 | **OVERALL** | | | **5.00** | **5.00** | **5.00** |
 
 <!-- EVAL_RESULTS_END:baseline -->
+
+## MCP Invoke Evaluation
+
+This suite evaluates the agent's ability to discover, understand, and correctly invoke tools provided via the Model Context Protocol (MCP).
+
+<!-- EVAL_RESULTS_START:baseline_mcp_invoking -->
+<!-- EVAL_RESULTS_END:baseline_mcp_invoking -->
 
 ## Evaluation Methodology
 

@@ -34,6 +34,7 @@ type Config struct {
 	FilesListFile                string   `mapstructure:"files-list-file"`
 	CommitsFile                  string   `mapstructure:"commits-file"`
 	MCPConfigFile                string   `mapstructure:"mcp-config"`
+	AllowURLFetch                bool     `mapstructure:"allow-url-fetch"`
 	IgnoredLockFiles             []string `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string   `mapstructure:"config"`
 }
@@ -59,6 +60,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", tools.DefaultLockFiles)
+	v.SetDefault("allow-url-fetch", false)
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)

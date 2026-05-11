@@ -49,6 +49,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.FilesListFile, "files-list-file", "", "Path to a file containing the list of changed files (one per line)")
 	fs.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
 	fs.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
+	fs.BoolVar(&cfg.AllowURLFetch, "allow-url-fetch", false, "Enable the mcp-server-fetch tool (requires uvx to be installed)")
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 
@@ -86,6 +87,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", tools.DefaultLockFiles)
+	v.SetDefault("allow-url-fetch", false)
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Changed {
