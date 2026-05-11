@@ -59,7 +59,7 @@ mkdir -p "$RESULTS_DIR"
 RESULTS_FILES=()
 
 for ((i=1; i<=REPEATS; i++)); do
-  # Filename format: <ID>_<TIMESTAMP>_run<i].json
+  # Filename format: <ID>_<TIMESTAMP>_run<i>].json
   RESULTS_FILE="$RESULTS_DIR/${ID}_${TIMESTAMP}_run${i}.json"
   echo "===> [Run $i/$REPEATS] Running evaluations for $CONFIG_PATH (ID: $ID)..."
   bazel run //cmd/eval -- \
