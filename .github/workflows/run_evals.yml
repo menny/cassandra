@@ -1,0 +1,60 @@
+name: Run Evaluations
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: 'Evaluation ID (matches markers in EVALUATIONS.md)'
+        required: true
+        default: 'baseline'
+      config:
+        description: 'Path to Cassandra config'
+        required: true
+        default: 'cassandra.toml'
+      repeats:
+        description: 'Number of evaluation runs'
+        required: true
+        default: '5'
+jobs:
+  evaluate:
+    name: Run and Report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          bazelisk-cache: true
+          disk-cache: ${{ github.workflow }}
+          repository-cache: true
+      - name: Run Evaluations
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EVAL_ID: ${{ github.event.inputs.id }}
+          EVAL_CONFIG: ${{ github.event.inputs.config }}
+          EVAL_REPEATS: ${{ github.event.inputs.repeats }}
+        run: |
+          ./scripts/run_evals.sh \
+            "$EVAL_ID" \
+            "$EVAL_CONFIG" \
+            "$GEMINI_API_KEY" \
+            "google" \
+            "gemini-3.1-flash-lite" \
+            "$GEMINI_API_KEY" \
+            "$EVAL_REPEATS"
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: update evaluation results for '${{ github.event.inputs.id }}'"
+          title: "Evaluation Results: ${{ github.event.inputs.id }}"
+          body: "Automated evaluation results for configuration `${{ github.event.inputs.config }}` using ID `${{ github.event.inputs.id }}`."
+          branch: "eval-results/${{ github.event.inputs.id }}"
+          base: main
+          delete-branch: true
+          add-paths: |
+            core/eval/EVALUATIONS.md
+            core/eval/results/*.json

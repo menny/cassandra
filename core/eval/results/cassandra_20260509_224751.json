@@ -1,0 +1,153 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly addressed the core requirement of the rubric by identifying the missing division-by-zero check. It correctly noted that dividing by zero would cause a runtime panic in Go. Furthermore, the reviewer provided a constructive and idiomatic recommendation to change the function signature to return an error, which is a best practice in Go programming.",
+      "findings": [
+        "Identified the missing zero check as specified in the rubric.",
+        "Correctly explained the runtime consequence (panic).",
+        "Offered a specific and constructive code improvement (returning an error).",
+        "Acknowledged the correction of the mathematical operator (from '+' to '/')."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3053,
+        "output": 127,
+        "thinking": 686,
+        "cached": 0,
+        "total_input": 3053,
+        "total_output": 813
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified the core issue described in the rubric: passing a potentially nil pointer to a function that requires a valid object. The agent correctly noted that if 'name' is empty, 'u' remains nil, and it suggested a proper fix (early validation and returning an error). The feedback is accurate, constructive, and directly addresses the bug highlighted in the code comments and the rubric.",
+      "findings": [
+        "Correctly identified that 'u' can be nil if 'name' is empty.",
+        "Identified the risk of a panic or unhandled error in the downstream 'SaveUser' function.",
+        "Suggested a valid fix: early validation of the 'name' parameter."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3166,
+        "output": 123,
+        "thinking": 607,
+        "cached": 0,
+        "total_input": 3166,
+        "total_output": 730
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 0,
+      "rationale": "",
+      "findings": null,
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "thinking": 0,
+        "cached": 0,
+        "total_input": 0,
+        "total_output": 0
+      },
+      "iterations": 0,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": null
+      }
+    },
+    "error": "failed to create sandbox: failed to apply diff: git [apply input.diff] failed in /var/folders/jx/jm4j57dx5kx864y5x5039s540000gn/T/cassandra-eval-sandbox-1323270294: exit status 128\nOutput: error: corrupt patch at line 27\n"
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identifies the primary issue required by the rubric: the use of raw `db.Query` instead of the mandated `SafeQuery` wrapper. Furthermore, it accurately identifies a logical bug in the code where the result of the query is ignored and a hardcoded `0` is returned. The feedback is professional, constructive, and comprehensive.",
+      "findings": [
+        "Correctly identified the violation of the AGENTS.md policy regarding SafeQuery.",
+        "Correctly identified that the query result was not being scanned and the function return value was hardcoded.",
+        "Provided clear guidance on how to fix the scanning logic (rows.Next, rows.Scan, rows.Err).",
+        "Maintained a constructive and professional tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 7211,
+        "output": 195,
+        "thinking": 1644,
+        "cached": 0,
+        "total_input": 7211,
+        "total_output": 1839
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "grep_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The AI review perfectly identified the core issue specified in the rubric. It correctly noted that `ExecuteAsync` is not a valid method on the `db.DB` type and explicitly mentioned verifying this against `lib/db/db.go`. Furthermore, it provided a helpful suggestion for the correct method name (`Execute`) and correctly identified that the code would result in a compilation error. The feedback is professional, accurate, and directly addresses the bug introduced in the diff.",
+      "findings": [
+        "Correctly identified that 'ExecuteAsync' does not exist.",
+        "Verified the issue by referencing 'lib/db/db.go' as required by the rubric.",
+        "Suggested the correct method name ('Execute').",
+        "Correctly flagged the PR for rejection due to a compilation error."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 14717,
+        "output": 169,
+        "thinking": 582,
+        "cached": 0,
+        "total_input": 14717,
+        "total_output": 751
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "glob_files": 1,
+          "godoc_package": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]

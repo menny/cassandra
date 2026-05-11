@@ -1,0 +1,153 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review was concise and accurately addressed the primary concern in the rubric: identifying that the `Divide` function lacked a check for division by zero. The agent not only identified the bug but also correctly described the consequence (runtime panic) and suggested the idiomatic Go solution of returning an error.",
+      "findings": [
+        "Identified the division-by-zero vulnerability required by the rubric.",
+        "Correctly noted the specific line and file where the issue exists.",
+        "Provided a constructive suggestion to change the function signature to return an error."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3053,
+        "output": 95,
+        "thinking": 363,
+        "cached": 0,
+        "total_input": 3053,
+        "total_output": 458
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The AI agent correctly identified the core issue specified in the rubric. It pointed out that 'u' could be nil when passed to 'SaveUser' if 'name' is empty. It also noted the existing inline comment that highlighted the bug and provided a constructive suggestion to handle the empty name case with a validation error to prevent production crashes.",
+      "findings": [
+        "Correctly identified the nil pointer dereference risk.",
+        "Referenced the specific line of code and the logic error.",
+        "Acknowledged the existing bug comment in the code.",
+        "Suggested a valid fix (early validation error)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3166,
+        "output": 122,
+        "thinking": 1043,
+        "cached": 0,
+        "total_input": 3166,
+        "total_output": 1165
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly addressed the rubric by identifying the path traversal vulnerability in the /file handler. It correctly recommended the use of `filepath.Clean` and, more importantly, emphasized the necessity of a boundary check to ensure the resulting path remains within the intended directory. Additionally, the reviewer identified several other valid issues, such as the ignored error in `os.ReadFile` and `http.ListenAndServe`, as well as the lack of server timeouts, demonstrating high depth and attention to detail.",
+      "findings": [
+        "Successfully identified the path traversal vulnerability at server.go:17.",
+        "Recommended both filepath.Clean and boundary checks as per the rubric.",
+        "Correctly identified an ignored error from os.ReadFile.",
+        "Correctly identified an ignored error from http.ListenAndServe.",
+        "Suggested proactive security measures like setting Read/Write timeouts on the HTTP server."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3234,
+        "output": 369,
+        "thinking": 1900,
+        "cached": 0,
+        "total_input": 3234,
+        "total_output": 2269
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review successfully identified the primary issue required by the rubric: the use of `db.Query` instead of the mandated `SafeQuery` wrapper. Beyond the rubric, the reviewer also correctly caught a logic bug where the rows were not being scanned and the function returned a hardcoded zero, demonstrating thoroughness and accuracy.",
+      "findings": [
+        "Successfully identified the violation of the 'SafeQuery' requirement specified in the rubric.",
+        "Identified a logic error where the query result was ignored and 0 was hardcoded as the return value.",
+        "Provided clear and actionable feedback with correct line references."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3253,
+        "output": 163,
+        "thinking": 1247,
+        "cached": 0,
+        "total_input": 3253,
+        "total_output": 1410
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly followed the rubric by identifying that `ExecuteAsync` does not exist on the `db.DB` type. It explicitly mentions that it verified this against the `lib/db/db.go` file, as required. Furthermore, the review is constructive, suggesting the correct method (`Execute`) and explaining that the current code would cause a compilation error.",
+      "findings": [
+        "Correctly identified the non-existent method `ExecuteAsync`.",
+        "Verified the issue against the source file `lib/db/db.go`.",
+        "Provided a constructive path forward by suggesting the `Execute` method."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11100,
+        "output": 158,
+        "thinking": 1032,
+        "cached": 0,
+        "total_input": 11100,
+        "total_output": 1190
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]

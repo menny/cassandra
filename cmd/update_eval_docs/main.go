@@ -13,17 +13,24 @@ import (
 
 func main() {
 	var (
-		resultsPath     string
+		resultsPaths    []string
 		configPath      string
 		suitePath       string
 		id              string
+		sha             string
+		repo            string
 		evaluationsFile string
 	)
 
-	flag.StringVar(&resultsPath, "results", "", "Path to the JSON results file")
+	flag.Func("results", "Path to the JSON results file (can be specified multiple times)", func(s string) error {
+		resultsPaths = append(resultsPaths, s)
+		return nil
+	})
 	flag.StringVar(&configPath, "config", "cassandra.toml", "Path to the subject's cassandra.toml")
 	flag.StringVar(&suitePath, "suite", "core/eval/testdata/evaluations.json", "Path to the evaluation suite manifest (JSON)")
 	flag.StringVar(&id, "id", "", "The ID of the injection site in EVALUATIONS.md")
+	flag.StringVar(&sha, "sha", "", "The commit SHA being evaluated")
+	flag.StringVar(&repo, "repo", "menny/cassandra", "The GitHub repository (owner/repo)")
 	flag.StringVar(&evaluationsFile, "md", "core/eval/EVALUATIONS.md", "Path to the EVALUATIONS.md file")
 	flag.Parse()
 
@@ -34,54 +41,95 @@ func main() {
 		}
 	}
 
-	if resultsPath == "" {
-		log.Fatal("--results is required")
+	if len(resultsPaths) == 0 {
+		log.Fatal("--results is required (at least once)")
 	}
 	if id == "" {
 		log.Fatal("--id is required")
 	}
 
-	// 1. Load results
-	resultsData, err := os.ReadFile(resultsPath)
-	if err != nil {
-		log.Fatalf("failed to read results: %v", err)
+	// 1. Load all results
+	allResults := make(map[string][]eval.CaseResult) // map[caseID][]results
+	for _, path := range resultsPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Fatalf("failed to read results from %s: %v", path, err)
+		}
+		var results []eval.CaseResult
+		if err := json.Unmarshal(data, &results); err != nil {
+			log.Fatalf("failed to parse results from %s: %v", path, err)
+		}
+		for _, res := range results {
+			allResults[res.CaseID] = append(allResults[res.CaseID], res)
+		}
 	}
 
-	var results []eval.CaseResult
-	if err := json.Unmarshal(resultsData, &results); err != nil {
-		log.Fatalf("failed to parse results: %v", err)
-	}
-
-	// 2. Load suite to get rubrics
+	// 2. Load suite to get rubrics and order
 	suite, err := eval.LoadSuite(suitePath)
 	if err != nil {
 		log.Fatalf("failed to load suite: %v", err)
 	}
 
-	rubrics := make(map[string]string)
-	for _, c := range suite.Cases {
-		rubrics[c.ID] = c.Rubric
-	}
-
 	// 3. Generate Markdown
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**Config**: `%s`  \n\n", configPath))
+	sb.WriteString(fmt.Sprintf("**Config**: `%s`  \n", configPath))
+	if sha != "" {
+		displaySha := sha
+		if len(sha) > 7 {
+			displaySha = sha[:7]
+		}
+		sb.WriteString(fmt.Sprintf("**Commit**: [`%s`](https://github.com/%s/commit/%s)  \n", displaySha, repo, sha))
+	}
+	sb.WriteString(fmt.Sprintf("**Runs**: %d  \n\n", len(resultsPaths)))
 
-	sb.WriteString("| Eval ID | Eval Name | Judge Criteria | Score |\n")
-	sb.WriteString("| --- | --- | --- | --- |\n")
+	sb.WriteString("| Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |\n")
+	sb.WriteString("| --- | --- | --- | --- | --- | --- |\n")
 
-	for _, res := range results {
-		rubric := rubrics[res.CaseID]
-		// Clean up rubric for table (no newlines, escape pipes)
-		rubric = strings.ReplaceAll(rubric, "\n", " ")
-		rubric = strings.ReplaceAll(rubric, "|", "\\|")
+	var totalMin, totalMax, totalMean float64
+	caseCount := 0
 
-		scoreStr := fmt.Sprintf("%d/5", res.Subject.Score)
-		if res.Error != "" {
-			scoreStr = "ERROR"
+	for _, c := range suite.Cases {
+		results, ok := allResults[c.ID]
+		if !ok || len(results) == 0 {
+			continue
 		}
 
-		sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %s |\n", res.CaseID, res.CaseName, rubric, scoreStr))
+		var minScore, maxScore int
+		var sum int
+		count := len(results)
+
+		for i, res := range results {
+			score := 0
+			if res.Error == "" {
+				score = res.Subject.Score
+			}
+
+			if i == 0 || score < minScore {
+				minScore = score
+			}
+			if i == 0 || score > maxScore {
+				maxScore = score
+			}
+			sum += score
+		}
+
+		rubric := strings.ReplaceAll(c.Rubric, "\n", " ")
+		rubric = strings.ReplaceAll(rubric, "|", "\\|")
+
+		mean := float64(sum) / float64(count)
+		sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | %d | %d | %.2f |\n", c.ID, c.Name, rubric, minScore, maxScore, mean))
+
+		totalMin += float64(minScore)
+		totalMax += float64(maxScore)
+		totalMean += mean
+		caseCount++
+	}
+
+	if caseCount > 0 {
+		avgMin := totalMin / float64(caseCount)
+		avgMax := totalMax / float64(caseCount)
+		avgMean := totalMean / float64(caseCount)
+		sb.WriteString(fmt.Sprintf("| **OVERALL** | | | **%.2f** | **%.2f** | **%.2f** |\n", avgMin, avgMax, avgMean))
 	}
 	sb.WriteString("\n")
 
@@ -113,5 +161,5 @@ func main() {
 		log.Fatalf("failed to write evaluations file: %v", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Successfully updated %s section '%s' with results from %s\n", evaluationsFile, id, resultsPath)
+	fmt.Fprintf(os.Stderr, "Successfully updated %s section '%s' with results from %d runs\n", evaluationsFile, id, len(resultsPaths))
 }
