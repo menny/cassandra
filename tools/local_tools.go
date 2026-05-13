@@ -181,27 +181,34 @@ func registerLocalReadFile(r *Registry, root string) {
 // writeLine appends a line to sb, adding a newline if started is true.
 // Returns true if the output was truncated and no more lines should be written.
 func writeLine(sb *strings.Builder, line []byte, started bool, maxOutput int) bool {
+	prefix := ""
 	if started {
-		if sb.Len()+1+len(line) > maxOutput {
-			sb.WriteString("\n... (truncated)")
-			return true
+		prefix = "\n"
+	}
+
+	if sb.Len()+len(prefix)+len(line) > maxOutput {
+		// Calculate how much of the line (if any) we can still fit.
+		remain := maxOutput - sb.Len() - len(prefix)
+		if remain > 0 {
+			sb.WriteString(prefix)
+			sb.Write(line[:remain])
 		}
-		sb.WriteString("\n")
-	} else if len(line) > maxOutput {
-		sb.Write(line[:maxOutput])
 		sb.WriteString("\n... (truncated)")
 		return true
 	}
+
+	sb.WriteString(prefix)
 	sb.Write(line)
 	return false
 }
 
 type tailBuffer struct {
-	lines    [][]byte
-	limit    int
-	maxBytes int
-	curBytes int
-	count    int
+	lines     [][]byte
+	limit     int
+	maxBytes  int
+	curBytes  int
+	count     int
+	oldestIdx int // Points to the oldest non-nil line
 }
 
 func newTailBuffer(limit, maxBytes int) *tailBuffer {
@@ -221,19 +228,18 @@ func (b *tailBuffer) Add(line []byte) {
 	b.curBytes += len(line)
 	b.count++
 
-	// Reclaim memory if we exceed maxBytes by purging oldest lines
+	// Reclaim memory if we exceed maxBytes by purging the oldest non-nil lines.
+	// Since we add at b.count%limit, the oldest is usually near oldestIdx.
 	for b.curBytes > b.maxBytes {
-		purged := false
-		for i := 0; i < b.limit; i++ {
-			testIdx := (b.count + i) % b.limit
-			if b.lines[testIdx] != nil {
-				b.curBytes -= len(b.lines[testIdx])
-				b.lines[testIdx] = nil
-				purged = true
-				break
-			}
+		if b.lines[b.oldestIdx] != nil {
+			b.curBytes -= len(b.lines[b.oldestIdx])
+			b.lines[b.oldestIdx] = nil
 		}
-		if !purged {
+		b.oldestIdx = (b.oldestIdx + 1) % b.limit
+
+		// Safety: if we've purged everything and still over, break.
+		if b.curBytes <= 0 {
+			b.curBytes = 0
 			break
 		}
 	}
