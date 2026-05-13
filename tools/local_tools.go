@@ -2,7 +2,6 @@ package tools
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -63,7 +62,8 @@ func registerLocalReadFile(r *Registry, root string) {
 		const defaultMaxReadLength = 40000
 		const absoluteMaxReadLength = 40000
 		const absoluteMaxTailLines = 10000
-		const maxLineLength = 65536 // 64KB per line safety limit
+		const maxLineLength = 65536           // 64KB per line safety limit
+		const maxTailBufferBytes = 1024 * 1024 // 1MB limit for the circular buffer storage
 
 		maxOutput := args.MaxReadLength
 		if maxOutput <= 0 {
@@ -118,12 +118,8 @@ func registerLocalReadFile(r *Registry, root string) {
 			if tailLines > absoluteMaxTailLines {
 				tailLines = absoluteMaxTailLines
 			}
-			// Circular buffer for tail lines.
-			buffer := make([][]byte, tailLines)
-			count := 0
-			totalBufferBytes := 0
-			const maxTailBufferBytes = 1024 * 1024 // 1MB limit for the circular buffer storage
 
+			tb := newTailBuffer(tailLines, maxTailBufferBytes)
 			for {
 				line, err := readLimitedLine(reader, maxLineLength)
 				if len(line) == 0 && err != nil {
@@ -133,59 +129,23 @@ func registerLocalReadFile(r *Registry, root string) {
 					return "", fmt.Errorf("read_file failed while reading: %w", err)
 				}
 
-				idx := count % tailLines
-				// Subtract old line size from total
-				if buffer[idx] != nil {
-					totalBufferBytes -= len(buffer[idx])
-				}
-
-				buffer[idx] = line
-				totalBufferBytes += len(line)
-				count++
-
-				// If we exceed 1MB, we must keep memory bounded.
-				// If the TOTAL bytes in the buffer exceeds 1MB, we'll start setting older entries to nil
-				// to reclaim memory until we are under the limit again.
-				for totalBufferBytes > maxTailBufferBytes {
-					oldestIdx := (count - tailLines)
-					if oldestIdx < 0 {
-						oldestIdx = 0
-					} else {
-						oldestIdx = oldestIdx % tailLines
-					}
-
-					if buffer[oldestIdx] != nil {
-						totalBufferBytes -= len(buffer[oldestIdx])
-						buffer[oldestIdx] = nil
-					} else {
-						break
-					}
-				}
+				tb.Add(line)
 
 				if err == io.EOF {
 					break
 				}
 			}
 
-			startIdx := 0
-			numToPrint := count
-			if count > tailLines {
-				startIdx = count % tailLines
-				numToPrint = tailLines
-			}
-
-			for i := 0; i < numToPrint; i++ {
-				line := buffer[(startIdx+i)%tailLines]
-				if line == nil {
-					continue
-				}
-				if sb.Len() > 0 {
+			lines := tb.Lines()
+			for i, line := range lines {
+				if i > 0 {
 					if sb.Len()+1+len(line) > maxOutput {
 						sb.WriteString("\n... (truncated)")
 						break
 					}
 					sb.WriteString("\n")
 				} else if len(line) > maxOutput {
+					// Handle case where even the first line is too long
 					sb.Write(line[:maxOutput])
 					sb.WriteString("\n... (truncated)")
 					break
@@ -224,6 +184,7 @@ func registerLocalReadFile(r *Registry, root string) {
 				} else {
 					started = true
 					if len(line) > maxOutput {
+						// Handle case where even the first line is too long
 						sb.Write(line[:maxOutput])
 						sb.WriteString("\n... (truncated)")
 						break
@@ -247,26 +208,94 @@ func registerLocalReadFile(r *Registry, root string) {
 	})
 }
 
+type tailBuffer struct {
+	lines    [][]byte
+	limit    int
+	maxBytes int
+	curBytes int
+	count    int
+}
+
+func newTailBuffer(limit, maxBytes int) *tailBuffer {
+	return &tailBuffer{
+		lines:    make([][]byte, limit),
+		limit:    limit,
+		maxBytes: maxBytes,
+	}
+}
+
+func (b *tailBuffer) Add(line []byte) {
+	idx := b.count % b.limit
+	if b.lines[idx] != nil {
+		b.curBytes -= len(b.lines[idx])
+	}
+	b.lines[idx] = line
+	b.curBytes += len(line)
+	b.count++
+
+	// Enforce maxBytes limit by purging oldest lines
+	for b.curBytes > b.maxBytes {
+		found := false
+		for i := 0; i < b.limit; i++ {
+			testIdx := (b.count + i) % b.limit
+			if b.lines[testIdx] != nil {
+				b.curBytes -= len(b.lines[testIdx])
+				b.lines[testIdx] = nil
+				found = true
+				break
+			}
+		}
+		if !found {
+			break
+		}
+	}
+}
+
+func (b *tailBuffer) Lines() [][]byte {
+	res := make([][]byte, 0, b.limit)
+	for i := 0; i < b.limit; i++ {
+		idx := (b.count + i) % b.limit
+		if b.lines[idx] != nil {
+			res = append(res, b.lines[idx])
+		}
+	}
+	return res
+}
+
 // readLimitedLine reads up to maxLineLength bytes or until a newline.
-// It trims the trailing newline.
+// It trims the trailing newline and ensures the returned slice is a copy.
 func readLimitedLine(r *bufio.Reader, limit int) ([]byte, error) {
-	line, err := r.ReadBytes('\n')
-	if len(line) > limit {
-		line = line[:limit]
-		// If we truncated, we need to skip the rest of the line until the next \n
-		if err == nil {
-			for {
-				b, err2 := r.ReadByte()
-				if err2 != nil {
-					return line, err2
-				}
-				if b == '\n' {
-					break
-				}
+	line, isPrefix, err := r.ReadLine()
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	res := make([]byte, 0, len(line))
+	res = append(res, line...)
+
+	for isPrefix && len(res) < limit {
+		line, isPrefix, err = r.ReadLine()
+		if err != nil {
+			break
+		}
+		toAppend := limit - len(res)
+		if toAppend > len(line) {
+			toAppend = len(line)
+		}
+		res = append(res, line[:toAppend]...)
+	}
+
+	if isPrefix {
+		// Line is longer than the limit. Consume the rest.
+		for isPrefix {
+			_, isPrefix, err = r.ReadLine()
+			if err != nil {
+				break
 			}
 		}
 	}
-	return bytes.TrimRight(line, "\r\n"), err
+
+	return res, err
 }
 
 func registerLocalGlobFiles(r *Registry, root string) {
