@@ -63,7 +63,9 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < 20000; i++ {
-			f.WriteString("line\n")
+			if _, err := f.WriteString("line\n"); err != nil {
+				t.Fatal(err)
+			}
 		}
 		f.Close()
 
