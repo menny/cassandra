@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -36,6 +37,10 @@ func registerLocalReadFile(r *Registry, root string) {
 					"type":        "integer",
 					"description": "Read this many lines from the end of the file. If specified, line_start and line_end are ignored.",
 				},
+				"max_read_length": map[string]any{
+					"type":        "integer",
+					"description": "The maximum number of bytes to read. Defaults to 40,000. Maximum allowed is 40,000.",
+				},
 			},
 			"required": []string{"file_path"},
 		},
@@ -43,13 +48,26 @@ func registerLocalReadFile(r *Registry, root string) {
 
 	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args struct {
-			FilePath  string `json:"file_path"`
-			LineStart int    `json:"line_start"`
-			LineEnd   int    `json:"line_end"`
-			TailLines int    `json:"tail_lines"`
+			FilePath      string `json:"file_path"`
+			LineStart     int    `json:"line_start"`
+			LineEnd       int    `json:"line_end"`
+			TailLines     int    `json:"tail_lines"`
+			MaxReadLength int    `json:"max_read_length"`
 		}
 		if err := tc.UnmarshalArguments(&args); err != nil {
 			return "", err
+		}
+
+		const defaultMaxReadLength = 40000
+		const absoluteMaxReadLength = 40000
+		const absoluteMaxTailLines = 10000
+
+		maxOutput := args.MaxReadLength
+		if maxOutput <= 0 {
+			maxOutput = defaultMaxReadLength
+		}
+		if maxOutput > absoluteMaxReadLength {
+			maxOutput = absoluteMaxReadLength
 		}
 
 		fullPath := args.FilePath
@@ -64,56 +82,105 @@ func registerLocalReadFile(r *Registry, root string) {
 			}
 		}
 
-		b, err := os.ReadFile(fullPath)
+		info, err := os.Stat(fullPath)
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
 
-		// If no line-limiting arguments are provided, return the whole file.
+		// If no line-limiting arguments are provided, return the whole file but only if it's small.
 		if args.LineStart <= 0 && args.LineEnd <= 0 && args.TailLines <= 0 {
-			return string(b), nil
-		}
-
-		lines := strings.Split(string(b), "\n")
-		numLines := len(lines)
-
-		// Handle tail_lines first as it takes precedence.
-		if args.TailLines > 0 {
-			start := numLines - args.TailLines
-			if start < 0 {
-				start = 0
+			if info.Size() > int64(absoluteMaxReadLength) {
+				return "", fmt.Errorf("read_file failed: file is too large (%d bytes) to read entirely. Use line_start/line_end or tail_lines", info.Size())
 			}
-			return strings.Join(lines[start:], "\n"), nil
+			b, err := os.ReadFile(fullPath)
+			if err != nil {
+				return "", fmt.Errorf("read_file failed: %w", err)
+			}
+			content := string(b)
+			if len(content) > maxOutput {
+				return content[:maxOutput] + "\n... (truncated)", nil
+			}
+			return content, nil
 		}
 
-		// Handle line range.
+		f, err := os.Open(fullPath)
+		if err != nil {
+			return "", fmt.Errorf("read_file failed: %w", err)
+		}
+		defer f.Close()
+
+		var sb strings.Builder
+		scanner := bufio.NewScanner(f)
+
+		if args.TailLines > 0 {
+			tailLines := args.TailLines
+			if tailLines > absoluteMaxTailLines {
+				tailLines = absoluteMaxTailLines
+			}
+			// Circular buffer for tail lines.
+			buffer := make([]string, tailLines)
+			count := 0
+			for scanner.Scan() {
+				buffer[count%tailLines] = scanner.Text()
+				count++
+			}
+			if err := scanner.Err(); err != nil {
+				return "", fmt.Errorf("read_file failed while scanning: %w", err)
+			}
+
+			startIdx := 0
+			numToPrint := count
+			if count > tailLines {
+				startIdx = count % tailLines
+				numToPrint = tailLines
+			}
+
+			for i := 0; i < numToPrint; i++ {
+				line := buffer[(startIdx+i)%tailLines]
+				if sb.Len()+len(line)+1 > maxOutput {
+					sb.WriteString("\n... (truncated)")
+					break
+				}
+				if i > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(line)
+			}
+			return sb.String(), nil
+		}
+
+		// Line range.
 		start := args.LineStart
 		if start <= 0 {
 			start = 1
 		}
 		end := args.LineEnd
-		if end <= 0 || end > numLines {
-			end = numLines
+
+		currentLine := 0
+		for scanner.Scan() {
+			currentLine++
+			if currentLine < start {
+				continue
+			}
+			if end > 0 && currentLine > end {
+				break
+			}
+
+			line := scanner.Text()
+			if sb.Len()+len(line)+1 > maxOutput {
+				sb.WriteString("\n... (truncated)")
+				break
+			}
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(line)
+		}
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read_file failed while scanning: %w", err)
 		}
 
-		// Adjust to 0-based indexing for slicing.
-		startIdx := start - 1
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		if startIdx >= numLines {
-			return "", nil
-		}
-
-		endIdx := end
-		if endIdx > numLines {
-			endIdx = numLines
-		}
-		if endIdx < startIdx {
-			return "", nil
-		}
-
-		return strings.Join(lines[startIdx:endIdx], "\n"), nil
+		return sb.String(), nil
 	})
 }
 

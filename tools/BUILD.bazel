@@ -18,6 +18,7 @@ go_test(
     name = "tools_test",
     srcs = [
         "diff_test.go",
+        "local_tools_safety_test.go",
         "local_tools_test.go",
     ],
     embed = [":tools"],
