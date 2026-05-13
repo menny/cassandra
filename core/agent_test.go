@@ -118,6 +118,20 @@ type spyReporter struct {
 	emptyResponseRetries []int
 	capsReached          []int
 	truncated            []int
+	mcpStatuses          []mcpStatus
+	reviewHeaders        []reviewHeaderInfo
+}
+
+type mcpStatus struct {
+	name   string
+	status string
+	err    error
+}
+
+type reviewHeaderInfo struct {
+	files      int
+	guidelines string
+	model      string
 }
 
 func (s *spyReporter) ReportIteration(iter int) {
@@ -140,6 +154,14 @@ func (s *spyReporter) ReportEmptyResponseRetry(attempt int) {
 func (s *spyReporter) ReportCapReached(max int) { s.capsReached = append(s.capsReached, max) }
 func (s *spyReporter) ReportTruncated(maxTokens int) {
 	s.truncated = append(s.truncated, maxTokens)
+}
+
+func (s *spyReporter) ReportMCPStatus(name string, status string, err error) {
+	s.mcpStatuses = append(s.mcpStatuses, mcpStatus{name: name, status: status, err: err})
+}
+
+func (s *spyReporter) ReportReviewHeader(files int, guidelines string, model string) {
+	s.reviewHeaders = append(s.reviewHeaders, reviewHeaderInfo{files: files, guidelines: guidelines, model: model})
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

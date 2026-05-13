@@ -48,6 +48,13 @@ type Reporter interface {
 	ReportEmptyResponseRetry(attempt int)
 	ReportCapReached(maxIterations int)
 	ReportTruncated(maxTokens int)
+	ReportMCPStatus(name string, status string, err error)
+	ReportReviewHeader(files int, guidelines string, model string)
+}
+
+// NewDefaultReporter creates a reporter that writes to the provided writer.
+func NewDefaultReporter(w io.Writer) Reporter {
+	return &defaultReporter{w: w}
 }
 
 // defaultReporter writes progress to an io.Writer.
@@ -56,16 +63,16 @@ type defaultReporter struct {
 }
 
 func (r *defaultReporter) ReportIteration(iter int) {
-	fmt.Fprintf(r.w, "Iteration %d: Cassandra is reviewing the code...\n", iter)
+	fmt.Fprintf(r.w, "🔍 [Iter %d] Reviewing...\n", iter)
 }
 
 func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
-	fmt.Fprintf(r.w, "Cassandra asked to run tool %q (%s)\n", tc.Name, compactToolCallArgs(tc))
+	fmt.Fprintf(r.w, "🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
 }
 
 func (r *defaultReporter) ReportUsage(usage llm.Usage) {
 	if usage.PromptTokens >= 0 && usage.OutputTokens >= 0 {
-		msg := fmt.Sprintf("  [Tokens: %d input, %d output]", usage.TotalInput(), usage.TotalOutput())
+		msg := fmt.Sprintf("📊 %d in, %d out", usage.TotalInput(), usage.TotalOutput())
 		var breakdown []string
 		if usage.CachedTokens > 0 {
 			breakdown = append(breakdown, fmt.Sprintf("%d cached", usage.CachedTokens))
@@ -82,32 +89,44 @@ func (r *defaultReporter) ReportUsage(usage llm.Usage) {
 
 func (r *defaultReporter) ReportUsageSummary(total llm.Usage) {
 	if total.PromptTokens > 0 || total.OutputTokens > 0 {
-		fmt.Fprintf(r.w, "Total session tokens: %d input, %d output\n", total.TotalInput(), total.TotalOutput())
+		fmt.Fprintf(r.w, "📈 %d in, %d out (total)\n", total.TotalInput(), total.TotalOutput())
 	}
 }
 
 func (r *defaultReporter) ReportFinalReview() {
-	fmt.Fprintln(r.w, "Cassandra is formulating the final review...")
+	fmt.Fprintln(r.w, "📝 Formulating final review...")
 }
 
 func (r *defaultReporter) ReportExtraction() {
-	fmt.Fprintln(r.w, "Cassandra is extracting structured JSON findings...")
+	fmt.Fprintln(r.w, "📦 Extracting findings...")
 }
 
 func (r *defaultReporter) ReportExtractionRetry(attempt int) {
-	fmt.Fprintf(r.w, "Extraction attempt %d failed; retrying...\n", attempt)
+	fmt.Fprintf(r.w, "🔄 [Retry] Extraction attempt %d failed; retrying...\n", attempt)
 }
 
 func (r *defaultReporter) ReportEmptyResponseRetry(attempt int) {
-	fmt.Fprintf(r.w, "LLM returned empty response (attempt %d); retrying...\n", attempt)
+	fmt.Fprintf(r.w, "🔄 [Retry] LLM returned empty response (attempt %d); retrying...\n", attempt)
 }
 
 func (r *defaultReporter) ReportCapReached(maxIterations int) {
-	fmt.Fprintf(r.w, "Warning: reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
+	fmt.Fprintf(r.w, "⚠️  Reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
 }
 
 func (r *defaultReporter) ReportTruncated(maxTokens int) {
-	fmt.Fprintf(r.w, "Warning: LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens)
+	fmt.Fprintf(r.w, "⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens)
+}
+
+func (r *defaultReporter) ReportMCPStatus(name string, status string, err error) {
+	if err != nil {
+		fmt.Fprintf(r.w, "🔌 [MCP] %s: %s: %v\n", name, status, err)
+	} else {
+		fmt.Fprintf(r.w, "🔌 [MCP] %s: %s\n", name, status)
+	}
+}
+
+func (r *defaultReporter) ReportReviewHeader(files int, guidelines string, model string) {
+	fmt.Fprintf(r.w, "\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model)
 }
 
 // AgentOption configures an Agent.
@@ -121,7 +140,11 @@ func WithStderr(w io.Writer) AgentOption {
 
 // WithReporter sets a custom reporter for the Agent.
 func WithReporter(r Reporter) AgentOption {
-	return func(a *Agent) { a.reporter = r }
+	return func(a *Agent) {
+		if r != nil {
+			a.reporter = r
+		}
+	}
 }
 
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
@@ -148,6 +171,11 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 		o(a)
 	}
 	return a
+}
+
+// Reporter returns the Agent's reporter.
+func (a *Agent) Reporter() Reporter {
+	return a.reporter
 }
 
 // GetMetrics returns the collected usage and execution metrics for the session.

@@ -28,7 +28,11 @@ type Reviewer struct {
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
 // targetDir is the directory where local tools (like grep) will operate.
-func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (r *Reviewer, err error) {
+func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, reporter Reporter) (r *Reviewer, err error) {
+	if reporter == nil {
+		reporter = NewDefaultReporter(os.Stderr)
+	}
+
 	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize LLM: %w", err)
@@ -69,7 +73,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (r *
 	if len(mcpConfig.MCPServers) > 0 {
 		mcpConfig.ExpandEnv()
 		mcpManager = mcp.NewManager()
-		if err := mcpManager.RegisterServers(ctx, mcpConfig, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
+		if err := mcpManager.RegisterServers(ctx, mcpConfig, reporter.ReportMCPStatus, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 			registry.RegisterTool(def, handler)
 		}); err != nil {
 			return nil, fmt.Errorf("failed to register MCP servers: %w", err)
@@ -105,7 +109,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string) (r *
 	}
 
 	return &Reviewer{
-		Agent:                    NewAgent(client, registry),
+		Agent:                    NewAgent(client, registry, WithReporter(reporter)),
 		Config:                   cfg,
 		RootDir:                  targetDir,
 		StablePrompt:             stable,
