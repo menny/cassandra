@@ -20,7 +20,7 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 	t.Run("read whole file > 40000 bytes fails", func(t *testing.T) {
 		largeFile := filepath.Join(tmpDir, "large_whole.txt")
 		content := strings.Repeat("a", 40001)
-		if err := os.WriteFile(largeFile, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(largeFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -39,7 +39,7 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 	t.Run("read whole file <= 40000 bytes succeeds", func(t *testing.T) {
 		smallFile := filepath.Join(tmpDir, "small_whole.txt")
 		content := strings.Repeat("a", 40000)
-		if err := os.WriteFile(smallFile, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(smallFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -76,7 +76,7 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The result should have at most 10000 lines.
-		// 10000 lines + possibly a truncation message if it hit byte limit too, 
+		// 10000 lines + possibly a truncation message if it hit byte limit too,
 		// but here 10000 lines * 5 bytes ("line\n") = 50KB, which is > 40KB.
 		// So it should be limited by 40KB.
 		if len(result) > 41000 {
@@ -86,27 +86,54 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 
 	t.Run("handles very long lines gracefully", func(t *testing.T) {
 		longLineFile := filepath.Join(tmpDir, "long_line.txt")
-		// Scanner default limit is 64KB. Let's create a line longer than that.
+		// Create a line longer than the previous 64KB Scanner limit.
 		content := strings.Repeat("a", 70000) + "\n"
-		if err := os.WriteFile(longLineFile, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(longLineFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
 		args, _ := json.Marshal(map[string]any{"file_path": longLineFile, "line_start": 1})
-		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "read_file",
 			Arguments: string(args),
 		})
-		// It might fail with "token too long" or it might succeed if Scanner is configured differently.
-		if err != nil && !strings.Contains(err.Error(), "token too long") {
-			t.Errorf("expected 'token too long' error, got: %v", err)
+		if err != nil {
+			t.Fatalf("expected success with long line, got: %v", err)
+		}
+		// It should be truncated to maxOutput (40000).
+		if len(result) > 41000 {
+			t.Errorf("result too large: %d", len(result))
+		}
+		if !strings.Contains(result, "truncated") {
+			t.Error("expected truncation message")
+		}
+	})
+
+	t.Run("preserves empty lines in range", func(t *testing.T) {
+		emptyLinesFile := filepath.Join(tmpDir, "empty_lines.txt")
+		content := "\nline 2\n\nline 4\n"
+		if err := os.WriteFile(emptyLinesFile, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		args, _ := json.Marshal(map[string]any{"file_path": emptyLinesFile, "line_start": 1})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "\nline 2\n\nline 4"
+		if result != expected {
+			t.Errorf("expected %q, got %q", expected, result)
 		}
 	})
 
 	t.Run("output truncated at 40000 bytes", func(t *testing.T) {
 		overflowFile := filepath.Join(tmpDir, "overflow.txt")
 		content := strings.Repeat("a\n", 30000) // 60,000 bytes
-		if err := os.WriteFile(overflowFile, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(overflowFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -129,7 +156,7 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 	t.Run("respects max_read_length", func(t *testing.T) {
 		smallFile := filepath.Join(tmpDir, "max_len.txt")
 		content := "1234567890"
-		if err := os.WriteFile(smallFile, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(smallFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 

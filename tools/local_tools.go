@@ -2,9 +2,11 @@ package tools
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -110,7 +112,7 @@ func registerLocalReadFile(r *Registry, root string) {
 		defer f.Close()
 
 		var sb strings.Builder
-		scanner := bufio.NewScanner(f)
+		reader := bufio.NewReader(f)
 
 		if args.TailLines > 0 {
 			tailLines := args.TailLines
@@ -118,14 +120,41 @@ func registerLocalReadFile(r *Registry, root string) {
 				tailLines = absoluteMaxTailLines
 			}
 			// Circular buffer for tail lines.
-			buffer := make([]string, tailLines)
+			// To reduce GC pressure, we'll try to be efficient, though ReadBytes still allocates.
+			buffer := make([][]byte, tailLines)
 			count := 0
-			for scanner.Scan() {
-				buffer[count%tailLines] = scanner.Text()
+			totalBufferBytes := 0
+			const maxTailBufferBytes = 1024 * 1024 // 1MB limit for the circular buffer storage
+
+			for {
+				line, err := reader.ReadBytes('\n')
+				if len(line) == 0 && err != nil {
+					if err == io.EOF {
+						break
+					}
+					return "", fmt.Errorf("read_file failed while reading: %w", err)
+				}
+
+				// Remove trailing newline for consistent storage.
+				line = bytes.TrimRight(line, "\r\n")
+
+				idx := count % tailLines
+				// Subtract old line size from total
+				if buffer[idx] != nil {
+					totalBufferBytes -= len(buffer[idx])
+				}
+
+				buffer[idx] = line
+				totalBufferBytes += len(line)
 				count++
-			}
-			if err := scanner.Err(); err != nil {
-				return "", fmt.Errorf("read_file failed while scanning: %w", err)
+
+				if totalBufferBytes > maxTailBufferBytes {
+					return "", fmt.Errorf("read_file failed: tail collection exceeded 1MB limit. Use a smaller tail_lines or line ranges")
+				}
+
+				if err == io.EOF {
+					break
+				}
 			}
 
 			startIdx := 0
@@ -137,14 +166,19 @@ func registerLocalReadFile(r *Registry, root string) {
 
 			for i := 0; i < numToPrint; i++ {
 				line := buffer[(startIdx+i)%tailLines]
-				if sb.Len()+len(line)+1 > maxOutput {
+				if i > 0 {
+					if sb.Len()+1+len(line) > maxOutput {
+						sb.WriteString("\n... (truncated)")
+						break
+					}
+					sb.WriteString("\n")
+				} else if len(line) > maxOutput {
+					// Handle case where even the first line is too long
+					sb.Write(line[:maxOutput])
 					sb.WriteString("\n... (truncated)")
 					break
 				}
-				if i > 0 {
-					sb.WriteString("\n")
-				}
-				sb.WriteString(line)
+				sb.Write(line)
 			}
 			return sb.String(), nil
 		}
@@ -157,27 +191,46 @@ func registerLocalReadFile(r *Registry, root string) {
 		end := args.LineEnd
 
 		currentLine := 0
-		for scanner.Scan() {
-			currentLine++
-			if currentLine < start {
-				continue
-			}
-			if end > 0 && currentLine > end {
-				break
+		started := false
+		for {
+			line, err := reader.ReadBytes('\n')
+			if len(line) == 0 && err != nil {
+				if err == io.EOF {
+					break
+				}
+				return "", fmt.Errorf("read_file failed while reading: %w", err)
 			}
 
-			line := scanner.Text()
-			if sb.Len()+len(line)+1 > maxOutput {
-				sb.WriteString("\n... (truncated)")
+			currentLine++
+			if currentLine >= start && (end <= 0 || currentLine <= end) {
+				line = bytes.TrimRight(line, "\r\n")
+				if started {
+					if sb.Len()+1+len(line) > maxOutput {
+						sb.WriteString("\n... (truncated)")
+						break
+					}
+					sb.WriteString("\n")
+				} else {
+					started = true
+					if len(line) > maxOutput {
+						// Handle case where even the first line is too long
+						sb.Write(line[:maxOutput])
+						sb.WriteString("\n... (truncated)")
+						break
+					}
+				}
+				sb.Write(line)
+			}
+
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return "", fmt.Errorf("read_file failed while reading: %w", err)
+			}
+			if end > 0 && currentLine >= end {
 				break
 			}
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(line)
-		}
-		if err := scanner.Err(); err != nil {
-			return "", fmt.Errorf("read_file failed while scanning: %w", err)
 		}
 
 		return sb.String(), nil
