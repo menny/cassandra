@@ -59,17 +59,15 @@ func registerLocalReadFile(r *Registry, root string) {
 			return "", err
 		}
 
-		const defaultMaxReadLength = 40000
-		const absoluteMaxReadLength = 40000
-		const absoluteMaxTailLines = 10000
-		const maxLineLength = 65536           // 64KB per line safety limit
-		const maxTailBufferBytes = 1024 * 1024 // 1MB limit for the circular buffer storage
+		const (
+			absoluteMaxReadLength = 40000
+			absoluteMaxTailLines  = 10000
+			maxLineLength         = 65536
+			maxTailBufferBytes    = 1024 * 1024
+		)
 
 		maxOutput := args.MaxReadLength
-		if maxOutput <= 0 {
-			maxOutput = defaultMaxReadLength
-		}
-		if maxOutput > absoluteMaxReadLength {
+		if maxOutput <= 0 || maxOutput > absoluteMaxReadLength {
 			maxOutput = absoluteMaxReadLength
 		}
 
@@ -78,7 +76,6 @@ func registerLocalReadFile(r *Registry, root string) {
 			if !filepath.IsAbs(fullPath) {
 				fullPath = filepath.Join(root, fullPath)
 			}
-			// Security: Ensure the path is within the root directory.
 			rel, err := filepath.Rel(root, fullPath)
 			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 				return "", fmt.Errorf("read_file failed: path %q is outside the workspace root", args.FilePath)
@@ -91,17 +88,16 @@ func registerLocalReadFile(r *Registry, root string) {
 		}
 		defer f.Close()
 
-		// If no line-limiting arguments are provided, return the whole file but only if it's small.
+		// If no line limits, read up to absoluteMaxReadLength.
+		// Use LimitReader to protect against infinite pseudo-files (e.g. /dev/zero).
 		if args.LineStart <= 0 && args.LineEnd <= 0 && args.TailLines <= 0 {
-			// Security: info.Size() is 0 for pseudo-files (e.g. /dev/zero).
-			// We use io.LimitReader to enforce a hard limit regardless of what Stat reports.
 			lr := io.LimitReader(f, int64(absoluteMaxReadLength)+1)
 			b, err := io.ReadAll(lr)
 			if err != nil {
 				return "", fmt.Errorf("read_file failed: %w", err)
 			}
 			if len(b) > absoluteMaxReadLength {
-				return "", fmt.Errorf("read_file failed: file is too large to read entirely. Use line_start/line_end or tail_lines")
+				return "", fmt.Errorf("read_file failed: file too large for whole-file read. Use line limits")
 			}
 			content := string(b)
 			if len(content) > maxOutput {
@@ -114,12 +110,12 @@ func registerLocalReadFile(r *Registry, root string) {
 		reader := bufio.NewReader(f)
 
 		if args.TailLines > 0 {
-			tailLines := args.TailLines
-			if tailLines > absoluteMaxTailLines {
-				tailLines = absoluteMaxTailLines
+			limit := args.TailLines
+			if limit > absoluteMaxTailLines {
+				limit = absoluteMaxTailLines
 			}
 
-			tb := newTailBuffer(tailLines, maxTailBufferBytes)
+			tb := newTailBuffer(limit, maxTailBufferBytes)
 			for {
 				line, err := readLimitedLine(reader, maxLineLength)
 				if len(line) == 0 && err != nil {
@@ -128,34 +124,20 @@ func registerLocalReadFile(r *Registry, root string) {
 					}
 					return "", fmt.Errorf("read_file failed while reading: %w", err)
 				}
-
 				tb.Add(line)
-
 				if err == io.EOF {
 					break
 				}
 			}
 
-			lines := tb.Lines()
-			for i, line := range lines {
-				if i > 0 {
-					if sb.Len()+1+len(line) > maxOutput {
-						sb.WriteString("\n... (truncated)")
-						break
-					}
-					sb.WriteString("\n")
-				} else if len(line) > maxOutput {
-					// Handle case where even the first line is too long
-					sb.Write(line[:maxOutput])
-					sb.WriteString("\n... (truncated)")
+			for i, line := range tb.Lines() {
+				if stop := writeLine(&sb, line, i > 0, maxOutput); stop {
 					break
 				}
-				sb.Write(line)
 			}
 			return sb.String(), nil
 		}
 
-		// Line range.
 		start := args.LineStart
 		if start <= 0 {
 			start = 1
@@ -175,22 +157,10 @@ func registerLocalReadFile(r *Registry, root string) {
 
 			currentLine++
 			if currentLine >= start && (end <= 0 || currentLine <= end) {
-				if started {
-					if sb.Len()+1+len(line) > maxOutput {
-						sb.WriteString("\n... (truncated)")
-						break
-					}
-					sb.WriteString("\n")
-				} else {
-					started = true
-					if len(line) > maxOutput {
-						// Handle case where even the first line is too long
-						sb.Write(line[:maxOutput])
-						sb.WriteString("\n... (truncated)")
-						break
-					}
+				if stop := writeLine(&sb, line, started, maxOutput); stop {
+					break
 				}
-				sb.Write(line)
+				started = true
 			}
 
 			if err != nil {
@@ -206,6 +176,24 @@ func registerLocalReadFile(r *Registry, root string) {
 
 		return sb.String(), nil
 	})
+}
+
+// writeLine appends a line to sb, adding a newline if started is true.
+// Returns true if the output was truncated and no more lines should be written.
+func writeLine(sb *strings.Builder, line []byte, started bool, maxOutput int) bool {
+	if started {
+		if sb.Len()+1+len(line) > maxOutput {
+			sb.WriteString("\n... (truncated)")
+			return true
+		}
+		sb.WriteString("\n")
+	} else if len(line) > maxOutput {
+		sb.Write(line[:maxOutput])
+		sb.WriteString("\n... (truncated)")
+		return true
+	}
+	sb.Write(line)
+	return false
 }
 
 type tailBuffer struct {
@@ -233,19 +221,19 @@ func (b *tailBuffer) Add(line []byte) {
 	b.curBytes += len(line)
 	b.count++
 
-	// Enforce maxBytes limit by purging oldest lines
+	// Reclaim memory if we exceed maxBytes by purging oldest lines
 	for b.curBytes > b.maxBytes {
-		found := false
+		purged := false
 		for i := 0; i < b.limit; i++ {
 			testIdx := (b.count + i) % b.limit
 			if b.lines[testIdx] != nil {
 				b.curBytes -= len(b.lines[testIdx])
 				b.lines[testIdx] = nil
-				found = true
+				purged = true
 				break
 			}
 		}
-		if !found {
+		if !purged {
 			break
 		}
 	}
