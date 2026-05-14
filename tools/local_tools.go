@@ -117,7 +117,11 @@ func registerLocalReadFile(r *Registry, root string) {
 
 			tb := newTailBuffer(limit, maxTailBufferBytes)
 			for {
-				line, err := readLimitedLine(reader, maxLineLength)
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+
+				line, err := readLimitedLine(ctx, reader, maxLineLength)
 				if len(line) == 0 && err != nil {
 					if err == io.EOF {
 						break
@@ -147,7 +151,11 @@ func registerLocalReadFile(r *Registry, root string) {
 		currentLine := 0
 		started := false
 		for {
-			line, err := readLimitedLine(reader, maxLineLength)
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+
+			line, err := readLimitedLine(ctx, reader, maxLineLength)
 			if len(line) == 0 && err != nil {
 				if err == io.EOF {
 					break
@@ -187,7 +195,6 @@ func writeLine(sb *strings.Builder, line []byte, started bool, maxOutput int) bo
 	}
 
 	if sb.Len()+len(prefix)+len(line) > maxOutput {
-		// Calculate how much of the line (if any) we can still fit.
 		remain := maxOutput - sb.Len() - len(prefix)
 		if remain > 0 {
 			sb.WriteString(prefix)
@@ -208,7 +215,7 @@ type tailBuffer struct {
 	maxBytes  int
 	curBytes  int
 	count     int
-	oldestIdx int // Points to the oldest non-nil line
+	oldestIdx int
 }
 
 func newTailBuffer(limit, maxBytes int) *tailBuffer {
@@ -223,13 +230,12 @@ func (b *tailBuffer) Add(line []byte) {
 	idx := b.count % b.limit
 	if b.lines[idx] != nil {
 		b.curBytes -= len(b.lines[idx])
+		b.oldestIdx = (idx + 1) % b.limit
 	}
 	b.lines[idx] = line
 	b.curBytes += len(line)
 	b.count++
 
-	// Reclaim memory if we exceed maxBytes by purging the oldest non-nil lines.
-	// Since we add at b.count%limit, the oldest is usually near oldestIdx.
 	for b.curBytes > b.maxBytes {
 		if b.lines[b.oldestIdx] != nil {
 			b.curBytes -= len(b.lines[b.oldestIdx])
@@ -237,7 +243,6 @@ func (b *tailBuffer) Add(line []byte) {
 		}
 		b.oldestIdx = (b.oldestIdx + 1) % b.limit
 
-		// Safety: if we've purged everything and still over, break.
 		if b.curBytes <= 0 {
 			b.curBytes = 0
 			break
@@ -248,7 +253,7 @@ func (b *tailBuffer) Add(line []byte) {
 func (b *tailBuffer) Lines() [][]byte {
 	res := make([][]byte, 0, b.limit)
 	for i := 0; i < b.limit; i++ {
-		idx := (b.count + i) % b.limit
+		idx := (b.oldestIdx + i) % b.limit
 		if b.lines[idx] != nil {
 			res = append(res, b.lines[idx])
 		}
@@ -256,9 +261,7 @@ func (b *tailBuffer) Lines() [][]byte {
 	return res
 }
 
-// readLimitedLine reads up to maxLineLength bytes or until a newline.
-// It trims the trailing newline and ensures the returned slice is a copy.
-func readLimitedLine(r *bufio.Reader, limit int) ([]byte, error) {
+func readLimitedLine(ctx context.Context, r *bufio.Reader, limit int) ([]byte, error) {
 	line, isPrefix, err := r.ReadLine()
 	if err != nil && err != io.EOF {
 		return nil, err
@@ -268,6 +271,9 @@ func readLimitedLine(r *bufio.Reader, limit int) ([]byte, error) {
 	res = append(res, line...)
 
 	for isPrefix && len(res) < limit {
+		if errCtx := ctx.Err(); errCtx != nil {
+			return res, errCtx
+		}
 		line, isPrefix, err = r.ReadLine()
 		if err != nil {
 			break
@@ -280,8 +286,10 @@ func readLimitedLine(r *bufio.Reader, limit int) ([]byte, error) {
 	}
 
 	if isPrefix {
-		// Line is longer than the limit. Consume the rest.
 		for isPrefix {
+			if errCtx := ctx.Err(); errCtx != nil {
+				return res, errCtx
+			}
 			_, isPrefix, err = r.ReadLine()
 			if err != nil {
 				break
@@ -329,7 +337,6 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			if !filepath.IsAbs(dir) {
 				dir = filepath.Join(root, dir)
 			}
-			// Security: Ensure the path is within the root directory.
 			rel, err := filepath.Rel(root, dir)
 			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 				return "", fmt.Errorf("glob_files failed: path %q is outside the workspace root", args.Directory)
@@ -339,10 +346,9 @@ func registerLocalGlobFiles(r *Registry, root string) {
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil // Skip errors reading specific files
+				return nil
 			}
 			if !d.IsDir() {
-				// Simple substring match allows catching things like ".go" or "BUILD"
 				if strings.Contains(filepath.Base(path), args.Query) || strings.Contains(path, args.Query) {
 					relPath := path
 					if root != "" {
@@ -400,12 +406,6 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 			return "", err
 		}
 
-		// git grep options:
-		// --line-number: show line numbers
-		// --column: show column numbers
-		// --extended-regexp: use extended regex
-		// --untracked: search untracked files as well
-		// -e: treat the next argument as the pattern, even if it starts with a hyphen
 		cmdArgs := []string{"grep", "--line-number", "--column", "--extended-regexp", "--untracked"}
 		if args.CaseInsensitive {
 			cmdArgs = append(cmdArgs, "-i")
@@ -418,15 +418,10 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 			cmdArgs = append(cmdArgs, "--", ".")
 		}
 
-		// Filter out lock files as they are usually not relevant and can be huge.
 		cmdArgs = appendLockFileExcludes(cmdArgs, ignoredLockFiles)
-
-		// Note: git grep already searches the working tree (unstaged changes) by default.
-		// We've also added --untracked to include newly created files.
 
 		out, err := runGit(ctx, root, cmdArgs...)
 		if err != nil {
-			// git grep returns exit code 1 if no matches are found.
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(out) == 0 {
 				return "No matches found.", nil
