@@ -89,6 +89,13 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ### 7. Lint Exceptions
 - **Centralize `//nolint` pragmas**: If a construct legitimately needs a lint exception (e.g. `int32` narrowing after a bounds check, an intentionally-unused receiver), wrap it in a named helper so the pragma lives in one place with a comment explaining the invariant. Do not sprinkle `//nolint:gosec` or similar pragmas at multiple call sites — the invariant becomes invisible and copy-paste drift accumulates. See `clampInt32` in `llm/google/provider.go` as the canonical example.
 
+### 8. Defensive Tool Implementation
+Tools that interact with external data (files, network, pipes) MUST be resilient to resource exhaustion and hangs.
+- **Hard Safety Limits**: Every tool MUST enforce an output size limit (e.g., 40KB) and a per-operation memory cap.
+- **Streaming over Loading**: Do NOT use `os.ReadFile` or `io.ReadAll` on potentially large sources. Use `io.LimitReader` and `bufio.Reader` to process data in chunks.
+- **Pseudo-file Protection**: Never trust `os.Stat().Size()` for OOM prevention (it returns 0 for pseudo-files like `/dev/zero`). Always use `io.LimitReader` with a hard cap.
+- **Cancellation Checks**: Every loop that performs I/O or intensive computation MUST check `ctx.Err()` in each iteration to ensure the tool can be interrupted by the ReAct loop timeout.
+
 ## Security Standards
 
 ### 1. GitHub Action Input Safety

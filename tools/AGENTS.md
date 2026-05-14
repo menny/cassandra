@@ -11,6 +11,10 @@ Tools that invoke external CLIs MUST:
 - Capture both `stdout` and `stderr`.
 - On failure, include the `stderr` output in the returned error string so the LLM can diagnose the issue (e.g., "command failed: <stderr>").
 
+### 3. Resource Management
+- **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., a circular buffer for `tail_lines`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1MB).
+- **Graceful Truncation**: When a tool hits an output limit, it should return as much valid data as possible followed by a clear truncation notice (e.g., `... (truncated)`), rather than failing with an error.
+
 ## Model Context Protocol (MCP) Servers
 
 MCP servers allow Cassandra to extend its capabilities without increasing the main binary's complexity or dependency footprint.
