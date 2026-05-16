@@ -39,7 +39,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	}
 
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles)
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.

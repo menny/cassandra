@@ -11,6 +11,7 @@ go_library(
         "//core/prompts",
         "//llm",
         "//tools",
+        "//util",
         "@com_github_spf13_pflag//:pflag",
         "@com_github_spf13_viper//:viper",
     ],

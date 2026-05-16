@@ -37,6 +37,7 @@ type Config struct {
 	AllowURLFetch                bool     `mapstructure:"allow-url-fetch"`
 	IgnoredLockFiles             []string `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string   `mapstructure:"config"`
+	WishlistDir                  string   `mapstructure:"wishlist-dir"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.
