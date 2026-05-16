@@ -6,11 +6,13 @@ go_library(
         "diff.go",
         "local_tools.go",
         "registry.go",
+        "wishlist.go",
     ],
     importpath = "github.com/menny/cassandra/tools",
     visibility = ["//visibility:public"],
     deps = [
         "//llm",
+        "//util",
     ],
 )
 
@@ -20,6 +22,7 @@ go_test(
         "diff_test.go",
         "local_tools_safety_test.go",
         "local_tools_test.go",
+        "wishlist_test.go",
     ],
     embed = [":tools"],
     deps = ["//llm"],

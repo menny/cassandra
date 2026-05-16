@@ -17,6 +17,7 @@ import (
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/tools"
+	"github.com/menny/cassandra/util"
 )
 
 func main() {
@@ -52,6 +53,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.BoolVar(&cfg.AllowURLFetch, "allow-url-fetch", false, "Enable the mcp-server-fetch tool (requires uvx to be installed)")
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
+	fs.StringVar(&cfg.WishlistDir, "wishlist-dir", "", "Path to a directory where AI-Reviewer feedback/wishlist will be stored")
 
 	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
@@ -147,6 +149,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	if cfg.MainGuidelines != "" {
 		stderr.Printf("  Main Guidelines: %s\n", cfg.MainGuidelines)
 	}
+	if cfg.WishlistDir != "" {
+		stderr.Printf("  Wishlist Directory: %s\n", cfg.WishlistDir)
+	}
 	if len(cfg.SupplementalGuidelines) > 0 {
 		stderr.Printf("  Supplemental Guidelines: %s\n", strings.Join(cfg.SupplementalGuidelines, ", "))
 	}
@@ -186,7 +191,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 				return
 			}
 
-			if err := core.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
+			if err := util.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
 				stderr.Printf("⚠️  Failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
 				return
 			}
@@ -285,7 +290,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fmt.Println(result)
 
 	if cfg.ReviewOutputFile != "" {
-		if err := core.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
+		if err := util.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
 			return fmt.Errorf("failed to write review to %s: %w", cfg.ReviewOutputFile, err)
 		}
 		stderr.Printf("📝 Review written to %s\n", cfg.ReviewOutputFile)
@@ -308,7 +313,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return fmt.Errorf("failed to marshal structured review: %w", err)
 		}
 
-		if err := core.WriteFileWithDirs(cfg.OutputJSONFile, jsonBytes); err != nil {
+		if err := util.WriteFileWithDirs(cfg.OutputJSONFile, jsonBytes); err != nil {
 			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
 		stderr.Printf("📦 Structured review written to %s\n", cfg.OutputJSONFile)
