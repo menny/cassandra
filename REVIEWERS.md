@@ -5,8 +5,10 @@ Reviewer lens for the whole repo. Assumes [AGENTS.md](AGENTS.md) and [DESIGN.md]
 ## Paired edits (block if one is missing)
 
 - New `os.Stdout` write ↔ justification that it is final review output.
-- `BuildSystemPrompt` addition ↔ placement between Zone 2 and Zone 3 (AGENTS.md §6).
-- GitHub Action input added ↔ `env:` mapping per AGENTS.md §Security 1.
+- `BuildSystemPrompt` addition ↔ placement between Zone 2 and Zone 3 (AGENTS.md — Prompt Engineering & Prefix Caching).
+- GitHub Action input added ↔ `env:` mapping per AGENTS.md — GitHub Action Input Safety.
+- `llm.Model` interface signature change ↔ all test doubles under `llm/` (see also [llm/REVIEWERS.md — Paired edits](llm/REVIEWERS.md)).
+- New local tool ↔ security negative tests (traversal, valid symlink, broken symlink, trampoline symlink); see [tools/REVIEWERS.md](tools/REVIEWERS.md).
 
 ## Safety & Liveness (block if missing)
 

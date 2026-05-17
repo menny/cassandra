@@ -13,13 +13,13 @@ Behavioral divergence between `llm/anthropic` and `llm/google` is a defect unles
 
 - `RetryingModel` retries on all errors, including 4xx. Error-class filtering was rejected.
 - `llm.UnknownUsage()` is value-typed with `-1/-1` sentinels. Callers depend on this; do not suggest pointers or an `Ok` field.
-- `clampInt32` carries the package `//nolint:gosec`; it is the centralization point (root AGENTS.md §7).
+- `clampInt32` carries the package `//nolint:gosec`; it is the centralization point (root AGENTS.md — Lint Exceptions).
 - `llm/internal/util` is the intentional shared conversion layer.
 - `llm.retry[T]` is tested via both `RetryingModel` methods; do not request direct unit tests.
 
 ## Paired edits (block if one is missing)
 
-- `submitReviewToolName` ↔ `DESIGN.md §Technical Decisions 4`.
+- `submitReviewToolName` ↔ `DESIGN.md — Structured Feedback Extraction`.
 - `DefaultMaxTokens` ↔ CLI `--max-tokens` default in `cmd/ai_reviewer`.
-- New provider ↔ `factory.providers` map + `README.md` §Supported Models.
+- New provider ↔ `factory.providers` map + `README.md` — Supported Models.
 - `llm.Model` signature change ↔ test doubles under `llm/`.

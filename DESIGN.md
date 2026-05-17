@@ -39,27 +39,16 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
   6. **Cap Reached**: If the cap is reached, the agent forces a final review call by appending a system message and stripping tool definitions from the next LLM call.
 
 ### 4. Tool Registry (`tools/`)
-- **Interface**: The `ToolDispatcher` interface (defined in `core/agent.go`) is the minimal set of methods the Agent needs:
-  ```go
-  type ToolDispatcher interface {
-      ToTools() []llm.ToolDef
-      HandleCall(tc llm.ToolCall) (string, error)
-  }
-  ```
+- **Interface**: The `ToolDispatcher` interface (defined in `core/agent.go`) is the minimal set of methods the Agent needs: one to enumerate available tools and one to dispatch a tool call by name with its context and arguments. Read `core/agent.go` for the authoritative signature.
 - **Implementation**: `tools.Registry` (in `tools/registry.go`) implements this interface. It stores a list of `llm.ToolDef` and a map of `ToolHandler` functions.
-- **Local Tools**: High-level tools implemented in `tools/local_tools.go`:
+- **Local Tools**: High-level tools implemented in `tools/local_tools.go` and registered via `tools.RegisterLocalTools`:
   - `read_file`: Reads file content from the local disk.
   - `glob_files`: Finds files matching a pattern or extension.
   - `grep_files`: Searches for patterns in the repository using `git grep`.
+  - `wishlist_tool`: Reads developer wishlist/guidance files from a configurable directory.
 
 ### 5. LLM Abstraction (`llm/`)
-- **Interface**: `llm.Model` (in `llm/llm.go`) is the provider-agnostic interface:
-  ```go
-  type Model interface {
-      GenerateContent(ctx context.Context, messages []Message, tools []ToolDef, maxTokens int) (*Response, error)
-      GenerateStructuredContent(ctx context.Context, messages []Message, schema map[string]any, config StructuredConfig) (*Response, error)
-  }
-  ```
+- **Interface**: `llm.Model` (in `llm/llm.go`) is the provider-agnostic interface. It exposes two generation methods: `GenerateContent` for free-form responses with optional tool use, and `GenerateStructuredContent` for schema-constrained output. Read `llm/llm.go` for the authoritative signatures.
 - **Shared Types**: Standardizes `Message`, `ToolDef`, `ToolCall`, `ToolResult`, and `Response` across all providers.
 - **Provider Implementations**:
   - `llm/anthropic`: Uses `github.com/anthropics/anthropic-sdk-go`.
@@ -111,8 +100,7 @@ the companion implementation rules.
 
 ## Output Contract
 
-- **Stderr**: All diagnostic and progress output (configuration summary, iteration progress, tool calls).
-- **Stdout**: The final review text (markdown). This allows for easy redirection: `cassandra ... > review.md`.
+See [AGENTS.md — Output Contract](AGENTS.md#output-contract). All diagnostic and progress output goes to stderr; the final review text goes to stdout only.
 
 ## Structured Output JSON (`--output-json`)
 

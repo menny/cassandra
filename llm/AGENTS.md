@@ -2,7 +2,7 @@
 
 Scoped guidance for code under `llm/`. These rules complement the repo-level
 [AGENTS.md](../AGENTS.md); follow both. See also the architectural contract
-in [DESIGN.md §5 LLM Abstraction](../DESIGN.md#5-llm-abstraction-llm).
+in [DESIGN.md — LLM Abstraction](../DESIGN.md#5-llm-abstraction-llm).
 
 ## Provider Implementation Pattern
 

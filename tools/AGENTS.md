@@ -2,8 +2,14 @@
 
 ## Tool Implementation Pattern
 
-### 1. Registration
-Local tools (compiled into the binary) MUST be registered in `tools/registry.go`. Each tool implementation should reside in its own file (e.g., `tools/diff.go`) and follow the struct-based argument pattern defined in the root `AGENTS.md`.
+### 1. Registration & Argument Handling
+Local tools (compiled into the binary) MUST be registered in `tools/registry.go` via `RegisterLocalTools`. Each tool implementation should reside in its own file (e.g., `tools/diff.go`).
+
+All tools MUST follow this argument-handling pattern:
+- **Struct-based Arguments**: Define a local anonymous struct (or a named struct if reused) to represent the tool's parameters.
+- **Explicit Unmarshaling**: Use `tc.UnmarshalArguments(&args)` within the handler. Do not perform manual type assertions or "missing key" checks on a raw map.
+  - *Exception*: MCP tools that proxy external systems with dynamic schemas may use `map[string]any` since their arguments are discovered at runtime and cannot be statically typed.
+- **Error Propagation**: Return errors from the handler; the `Agent` is responsible for formatting these as "error: ..." strings for the LLM.
 
 ### 2. Execution Context
 Tools that invoke external CLIs MUST:
@@ -12,13 +18,14 @@ Tools that invoke external CLIs MUST:
 - On failure, include the `stderr` output in the returned error string so the LLM can diagnose the issue (e.g., "command failed: <stderr>").
 
 ### 3. Resource Management
-- **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., a circular buffer for `tail_lines`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1MB).
+- **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., the `tail_lines` parameter of `read_file`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1 MB). This cap covers in-process buffer allocation; the separate 40 KB output limit (root AGENTS.md — Defensive Tool Implementation) caps bytes returned to the LLM.
 - **Graceful Truncation**: When a tool hits an output limit, it should return as much valid data as possible followed by a clear truncation notice (e.g., `... (truncated)`), rather than failing with an error.
 
 ### 4. Path Validation & Security
 Tools that accept file or directory paths as arguments MUST:
 - **Use `util.ValidatePathInRoot(root, path)`**: This helper ensures the path is physically within the root by resolving all intermediate symlinks.
 - **Check for Broken Symlinks**: Broken symlinks committed to a repo can be used to bypass lexical checks. `ValidatePathInRoot` handles this by rejecting paths that cannot be safely resolved.
+- **TOCTOU Protection**: When creating symlinks (e.g., in sandboxes), re-compute the relative target from validated physical paths to neutralize parsing differentials between lexical and physical resolution.
 - **Consistent Relative Output**: Tools (like `grep` or `glob`) SHOULD return paths relative to the workspace root. If a tool resolves a path to an absolute location during validation, it MUST convert it back to a relative path before passing it to external CLIs or returning it to the LLM.
 - **Context Awareness**: Long-running filesystem operations (e.g., `WalkDir`) MUST propagate the tool's context and check `ctx.Err()` to prevent "context holes" during large repository scans.
 
