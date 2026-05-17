@@ -187,13 +187,19 @@ func extractTarGz(gzipPath, dst string) error {
 			}
 		case tar.TypeSymlink:
 			// Security: Validate that the symlink target is also within the root.
+			// Use the physical directory to resolve relative targets to prevent trampoline escapes.
+			physicalDir, err := util.ValidatePathInRoot(dst, filepath.Dir(header.Name))
+			if err != nil {
+				return fmt.Errorf("invalid symlink directory: %w", err)
+			}
+
 			linkTarget := header.Linkname
 			if !filepath.IsAbs(linkTarget) {
-				// Relative targets are relative to the symlink's location.
-				linkTarget = filepath.Join(filepath.Dir(header.Name), linkTarget)
+				// Relative targets are relative to the symlink's physical location.
+				linkTarget = filepath.Join(physicalDir, linkTarget)
 			}
-			// Use the logical check for the target since it doesn't have to exist yet.
-			// ValidatePathInRoot will handle the logic.
+
+			// Validate the resolved target.
 			if _, err := util.ValidatePathInRoot(dst, linkTarget); err != nil {
 				return fmt.Errorf("malicious symlink target detected: %w", err)
 			}

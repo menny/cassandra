@@ -269,6 +269,70 @@ func TestExtractTarGz_SymlinkTargetSlip(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_SymlinkTrampolineSlip(t *testing.T) {
+	// 1. Setup a clean destination and a parent directory we want to protect
+	parentDir := t.TempDir()
+	dstDir := filepath.Join(parentDir, "sandbox")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a tarball with a symlink trampoline exploit
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Entry 1: Symlink "a" -> "." (trampoline)
+	hdr := &tar.Header{
+		Name:     "a",
+		Typeflag: tar.TypeSymlink,
+		Linkname: ".",
+		Mode:     0o755,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+
+	// Entry 2: Symlink "a/b/c/evil" -> "../../../etc/passwd"
+	// Lexically: a/b/c/evil -> etc/passwd (Safe)
+	// Physically: a is root, so a/b/c/evil is actually ./b/c/evil.
+	// Going up 3 levels from ./b/c/evil reaches parentDir/../../etc/passwd (Escape!)
+	hdr = &tar.Header{
+		Name:     "a/b/c/evil",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../../../etc/passwd",
+		Mode:     0o644,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	tarPath := filepath.Join(parentDir, "trampoline.tar.gz")
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Attempt extraction
+	err := extractTarGz(tarPath, dstDir)
+
+	// 4. Assert failure
+	if err == nil {
+		t.Fatalf("Expected error for trampoline symlink escape, but got nil")
+	}
+	if !strings.Contains(err.Error(), "malicious symlink target detected") {
+		t.Errorf("Expected 'malicious symlink target detected' error, got: %v", err)
+	}
+
+	// 5. Final safety check
+	evilFilePath := filepath.Join(parentDir, "etc/passwd")
+	if _, err := os.Stat(evilFilePath); err == nil {
+		t.Errorf("CRITICAL SECURITY FAILURE: Malicious file was pointed to outside sandbox via trampoline")
+	}
+}
+
 func TestExtractTarGz_Truncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	dstDir := filepath.Join(tmpDir, "dst")
