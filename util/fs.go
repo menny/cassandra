@@ -64,7 +64,11 @@ func ValidatePathInRoot(root, path string) (string, error) {
 	fullPath = filepath.Clean(fullPath)
 
 	// 1. Logical boundary check (preliminary)
-	rel, err := filepath.Rel(root, fullPath)
+	absFullPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		absFullPath = fullPath
+	}
+	rel, err := filepath.Rel(root, absFullPath)
 	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return "", fmt.Errorf("path %q is logically outside the root %q", path, root)
 	}

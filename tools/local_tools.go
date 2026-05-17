@@ -346,13 +346,13 @@ func registerLocalGlobFiles(r *Registry, root string) {
 				return nil
 			}
 			if !d.IsDir() {
-				if strings.Contains(filepath.Base(path), args.Query) || strings.Contains(path, args.Query) {
-					relPath := path
-					if root != "" {
-						if rel, err := filepath.Rel(root, path); err == nil {
-							relPath = rel
-						}
+				relPath := path
+				if root != "" {
+					if rel, err := filepath.Rel(root, path); err == nil {
+						relPath = rel
 					}
+				}
+				if strings.Contains(filepath.Base(relPath), args.Query) || strings.Contains(relPath, args.Query) {
 					matches = append(matches, relPath)
 				}
 			}
@@ -416,6 +416,14 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 				dir, err = util.ValidatePathInRoot(root, args.Directory)
 				if err != nil {
 					return "", fmt.Errorf("grep_files failed: %w", err)
+				}
+				// Convert back to relative path for Git consistency and relative output.
+				// We only use the relative path if it's clean and doesn't escape.
+				if rel, err := filepath.Rel(root, dir); err == nil && !strings.HasPrefix(rel, "..") {
+					dir = rel
+				} else if !filepath.IsAbs(args.Directory) {
+					// Fallback to original input if it was relative
+					dir = args.Directory
 				}
 			}
 			cmdArgs = append(cmdArgs, "--", dir)
