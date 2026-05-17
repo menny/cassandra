@@ -333,6 +333,70 @@ func TestExtractTarGz_SymlinkTrampolineSlip(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_SymlinkTOCTOUSlip(t *testing.T) {
+	// 1. Setup a clean destination and a parent directory we want to protect
+	parentDir := t.TempDir()
+	dstDir := filepath.Join(parentDir, "sandbox")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a tarball with a TOCTOU symlink exploit
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	// Entry 1: Symlink "y" -> "." (inside root)
+	hdr := &tar.Header{
+		Name:     "y",
+		Typeflag: tar.TypeSymlink,
+		Linkname: ".",
+		Mode:     0o755,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+
+	// Entry 2: Symlink "evil" -> "y/../../etc/passwd"
+	// Lexical Join: y/../../etc/passwd -> ../etc/passwd (relative to dstDir) -> parentDir/etc/passwd (Escape!)
+	// BUT, filepath.Clean (inside Join/Validate) sees y/../../etc/passwd and makes it ../etc/passwd.
+	// If the original "y/../../etc/passwd" is used in os.Symlink, and "y" is physically ".",
+	// then "y/../../etc/passwd" physically resolves to "../../etc/passwd" from dstDir -> parentDir/../etc/passwd -> /etc/passwd (Escape!)
+	hdr = &tar.Header{
+		Name:     "evil",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "y/../../etc/passwd",
+		Mode:     0o644,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	tarPath := filepath.Join(parentDir, "toctou.tar.gz")
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Attempt extraction
+	err := extractTarGz(tarPath, dstDir)
+
+	// 4. Verify outcome
+	// The validation should fail because even after lexical cleaning, "y/../../etc/passwd" becomes "../etc/passwd"
+	// which is outside the root.
+	if err == nil {
+		t.Fatalf("Expected error for TOCTOU symlink escape, but got nil")
+	}
+	if !strings.Contains(err.Error(), "malicious symlink target detected") {
+		t.Errorf("Expected 'malicious symlink target detected' error, got: %v", err)
+	}
+
+	// Verify the symlink was NOT created or if it was, it doesn't escape.
+	// (Our current logic fails BEFORE creation).
+}
+
 func TestExtractTarGz_Truncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	dstDir := filepath.Join(tmpDir, "dst")

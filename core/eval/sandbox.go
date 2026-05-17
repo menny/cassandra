@@ -199,15 +199,26 @@ func extractTarGz(gzipPath, dst string) error {
 				linkTarget = filepath.Join(physicalDir, linkTarget)
 			}
 
-			// Validate the resolved target.
-			if _, err := util.ValidatePathInRoot(dst, linkTarget); err != nil {
+			// Validate the resolved target and capture the safe physical path.
+			safeAbsTarget, err := util.ValidatePathInRoot(dst, linkTarget)
+			if err != nil {
 				return fmt.Errorf("malicious symlink target detected: %w", err)
+			}
+
+			safeLinkname := header.Linkname
+			if !filepath.IsAbs(linkTarget) {
+				// Recompute the relative linkname from the physical directory
+				// to neutralize any physical path traversal bypasses.
+				safeLinkname, err = filepath.Rel(physicalDir, safeAbsTarget)
+				if err != nil {
+					return fmt.Errorf("failed to compute safe linkname: %w", err)
+				}
 			}
 
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return err
 			}
-			if err := os.Symlink(header.Linkname, target); err != nil {
+			if err := os.Symlink(safeLinkname, target); err != nil {
 				return err
 			}
 		}
