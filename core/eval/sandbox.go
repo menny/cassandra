@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/menny/cassandra/util"
 )
 
 // Sandbox provides a high-fidelity git environment for evaluating the agent.
@@ -157,10 +159,9 @@ func extractTarGz(gzipPath, dst string) error {
 
 		target := filepath.Join(dst, header.Name)
 
-		// Security: Prevent "Tar Slip" (directory traversal)
-		rel, err := filepath.Rel(dst, target)
-		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-			return fmt.Errorf("tar slip detected: %s", header.Name)
+		// Security: Prevent "Tar Slip" (directory traversal and symlink escape)
+		if _, err := util.ValidatePathInRoot(dst, header.Name); err != nil {
+			return fmt.Errorf("tar slip detected: %w", err)
 		}
 
 		switch header.Typeflag {
@@ -182,6 +183,25 @@ func extractTarGz(gzipPath, dst string) error {
 				return err
 			}
 			if err := f.Close(); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			// Security: Validate that the symlink target is also within the root.
+			linkTarget := header.Linkname
+			if !filepath.IsAbs(linkTarget) {
+				// Relative targets are relative to the symlink's location.
+				linkTarget = filepath.Join(filepath.Dir(header.Name), linkTarget)
+			}
+			// Use the logical check for the target since it doesn't have to exist yet.
+			// ValidatePathInRoot will handle the logic.
+			if _, err := util.ValidatePathInRoot(dst, linkTarget); err != nil {
+				return fmt.Errorf("malicious symlink target detected: %w", err)
+			}
+
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			if err := os.Symlink(header.Linkname, target); err != nil {
 				return err
 			}
 		}

@@ -108,6 +108,115 @@ func TestExtractTarGz_TarSlip(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_SymlinkSlip(t *testing.T) {
+	// 1. Setup a clean destination and a parent directory we want to protect
+	parentDir := t.TempDir()
+	dstDir := filepath.Join(parentDir, "sandbox")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolve symlinks for base dirs because of macOS /var -> /private/var
+	if resolved, err := filepath.EvalSymlinks(parentDir); err == nil {
+		parentDir = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(dstDir); err == nil {
+		dstDir = resolved
+	}
+
+	// 2. Create a symlink in the destination that points outside
+	linkPath := filepath.Join(dstDir, "malicious_link")
+	if err := os.Symlink(parentDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Create a tarball that attempts to write through that symlink
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	content := "unauthorized access"
+	hdr := &tar.Header{
+		Name: "malicious_link/evil.txt",
+		Mode: 0o644,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	tarPath := filepath.Join(parentDir, "malicious_symlink.tar.gz")
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Attempt extraction
+	err := extractTarGz(tarPath, dstDir)
+
+	// 5. Assert failure
+	if err == nil {
+		t.Fatalf("Expected error for symlink escape tarball, but got nil")
+	}
+	if !strings.Contains(err.Error(), "tar slip detected") {
+		t.Errorf("Expected 'tar slip detected' error, got: %v", err)
+	}
+
+	// 6. Final safety check
+	evilFilePath := filepath.Join(parentDir, "evil.txt")
+	if _, err := os.Stat(evilFilePath); err == nil {
+		t.Errorf("CRITICAL SECURITY FAILURE: Malicious file was extracted to %s via symlink", evilFilePath)
+	}
+}
+
+func TestExtractTarGz_SymlinkTargetSlip(t *testing.T) {
+	// 1. Setup a clean destination and a parent directory we want to protect
+	parentDir := t.TempDir()
+	dstDir := filepath.Join(parentDir, "sandbox")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a tarball containing a symlink with a malicious target
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	hdr := &tar.Header{
+		Name:     "malicious_symlink",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "/etc/shadow", // Malicious absolute target
+		Mode:     0o644,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	tarPath := filepath.Join(parentDir, "malicious_target.tar.gz")
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Attempt extraction
+	err := extractTarGz(tarPath, dstDir)
+
+	// 4. Assert failure
+	if err == nil {
+		t.Error("Expected error for malicious symlink target, but got nil")
+	}
+	if !strings.Contains(err.Error(), "malicious symlink target detected") {
+		t.Errorf("Expected 'malicious symlink target detected' error, got: %v", err)
+	}
+}
+
 func TestExtractTarGz_Truncation(t *testing.T) {
 	tmpDir := t.TempDir()
 	dstDir := filepath.Join(tmpDir, "dst")

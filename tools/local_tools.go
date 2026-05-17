@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 func registerLocalReadFile(r *Registry, root string) {
@@ -73,12 +74,10 @@ func registerLocalReadFile(r *Registry, root string) {
 
 		fullPath := args.FilePath
 		if root != "" {
-			if !filepath.IsAbs(fullPath) {
-				fullPath = filepath.Join(root, fullPath)
-			}
-			rel, err := filepath.Rel(root, fullPath)
-			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-				return "", fmt.Errorf("read_file failed: path %q is outside the workspace root", args.FilePath)
+			var err error
+			fullPath, err = util.ValidatePathInRoot(root, args.FilePath)
+			if err != nil {
+				return "", fmt.Errorf("read_file failed: %w", err)
 			}
 		}
 
@@ -334,12 +333,10 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			dir = "."
 		}
 		if root != "" {
-			if !filepath.IsAbs(dir) {
-				dir = filepath.Join(root, dir)
-			}
-			rel, err := filepath.Rel(root, dir)
-			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-				return "", fmt.Errorf("glob_files failed: path %q is outside the workspace root", args.Directory)
+			var err error
+			dir, err = util.ValidatePathInRoot(root, dir)
+			if err != nil {
+				return "", fmt.Errorf("glob_files failed: %w", err)
 			}
 		}
 
@@ -413,7 +410,15 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 		cmdArgs = append(cmdArgs, "-e", args.Query)
 
 		if args.Directory != "" {
-			cmdArgs = append(cmdArgs, "--", args.Directory)
+			dir := args.Directory
+			if root != "" {
+				var err error
+				dir, err = util.ValidatePathInRoot(root, args.Directory)
+				if err != nil {
+					return "", fmt.Errorf("grep_files failed: %w", err)
+				}
+			}
+			cmdArgs = append(cmdArgs, "--", dir)
 		} else {
 			cmdArgs = append(cmdArgs, "--", ".")
 		}

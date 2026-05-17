@@ -178,3 +178,39 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 		}
 	})
 }
+
+func TestLocalReadFile_SymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	workspaceRoot := filepath.Join(tmpDir, "workspace")
+	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRegistry()
+	RegisterLocalTools(r, workspaceRoot, nil, "")
+
+	// Create a file OUTSIDE the workspace root
+	secretFile := filepath.Join(tmpDir, "secret.txt")
+	secretContent := "SENSITIVE SYSTEM DATA"
+	if err := os.WriteFile(secretFile, []byte(secretContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink INSIDE the workspace root pointing OUTSIDE
+	linkPath := filepath.Join(workspaceRoot, "malicious_link")
+	if err := os.Symlink(secretFile, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("symlink escape should be blocked", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": "malicious_link"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "read_file",
+			Arguments: string(args),
+		})
+
+		if err == nil {
+			t.Error("Security Vulnerability: read_file successfully read content through a symlink escaping the workspace root")
+		}
+	})
+}
