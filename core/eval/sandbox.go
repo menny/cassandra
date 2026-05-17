@@ -206,7 +206,7 @@ func extractTarGz(gzipPath, dst string) error {
 			}
 
 			safeLinkname := header.Linkname
-			if !filepath.IsAbs(linkTarget) {
+			if !filepath.IsAbs(header.Linkname) {
 				// Recompute the relative linkname from the physical directory
 				// to neutralize any physical path traversal bypasses.
 				safeLinkname, err = filepath.Rel(physicalDir, safeAbsTarget)

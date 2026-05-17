@@ -342,6 +342,9 @@ func registerLocalGlobFiles(r *Registry, root string) {
 
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil {
 				return nil
 			}
