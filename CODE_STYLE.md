@@ -169,7 +169,7 @@ under the relevant scope.
 
 ```
 # llm/REVIEWERS.md
-- `submitReviewToolName` ↔ `DESIGN.md §Technical Decisions 4`.
+- `submitReviewToolName` ↔ `DESIGN.md — Structured Feedback Extraction`.
 - `DefaultMaxTokens` ↔ CLI `--max-tokens` default in `cmd/ai_reviewer`.
 ```
 
