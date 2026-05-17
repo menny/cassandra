@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -38,6 +39,11 @@ func (r *Registry) HandleCall(ctx context.Context, tc llm.ToolCall) (string, err
 }
 
 func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string) {
+	if root != "" {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			root = resolved
+		}
+	}
 	registerLocalReadFile(r, root)
 	registerLocalGlobFiles(r, root)
 	registerLocalGrepFiles(r, root, ignoredLockFiles)

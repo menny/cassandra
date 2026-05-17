@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/menny/cassandra/util"
 )
 
 // Sandbox provides a high-fidelity git environment for evaluating the agent.
@@ -157,10 +159,9 @@ func extractTarGz(gzipPath, dst string) error {
 
 		target := filepath.Join(dst, header.Name)
 
-		// Security: Prevent "Tar Slip" (directory traversal)
-		rel, err := filepath.Rel(dst, target)
-		if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-			return fmt.Errorf("tar slip detected: %s", header.Name)
+		// Security: Prevent "Tar Slip" (directory traversal and symlink escape)
+		if _, err := util.ValidatePathInRoot(dst, header.Name); err != nil {
+			return fmt.Errorf("tar slip detected: %w", err)
 		}
 
 		switch header.Typeflag {
@@ -182,6 +183,42 @@ func extractTarGz(gzipPath, dst string) error {
 				return err
 			}
 			if err := f.Close(); err != nil {
+				return err
+			}
+		case tar.TypeSymlink:
+			// Security: Validate that the symlink target is also within the root.
+			// Use the physical directory to resolve relative targets to prevent trampoline escapes.
+			physicalDir, err := util.ValidatePathInRoot(dst, filepath.Dir(header.Name))
+			if err != nil {
+				return fmt.Errorf("invalid symlink directory: %w", err)
+			}
+
+			linkTarget := header.Linkname
+			if !filepath.IsAbs(linkTarget) {
+				// Relative targets are relative to the symlink's physical location.
+				linkTarget = filepath.Join(physicalDir, linkTarget)
+			}
+
+			// Validate the resolved target and capture the safe physical path.
+			safeAbsTarget, err := util.ValidatePathInRoot(dst, linkTarget)
+			if err != nil {
+				return fmt.Errorf("malicious symlink target detected: %w", err)
+			}
+
+			safeLinkname := header.Linkname
+			if !filepath.IsAbs(header.Linkname) {
+				// Recompute the relative linkname from the physical directory
+				// to neutralize any physical path traversal bypasses.
+				safeLinkname, err = filepath.Rel(physicalDir, safeAbsTarget)
+				if err != nil {
+					return fmt.Errorf("failed to compute safe linkname: %w", err)
+				}
+			}
+
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			if err := os.Symlink(safeLinkname, target); err != nil {
 				return err
 			}
 		}

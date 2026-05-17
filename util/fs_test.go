@@ -62,3 +62,107 @@ func TestWriteFileWithDirs(t *testing.T) {
 		t.Errorf("expected 'hello', got %q", string(content))
 	}
 }
+
+func TestValidatePathInRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Resolve root to handle macOS /var symlink
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+
+	// Create a secret file outside root
+	secretFile := filepath.Join(tmpDir, "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid path", func(t *testing.T) {
+		path := filepath.Join(root, "file.txt")
+		if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := ValidatePathInRoot(root, "file.txt")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		rel, _ := filepath.Rel(root, got)
+		if rel != "file.txt" {
+			t.Errorf("expected rel path 'file.txt', got %q", rel)
+		}
+	})
+
+	t.Run("traversal attempt", func(t *testing.T) {
+		_, err := ValidatePathInRoot(root, "../secret.txt")
+		if err == nil {
+			t.Error("expected error for traversal, got nil")
+		}
+	})
+
+	t.Run("symlink escape", func(t *testing.T) {
+		link := filepath.Join(root, "link")
+		if err := os.Symlink(secretFile, link); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ValidatePathInRoot(root, "link")
+		if err == nil {
+			t.Error("expected error for symlink escape, got nil")
+		}
+	})
+
+	t.Run("nested symlink escape", func(t *testing.T) {
+		subdir := filepath.Join(tmpDir, "outside_dir")
+		if err := os.Mkdir(subdir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		outsideFile := filepath.Join(subdir, "file.txt")
+		if err := os.WriteFile(outsideFile, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		link := filepath.Join(root, "dir_link")
+		if err := os.Symlink(subdir, link); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := ValidatePathInRoot(root, "dir_link/file.txt")
+		if err == nil {
+			t.Error("expected error for nested symlink escape, got nil")
+		}
+	})
+
+	t.Run("valid symlink within root", func(t *testing.T) {
+		target := filepath.Join(root, "target.txt")
+		if err := os.WriteFile(target, []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(root, "valid_link")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := ValidatePathInRoot(root, "valid_link")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		rel, _ := filepath.Rel(root, got)
+		if rel != "target.txt" {
+			t.Errorf("expected rel path 'target.txt', got %q", rel)
+		}
+	})
+
+	t.Run("nested non-existent symlink escape", func(t *testing.T) {
+		link := filepath.Join(root, "bad_link")
+		if err := os.Symlink(tmpDir, link); err != nil {
+			t.Fatal(err)
+		}
+		// This should fail even though 'a/b/c.txt' does not exist
+		_, err := ValidatePathInRoot(root, "bad_link/a/b/c.txt")
+		if err == nil {
+			t.Error("expected error for nested non-existent symlink escape, got nil")
+		}
+	})
+}

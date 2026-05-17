@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 func registerLocalReadFile(r *Registry, root string) {
@@ -73,12 +74,10 @@ func registerLocalReadFile(r *Registry, root string) {
 
 		fullPath := args.FilePath
 		if root != "" {
-			if !filepath.IsAbs(fullPath) {
-				fullPath = filepath.Join(root, fullPath)
-			}
-			rel, err := filepath.Rel(root, fullPath)
-			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-				return "", fmt.Errorf("read_file failed: path %q is outside the workspace root", args.FilePath)
+			var err error
+			fullPath, err = util.ValidatePathInRoot(root, args.FilePath)
+			if err != nil {
+				return "", fmt.Errorf("read_file failed: %w", err)
 			}
 		}
 
@@ -334,28 +333,29 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			dir = "."
 		}
 		if root != "" {
-			if !filepath.IsAbs(dir) {
-				dir = filepath.Join(root, dir)
-			}
-			rel, err := filepath.Rel(root, dir)
-			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-				return "", fmt.Errorf("glob_files failed: path %q is outside the workspace root", args.Directory)
+			var err error
+			dir, err = util.ValidatePathInRoot(root, dir)
+			if err != nil {
+				return "", fmt.Errorf("glob_files failed: %w", err)
 			}
 		}
 
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			if err != nil {
 				return nil
 			}
 			if !d.IsDir() {
-				if strings.Contains(filepath.Base(path), args.Query) || strings.Contains(path, args.Query) {
-					relPath := path
-					if root != "" {
-						if rel, err := filepath.Rel(root, path); err == nil {
-							relPath = rel
-						}
+				relPath := path
+				if root != "" {
+					if rel, err := filepath.Rel(root, path); err == nil {
+						relPath = rel
 					}
+				}
+				if strings.Contains(filepath.Base(relPath), args.Query) || strings.Contains(relPath, args.Query) {
 					matches = append(matches, relPath)
 				}
 			}
@@ -413,7 +413,23 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 		cmdArgs = append(cmdArgs, "-e", args.Query)
 
 		if args.Directory != "" {
-			cmdArgs = append(cmdArgs, "--", args.Directory)
+			dir := args.Directory
+			if root != "" {
+				var err error
+				dir, err = util.ValidatePathInRoot(root, args.Directory)
+				if err != nil {
+					return "", fmt.Errorf("grep_files failed: %w", err)
+				}
+				// Convert back to relative path for Git consistency and relative output.
+				// We only use the relative path if it's clean and doesn't escape.
+				if rel, err := filepath.Rel(root, dir); err == nil && !strings.HasPrefix(rel, "..") {
+					dir = rel
+				} else if !filepath.IsAbs(args.Directory) {
+					// Fallback to original input if it was relative
+					dir = args.Directory
+				}
+			}
+			cmdArgs = append(cmdArgs, "--", dir)
 		} else {
 			cmdArgs = append(cmdArgs, "--", ".")
 		}

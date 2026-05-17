@@ -41,3 +41,77 @@ func SanitizeFileNameWithDefault(s, defaultName string) string {
 	}
 	return res
 }
+
+// ValidatePathInRoot ensures that the given path is within the root directory.
+// It resolves symlinks to prevent escaping the root, including cases where
+// multiple non-existent components follow a symlink.
+func ValidatePathInRoot(root, path string) (string, error) {
+	var err error
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path for root: %w", err)
+	}
+	// Resolve symlinks for root too, because on some systems (like macOS)
+	// /var is a symlink to /private/var, which can cause Rel to fail.
+	if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolvedRoot
+	}
+
+	fullPath := path
+	if !filepath.IsAbs(fullPath) {
+		fullPath = filepath.Join(root, fullPath)
+	}
+	fullPath = filepath.Clean(fullPath)
+
+	// 1. Logical boundary check (preliminary)
+	absFullPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		absFullPath = fullPath
+	}
+	rel, err := filepath.Rel(root, absFullPath)
+	if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return "", fmt.Errorf("path %q is logically outside the root %q", path, root)
+	}
+
+	// 2. Physical boundary check (resolve symlinks)
+	// We iterate upwards until we find a component that exists, then validate its resolution.
+	curr := fullPath
+	for {
+		resolved, err := filepath.EvalSymlinks(curr)
+		if err == nil {
+			// Found an existing component. Check if its resolved path is within root.
+			rel, err = filepath.Rel(root, resolved)
+			if err != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+				return "", fmt.Errorf("resolved path %q (from %q) is outside the root %q", resolved, curr, root)
+			}
+
+			// If we resolved a prefix of the path, we should return the path constructed from the resolved prefix.
+			// This ensures that symlinks are resolved in the returned path.
+			if curr != fullPath {
+				relToCurr, _ := filepath.Rel(curr, fullPath)
+				return filepath.Join(resolved, relToCurr), nil
+			}
+			return resolved, nil
+		}
+
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("failed to resolve symlinks for %q: %w", curr, err)
+		}
+
+		// Handle potential broken symlinks. EvalSymlinks fails with IsNotExist
+		// if a symlink exists but its target does not.
+		if info, lerr := os.Lstat(curr); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path contains a broken symlink %q which cannot be safely validated", curr)
+		}
+
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			// Reached the root of the filesystem without finding anything that exists.
+			// This shouldn't happen if 'root' exists, but as a fallback, we've already done the logical check.
+			break
+		}
+		curr = parent
+	}
+
+	return fullPath, nil
+}
