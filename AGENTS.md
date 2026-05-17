@@ -94,7 +94,8 @@ Tools that interact with external data (files, network, pipes) MUST be resilient
 - **Hard Safety Limits**: Every tool MUST enforce an output size limit (e.g., 40KB) and a per-operation memory cap.
 - **Streaming over Loading**: Do NOT use `os.ReadFile` or `io.ReadAll` on potentially large sources. Use `io.LimitReader` and `bufio.Reader` to process data in chunks.
 - **Pseudo-file Protection**: Never trust `os.Stat().Size()` for OOM prevention (it returns 0 for pseudo-files like `/dev/zero`). Always use `io.LimitReader` with a hard cap.
-- **Cancellation Checks**: Every loop that performs I/O or intensive computation MUST check `ctx.Err()` in each iteration to ensure the tool can be interrupted by the ReAct loop timeout.
+- **Cancellation Checks**: Every loop that performs I/O or intensive computation (including filesystem traversals like `filepath.WalkDir`) MUST check `ctx.Err()` in each iteration to ensure the tool can be interrupted by the ReAct loop timeout.
+- **Workspace Isolation**: Tools MUST NEVER read or write outside the designated workspace root. Use `util.ValidatePathInRoot` to securely resolve and validate paths, ensuring protection against directory traversal and symbolic link escapes.
 
 ## Security Standards
 
@@ -103,6 +104,12 @@ To prevent command injection vulnerabilities, you MUST NOT interpolate user-cont
 - **Use Environment Variables**: Map user-controlled inputs to environment variables in the `env:` block of the step.
 - **Reference Safely**: Use the environment variable within the script (e.g., `run: my-tool --arg "$VAL"`). This ensures the shell treats the input as literal data.
 - **Exceptions**: System-provided variables that are not user-controlled and follow a strict format (e.g., `${{ github.repository }}`, `${{ github.action_path }}`, `${{ github.workspace }}`, `${{ runner.temp }}`) can be used directly if it improves readability and doesn't introduce risk.
+
+### 2. Tool Workspace Isolation
+To prevent sensitive data leaks and host system compromise, all local tools MUST enforce strict directory isolation:
+- **Root Validation**: Always validate user-provided paths against the workspace root using `util.ValidatePathInRoot`.
+- **Symlink Hardening**: Do not trust lexical path cleaning (e.g., `filepath.Clean`). Validation must resolve physical paths to detect symlink trampolines or broken symlink escapes.
+- **TOCTOU Protection**: When creating symlinks (e.g., in sandboxes), re-compute the relative target from validated physical paths to neutralize parsing differentials.
 
 ## Git Commit Guidelines
 

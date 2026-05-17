@@ -15,6 +15,13 @@ Tools that invoke external CLIs MUST:
 - **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., a circular buffer for `tail_lines`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1MB).
 - **Graceful Truncation**: When a tool hits an output limit, it should return as much valid data as possible followed by a clear truncation notice (e.g., `... (truncated)`), rather than failing with an error.
 
+### 4. Path Validation & Security
+Tools that accept file or directory paths as arguments MUST:
+- **Use `util.ValidatePathInRoot(root, path)`**: This helper ensures the path is physically within the root by resolving all intermediate symlinks.
+- **Check for Broken Symlinks**: Broken symlinks committed to a repo can be used to bypass lexical checks. `ValidatePathInRoot` handles this by rejecting paths that cannot be safely resolved.
+- **Consistent Relative Output**: Tools (like `grep` or `glob`) SHOULD return paths relative to the workspace root. If a tool resolves a path to an absolute location during validation, it MUST convert it back to a relative path before passing it to external CLIs or returning it to the LLM.
+- **Context Awareness**: Long-running filesystem operations (e.g., `WalkDir`) MUST propagate the tool's context and check `ctx.Err()` to prevent "context holes" during large repository scans.
+
 ## Model Context Protocol (MCP) Servers
 
 MCP servers allow Cassandra to extend its capabilities without increasing the main binary's complexity or dependency footprint.
@@ -54,4 +61,8 @@ The command should also include a trailing `--` to separate Bazel flags from app
 ## Testing Standards
 
 - **Local Tools**: Use `t.TempDir()` and file-based fixtures to test tools that interact with the filesystem.
+- **Security Negative Tests**: Any tool interacting with the filesystem MUST include test cases for:
+  - Directory traversal attempts (`../etc/passwd`).
+  - Symlinks pointing outside the workspace (valid, broken, and "trampoline" symlinks).
+  - TOCTOU bypasses (relative targets with hidden physical traversals).
 - **MCP Servers**: Unit tests for MCP server logic should verify the execution of underlying commands (e.g., by checking for expected output strings or error conditions).
