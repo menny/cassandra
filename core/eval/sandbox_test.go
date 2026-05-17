@@ -219,7 +219,7 @@ func TestExtractTarGz_BrokenSymlinkSlip(t *testing.T) {
 
 	// 5. Assert failure
 	if err == nil {
-		t.Error("Expected error for broken symlink escape tarball, but got nil")
+		t.Fatalf("Expected error for broken symlink escape tarball, but got nil")
 	}
 	if !strings.Contains(err.Error(), "broken symlink") {
 		t.Errorf("Expected 'broken symlink' error, got: %v", err)
@@ -262,7 +262,7 @@ func TestExtractTarGz_SymlinkTargetSlip(t *testing.T) {
 
 	// 4. Assert failure
 	if err == nil {
-		t.Error("Expected error for malicious symlink target, but got nil")
+		t.Fatalf("Expected error for malicious symlink target, but got nil")
 	}
 	if !strings.Contains(err.Error(), "malicious symlink target detected") {
 		t.Errorf("Expected 'malicious symlink target detected' error, got: %v", err)
