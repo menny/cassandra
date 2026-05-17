@@ -20,6 +20,8 @@ Tools that invoke external CLIs MUST:
 ### 3. Resource Management
 - **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., the `tail_lines` parameter of `read_file`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1 MB). This cap covers in-process buffer allocation.
 - **Output Size Limit**: Every tool MUST cap the bytes it returns to the LLM at 40 KB. Return as much valid data as possible and append a clear truncation notice (e.g., `... (truncated)`) rather than failing.
+- **Streaming over Loading**: Do NOT use `os.ReadFile` or `io.ReadAll` on potentially large sources. Use `io.LimitReader` and `bufio.Reader` to process data in chunks.
+- **Pseudo-file Protection**: Never trust `os.Stat().Size()` for OOM prevention — it returns 0 for pseudo-files like `/dev/zero`. Always enforce limits via `io.LimitReader`, not by checking the reported file size.
 
 ### 4. Path Validation & Security
 Tools that accept file or directory paths as arguments MUST:

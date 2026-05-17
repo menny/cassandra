@@ -45,7 +45,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
   - `read_file`: Reads file content from the local disk.
   - `glob_files`: Finds files matching a pattern or extension.
   - `grep_files`: Searches for patterns in the repository using `git grep`.
-  - `wishlist_tool`: Reads developer wishlist/guidance files from a configurable directory.
+  - `wishlist_tool`: Records a capability gap the LLM encountered during a review into a configurable directory for future tool development.
 
 ### 5. LLM Abstraction (`llm/`)
 - **Interface**: `llm.Model` (in `llm/llm.go`) is the provider-agnostic interface. It exposes two generation methods: `GenerateContent` for free-form responses with optional tool use, and `GenerateStructuredContent` for schema-constrained output. Read `llm/llm.go` for the authoritative signatures.

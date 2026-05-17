@@ -13,8 +13,8 @@ import (
 
 // submitReviewToolName is the synthetic tool the OpenAI provider forces the
 // model to call to deliver structured output. The name is a documented
-// contract — see DESIGN.md §Technical Decisions 4 ("Structured Feedback
-// Extraction"). Keep it stable; downstream consumers may match on it.
+// contract — see DESIGN.md — Structured Feedback Extraction.
+// Keep it stable; downstream consumers may match on it.
 const submitReviewToolName = "submit_review"
 
 // Provider implements llm.Model backed by the OpenAI Chat Completions API.
