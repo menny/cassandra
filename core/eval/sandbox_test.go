@@ -174,6 +174,58 @@ func TestExtractTarGz_SymlinkSlip(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_BrokenSymlinkSlip(t *testing.T) {
+	// 1. Setup a clean destination and a parent directory we want to protect
+	parentDir := t.TempDir()
+	dstDir := filepath.Join(parentDir, "sandbox")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create a broken symlink in the destination that points to a non-existent path outside
+	linkPath := filepath.Join(dstDir, "broken_link")
+	if err := os.Symlink(filepath.Join(parentDir, "nonexistent"), linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Create a tarball that attempts to write through that broken symlink
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	content := "unauthorized access"
+	hdr := &tar.Header{
+		Name: "broken_link/evil.txt",
+		Mode: 0o644,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+
+	tw.Close()
+	gw.Close()
+
+	tarPath := filepath.Join(parentDir, "broken_symlink.tar.gz")
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Attempt extraction
+	err := extractTarGz(tarPath, dstDir)
+
+	// 5. Assert failure
+	if err == nil {
+		t.Error("Expected error for broken symlink escape tarball, but got nil")
+	}
+	if !strings.Contains(err.Error(), "broken symlink") {
+		t.Errorf("Expected 'broken symlink' error, got: %v", err)
+	}
+}
+
 func TestExtractTarGz_SymlinkTargetSlip(t *testing.T) {
 	// 1. Setup a clean destination and a parent directory we want to protect
 	parentDir := t.TempDir()

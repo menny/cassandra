@@ -98,6 +98,12 @@ func ValidatePathInRoot(root, path string) (string, error) {
 			return "", fmt.Errorf("failed to resolve symlinks for %q: %w", curr, err)
 		}
 
+		// Handle potential broken symlinks. EvalSymlinks fails with IsNotExist
+		// if a symlink exists but its target does not.
+		if info, lerr := os.Lstat(curr); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path contains a broken symlink %q which cannot be safely validated", curr)
+		}
+
 		parent := filepath.Dir(curr)
 		if parent == curr {
 			// Reached the root of the filesystem without finding anything that exists.
