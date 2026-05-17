@@ -18,8 +18,8 @@ Tools that invoke external CLIs MUST:
 - On failure, include the `stderr` output in the returned error string so the LLM can diagnose the issue (e.g., "command failed: <stderr>").
 
 ### 3. Resource Management
-- **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., the `tail_lines` parameter of `read_file`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1 MB). This cap covers in-process buffer allocation; the separate 40 KB output limit (root AGENTS.md — Defensive Tool Implementation) caps bytes returned to the LLM.
-- **Graceful Truncation**: When a tool hits an output limit, it should return as much valid data as possible followed by a clear truncation notice (e.g., `... (truncated)`), rather than failing with an error.
+- **Bounded Buffers**: If a tool uses a buffer to collect data (e.g., the `tail_lines` parameter of `read_file`), it MUST have both an entry count limit AND a strict byte-based memory cap (e.g., 1 MB). This cap covers in-process buffer allocation.
+- **Output Size Limit**: Every tool MUST cap the bytes it returns to the LLM at 40 KB. Return as much valid data as possible and append a clear truncation notice (e.g., `... (truncated)`) rather than failing.
 
 ### 4. Path Validation & Security
 Tools that accept file or directory paths as arguments MUST:

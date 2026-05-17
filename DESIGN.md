@@ -41,7 +41,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 ### 4. Tool Registry (`tools/`)
 - **Interface**: The `ToolDispatcher` interface (defined in `core/agent.go`) is the minimal set of methods the Agent needs: one to enumerate available tools and one to dispatch a tool call by name with its context and arguments. Read `core/agent.go` for the authoritative signature.
 - **Implementation**: `tools.Registry` (in `tools/registry.go`) implements this interface. It stores a list of `llm.ToolDef` and a map of `ToolHandler` functions.
-- **Local Tools**: High-level tools implemented in `tools/local_tools.go` and registered via `tools.RegisterLocalTools`:
+- **Local Tools**: High-level tools implemented under `tools/` and registered via `tools.RegisterLocalTools`:
   - `read_file`: Reads file content from the local disk.
   - `glob_files`: Finds files matching a pattern or extension.
   - `grep_files`: Searches for patterns in the repository using `git grep`.
