@@ -170,9 +170,13 @@ func TestValidatePathInRoot(t *testing.T) {
 func TestOpenInRoot(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := filepath.Join(tmpDir, "root")
-	os.Mkdir(root, 0o755)
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	filePath := filepath.Join(root, "test.txt")
-	os.WriteFile(filePath, []byte("hello"), 0o644)
+	if err := os.WriteFile(filePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("valid path", func(t *testing.T) {
 		f, err := OpenInRoot(root, "test.txt")
@@ -220,12 +224,16 @@ func TestSafeRel(t *testing.T) {
 func TestValidateAndRel(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := filepath.Join(tmpDir, "root")
-	os.Mkdir(root, 0o755)
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
 	filePath := filepath.Join(root, "test.txt")
-	os.WriteFile(filePath, []byte("hello"), 0o644)
+	if err := os.WriteFile(filePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Run("valid path", func(t *testing.T) {
 		got, err := ValidateAndRel(root, "test.txt")
