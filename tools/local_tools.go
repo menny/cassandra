@@ -330,6 +330,15 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			}
 		}
 
+		resolvedRoot := root
+		if root != "" {
+			// Resolve root once to handle symlinks (e.g. macOS /var) so that
+			// util.SafeRel produces consistent relative paths during the walk.
+			if r, err := util.ValidatePathInRoot(root, ""); err == nil {
+				resolvedRoot = r
+			}
+		}
+
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
@@ -339,7 +348,7 @@ func registerLocalGlobFiles(r *Registry, root string) {
 				return nil
 			}
 			if !d.IsDir() {
-				relPath := util.SafeRel(root, path)
+				relPath := util.SafeRel(resolvedRoot, path)
 				if strings.Contains(filepath.Base(relPath), args.Query) || strings.Contains(relPath, args.Query) {
 					matches = append(matches, relPath)
 				}

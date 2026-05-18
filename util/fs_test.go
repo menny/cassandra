@@ -211,12 +211,10 @@ func TestSafeRel(t *testing.T) {
 	})
 
 	t.Run("invalid rel", func(t *testing.T) {
-		// On windows this might fail if they are on different drives,
-		// but on unix it usually works. To force an error, maybe empty base?
-		// Actually filepath.Rel("", "a") might error.
-		got := SafeRel("", "a")
-		if got != "a" {
-			t.Errorf("expected 'a' on error, got %q", got)
+		// Combining absolute and relative paths forces filepath.Rel to fail on Unix.
+		got := SafeRel("/a", "b")
+		if got != "b" {
+			t.Errorf("expected 'b' on error, got %q", got)
 		}
 	})
 }
