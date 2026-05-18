@@ -25,5 +25,8 @@ go_test(
         "wishlist_test.go",
     ],
     embed = [":tools"],
-    deps = ["//llm"],
+    deps = [
+        "//llm",
+        "//util",
+    ],
 )

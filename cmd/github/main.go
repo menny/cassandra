@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"github.com/menny/cassandra/core"
-	"github.com/menny/cassandra/tools"
+	"github.com/menny/cassandra/util"
 	flag "github.com/spf13/pflag"
 )
 
@@ -45,7 +45,7 @@ func main() {
 	flag.StringVar(&metadataFile, "metadata-file", "", "Path to the metadata file (for post-structured-review)")
 	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
 	flag.BoolVar(&deleteOldComments, "delete-old-comments", true, "Whether to delete previous bot-authored inline comments before posting a new review.")
-	flag.StringSliceVar(&ignoredLockFiles, "ignored-lock-files", tools.DefaultLockFiles, "Comma-separated list of lock files to ignore (overrides default)")
+	flag.StringSliceVar(&ignoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore (overrides default)")
 
 	flag.Parse()
 
@@ -654,7 +654,7 @@ func getDiff(ctx context.Context, client *github.Client, owner, repo string, prN
 			// split on " b/" from the right to correctly isolate the destination path.
 			skipping = false
 			if idx := strings.LastIndex(line, " b/"); idx != -1 {
-				skipping = tools.IsLockFile(line[idx+3:], ignoredLockFiles)
+				skipping = util.IsLockFile(line[idx+3:], ignoredLockFiles)
 			}
 		}
 
@@ -678,7 +678,7 @@ func getFiles(ctx context.Context, client *github.Client, owner, repo string, pr
 			return nil, err
 		}
 		for _, f := range files {
-			if path := f.GetFilename(); !tools.IsLockFile(path, ignoredLockFiles) {
+			if path := f.GetFilename(); !util.IsLockFile(path, ignoredLockFiles) {
 				allFiles = append(allFiles, path)
 			}
 		}

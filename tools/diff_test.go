@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/menny/cassandra/util"
 )
 
 func runGitCmd(t *testing.T, dir string, args ...string) {
@@ -57,7 +59,7 @@ func TestFetchGitDiff(t *testing.T) {
 	t.Run("Triple-dot diff", func(t *testing.T) {
 		// diff main...feature should ONLY show feature.txt
 		// NOT main_new.txt
-		diff, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
+		diff, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", util.DefaultLockFiles)
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -98,7 +100,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "go.sum")
 		runGitCmd(t, tmpDir, "commit", "-m", "add go.sum")
 
-		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "feature", util.DefaultLockFiles)
 		if err != nil {
 			t.Fatalf("FetchGitDiff failed: %v", err)
 		}
@@ -120,7 +122,7 @@ func TestFetchGitDiff(t *testing.T) {
 		runGitCmd(t, tmpDir, "add", "uncommitted.txt")
 
 		// head="HEAD" should include uncommitted changes
-		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD", DefaultLockFiles)
+		_, files, err := FetchGitDiff(context.Background(), tmpDir, "main", "HEAD", util.DefaultLockFiles)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +138,7 @@ func TestFetchGitDiff(t *testing.T) {
 		}
 
 		// head="feature" should NOT include uncommitted changes (uses triple-dot)
-		_, files, err = FetchGitDiff(context.Background(), tmpDir, "main", "feature", DefaultLockFiles)
+		_, files, err = FetchGitDiff(context.Background(), tmpDir, "main", "feature", util.DefaultLockFiles)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,29 +148,6 @@ func TestFetchGitDiff(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestIsLockFile(t *testing.T) {
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"go.sum", true},
-		{"backend/go.sum", true},
-		{"a/b/c/go.sum", true},
-		{"Cargo.lock", true},
-		{"main.go", false},
-		{"go.sum.bak", false},
-		{"my-go.sum", false}, // not a path-separated suffix
-		{"", false},
-	}
-	for _, c := range cases {
-		t.Run(c.path, func(t *testing.T) {
-			if got := IsLockFile(c.path, DefaultLockFiles); got != c.want {
-				t.Errorf("IsLockFile(%q) = %v, want %v", c.path, got, c.want)
-			}
-		})
-	}
 }
 
 func TestFetchGitDiff_CustomIgnore(t *testing.T) {

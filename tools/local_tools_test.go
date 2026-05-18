@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 func TestLocalReadFile(t *testing.T) {
@@ -205,7 +206,7 @@ func TestLocalGlobFiles_Errors(t *testing.T) {
 func TestLocalGrepFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	r := NewRegistry()
-	registerLocalGrepFiles(r, tmpDir, DefaultLockFiles)
+	registerLocalGrepFiles(r, tmpDir, util.DefaultLockFiles)
 
 	setupGitRepo(t, tmpDir)
 

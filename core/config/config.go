@@ -9,7 +9,7 @@ import (
 
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
-	"github.com/menny/cassandra/tools"
+	"github.com/menny/cassandra/util"
 )
 
 // Config represents the complete configuration for a Cassandra reviewer.
@@ -47,7 +47,7 @@ func NewDefaultConfig() *Config {
 		Head:             "HEAD",
 		MainGuidelines:   "general",
 		MaxTokens:        llm.DefaultMaxTokens,
-		IgnoredLockFiles: tools.DefaultLockFiles,
+		IgnoredLockFiles: util.DefaultLockFiles,
 	}
 }
 
@@ -60,7 +60,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("base", "main")
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
-	v.SetDefault("ignored-lock-files", tools.DefaultLockFiles)
+	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
 
 	if configFile != "" {

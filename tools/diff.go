@@ -5,54 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/menny/cassandra/util"
 )
-
-var DefaultLockFiles = []string{
-	"go.sum",
-	"package-lock.json",
-	"yarn.lock",
-	"pnpm-lock.yaml",
-	"bun.lockb",
-	"deno.lock",
-	"Cargo.lock",
-	"poetry.lock",
-	"uv.lock",
-	"Gemfile.lock",
-	"composer.lock",
-	"pubspec.lock",
-	"mix.lock",
-	"flake.lock",
-	"MODULE.bazel.lock",
-}
-
-// appendLockFileExcludes appends a git pathspec ":(exclude)*<name>" for each
-// entry in ignoredLockFiles to args, returning the grown slice. Used to suppress
-// noisy lockfile churn in diff and grep output.
-func appendLockFileExcludes(args []string, ignoredLockFiles []string) []string {
-	for _, lf := range ignoredLockFiles {
-		if strings.TrimSpace(lf) == "" {
-			continue
-		}
-		args = append(args, fmt.Sprintf(":(exclude)*%s", lf))
-	}
-	return args
-}
-
-// IsLockFile reports whether path names one of the ignored lockfiles —
-// either at the repository root (path == name) or in any subdirectory
-// (path ends in "/name"). Used by callers that operate on pre-computed
-// paths (e.g. PR file lists) rather than via git pathspec excludes.
-func IsLockFile(path string, ignoredLockFiles []string) bool {
-	for _, lf := range ignoredLockFiles {
-		if strings.TrimSpace(lf) == "" {
-			continue
-		}
-		if path == lf || strings.HasSuffix(path, "/"+lf) {
-			return true
-		}
-	}
-	return false
-}
 
 // runGit invokes `git <args>` in the given working directory (or the current
 // directory when dir is empty) and returns combined stdout+stderr. Callers
@@ -79,7 +34,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
-	cmdArgs = appendLockFileExcludes(cmdArgs, ignoredLockFiles)
+	cmdArgs = append(cmdArgs, util.GitExcludeArgs(ignoredLockFiles)...)
 
 	out, err := runGit(ctx, workingDir, cmdArgs...)
 	if err != nil {
@@ -92,7 +47,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	}
 
 	// Get file list
-	nameOnlyArgs := appendLockFileExcludes([]string{"diff", "--name-only", diffRange, "--", "."}, ignoredLockFiles)
+	nameOnlyArgs := append([]string{"diff", "--name-only", diffRange, "--", "."}, util.GitExcludeArgs(ignoredLockFiles)...)
 	nameOnlyOut, err := runGit(ctx, workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
