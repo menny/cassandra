@@ -166,3 +166,87 @@ func TestValidatePathInRoot(t *testing.T) {
 		}
 	})
 }
+
+func TestOpenInRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "test.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid path", func(t *testing.T) {
+		f, err := OpenInRoot(root, "test.txt")
+		if err != nil {
+			t.Fatalf("OpenInRoot failed: %v", err)
+		}
+		f.Close()
+	})
+
+	t.Run("invalid path", func(t *testing.T) {
+		_, err := OpenInRoot(root, "../secret.txt")
+		if err == nil {
+			t.Fatal("expected error for invalid path, got nil")
+		}
+	})
+
+	t.Run("no root", func(t *testing.T) {
+		f, err := OpenInRoot("", filePath)
+		if err != nil {
+			t.Fatalf("OpenInRoot failed with no root: %v", err)
+		}
+		f.Close()
+	})
+}
+
+func TestSafeRel(t *testing.T) {
+	t.Run("valid rel", func(t *testing.T) {
+		got := SafeRel("/a/b", "/a/b/c")
+		if got != "c" {
+			t.Errorf("expected 'c', got %q", got)
+		}
+	})
+
+	t.Run("invalid rel", func(t *testing.T) {
+		// Combining absolute and relative paths forces filepath.Rel to fail on Unix.
+		got := SafeRel("/a", "b")
+		if got != "b" {
+			t.Errorf("expected 'b' on error, got %q", got)
+		}
+	})
+}
+
+func TestValidateAndRel(t *testing.T) {
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	filePath := filepath.Join(root, "test.txt")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid path", func(t *testing.T) {
+		got, err := ValidateAndRel(root, "test.txt")
+		if err != nil {
+			t.Fatalf("ValidateAndRel failed: %v", err)
+		}
+		if got != "test.txt" {
+			t.Errorf("expected 'test.txt', got %q", got)
+		}
+	})
+
+	t.Run("invalid path", func(t *testing.T) {
+		_, err := ValidateAndRel(root, "../secret.txt")
+		if err == nil {
+			t.Fatal("expected error for invalid path, got nil")
+		}
+	})
+}

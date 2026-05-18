@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -72,16 +71,7 @@ func registerLocalReadFile(r *Registry, root string) {
 			maxOutput = absoluteMaxReadLength
 		}
 
-		fullPath := args.FilePath
-		if root != "" {
-			var err error
-			fullPath, err = util.ValidatePathInRoot(root, args.FilePath)
-			if err != nil {
-				return "", fmt.Errorf("read_file failed: %w", err)
-			}
-		}
-
-		f, err := os.Open(fullPath)
+		f, err := util.OpenInRoot(root, args.FilePath)
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
@@ -340,6 +330,15 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			}
 		}
 
+		resolvedRoot := root
+		if root != "" {
+			// Resolve root once to handle symlinks (e.g. macOS /var) so that
+			// util.SafeRel produces consistent relative paths during the walk.
+			if r, err := util.ValidatePathInRoot(root, ""); err == nil {
+				resolvedRoot = r
+			}
+		}
+
 		var matches []string
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
@@ -349,12 +348,7 @@ func registerLocalGlobFiles(r *Registry, root string) {
 				return nil
 			}
 			if !d.IsDir() {
-				relPath := path
-				if root != "" {
-					if rel, err := filepath.Rel(root, path); err == nil {
-						relPath = rel
-					}
-				}
+				relPath := util.SafeRel(resolvedRoot, path)
 				if strings.Contains(filepath.Base(relPath), args.Query) || strings.Contains(relPath, args.Query) {
 					matches = append(matches, relPath)
 				}
@@ -416,17 +410,9 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 			dir := args.Directory
 			if root != "" {
 				var err error
-				dir, err = util.ValidatePathInRoot(root, args.Directory)
+				dir, err = util.ValidateAndRel(root, args.Directory)
 				if err != nil {
 					return "", fmt.Errorf("grep_files failed: %w", err)
-				}
-				// Convert back to relative path for Git consistency and relative output.
-				// We only use the relative path if it's clean and doesn't escape.
-				if rel, err := filepath.Rel(root, dir); err == nil && !strings.HasPrefix(rel, "..") {
-					dir = rel
-				} else if !filepath.IsAbs(args.Directory) {
-					// Fallback to original input if it was relative
-					dir = args.Directory
 				}
 			}
 			cmdArgs = append(cmdArgs, "--", dir)
