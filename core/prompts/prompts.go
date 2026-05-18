@@ -7,6 +7,8 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+
+	"github.com/menny/cassandra/util"
 )
 
 //go:embed reviewer_prompt.md
@@ -101,10 +103,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	personalPath := filepath.Join(workspaceRoot, "personal.ai_code_review_guidelines.md")
 	if personalBytes, err := os.ReadFile(personalPath); err == nil {
 		stable += fmt.Sprintf("\n<personal_review_guidelines>\n%s\n</personal_review_guidelines>\n", string(personalBytes))
-		relPersonal, relErr := filepath.Rel(workspaceRoot, personalPath)
-		if relErr != nil {
-			relPersonal = personalPath
-		}
+		relPersonal := util.SafeRel(workspaceRoot, personalPath)
 		summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: relPersonal, Type: "personal"})
 	}
 
@@ -169,10 +168,7 @@ func findRepoFiles(workspaceRoot string, changedFiles []string, filename string)
 		dir := filepath.Dir(absPath)
 
 		for {
-			relDir, err := filepath.Rel(workspaceRoot, dir)
-			if err != nil {
-				relDir = dir
-			}
+			relDir := util.SafeRel(workspaceRoot, dir)
 			if relDir == "." {
 				relDir = "/"
 			}

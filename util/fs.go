@@ -115,3 +115,39 @@ func ValidatePathInRoot(root, path string) (string, error) {
 
 	return fullPath, nil
 }
+
+// OpenInRoot validates the path is within the root (if root is not empty) and opens the file.
+func OpenInRoot(root, path string) (*os.File, error) {
+	fullPath := path
+	if root != "" {
+		var err error
+		fullPath, err = ValidatePathInRoot(root, path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return os.Open(fullPath)
+}
+
+// SafeRel returns the relative path from base to target. If an error occurs,
+// it returns the original target path.
+func SafeRel(base, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return target
+	}
+	return rel
+}
+
+// ValidateAndRel validates that target is within root and returns its relative path from root.
+func ValidateAndRel(root, target string) (string, error) {
+	resolvedTarget, err := ValidatePathInRoot(root, target)
+	if err != nil {
+		return "", err
+	}
+	resolvedRoot, err := ValidatePathInRoot(root, "")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Rel(resolvedRoot, resolvedTarget)
+}

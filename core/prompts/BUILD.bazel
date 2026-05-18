@@ -19,6 +19,7 @@ go_library(
     ],
     importpath = "github.com/menny/cassandra/core/prompts",
     visibility = ["//visibility:public"],
+    deps = ["//util"],
 )
 
 filegroup(
