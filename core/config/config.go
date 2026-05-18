@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/viper"
 
@@ -84,6 +85,10 @@ func Load(configFile string) (*Config, error) {
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal configuration: %w", err)
+	}
+
+	for i, lf := range cfg.IgnoredLockFiles {
+		cfg.IgnoredLockFiles[i] = strings.TrimSpace(lf)
 	}
 
 	return cfg, nil

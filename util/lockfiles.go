@@ -30,11 +30,9 @@ var DefaultLockFiles = []string{
 // (path ends in "/name").
 func IsLockFile(path string, ignoredLockFiles []string) bool {
 	for _, lf := range ignoredLockFiles {
-		lf = strings.TrimSpace(lf)
 		if lf == "" {
 			continue
 		}
-		// Efficiently check for exact match or suffix starting with a slash
 		if path == lf {
 			return true
 		}
@@ -51,7 +49,6 @@ func IsLockFile(path string, ignoredLockFiles []string) bool {
 func GitExcludeArgs(ignoredLockFiles []string) []string {
 	args := make([]string, 0, len(ignoredLockFiles))
 	for _, lf := range ignoredLockFiles {
-		lf = strings.TrimSpace(lf)
 		if lf == "" {
 			continue
 		}

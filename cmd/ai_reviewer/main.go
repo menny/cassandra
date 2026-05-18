@@ -121,6 +121,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
+	for i, lf := range cfg.IgnoredLockFiles {
+		cfg.IgnoredLockFiles[i] = strings.TrimSpace(lf)
+	}
+
 	var missing []string
 	if cfg.Provider == "" {
 		missing = append(missing, "--provider")
