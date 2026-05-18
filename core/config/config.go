@@ -87,9 +87,11 @@ func Load(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
+	trimmed := make([]string, len(cfg.IgnoredLockFiles))
 	for i, lf := range cfg.IgnoredLockFiles {
-		cfg.IgnoredLockFiles[i] = strings.TrimSpace(lf)
+		trimmed[i] = strings.TrimSpace(lf)
 	}
+	cfg.IgnoredLockFiles = trimmed
 
 	return cfg, nil
 }

@@ -34,7 +34,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	cmdArgs := []string{"diff", diffRange}
 
 	cmdArgs = append(cmdArgs, "--", ".")
-	cmdArgs = append(cmdArgs, util.GitExcludeArgs(ignoredLockFiles)...)
+	cmdArgs = util.AppendGitExcludeArgs(cmdArgs, ignoredLockFiles)
 
 	out, err := runGit(ctx, workingDir, cmdArgs...)
 	if err != nil {
@@ -47,7 +47,8 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	}
 
 	// Get file list
-	nameOnlyArgs := append([]string{"diff", "--name-only", diffRange, "--", "."}, util.GitExcludeArgs(ignoredLockFiles)...)
+	nameOnlyArgs := []string{"diff", "--name-only", diffRange, "--", "."}
+	nameOnlyArgs = util.AppendGitExcludeArgs(nameOnlyArgs, ignoredLockFiles)
 	nameOnlyOut, err := runGit(ctx, workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails

@@ -49,9 +49,11 @@ func main() {
 
 	flag.Parse()
 
+	trimmed := make([]string, len(ignoredLockFiles))
 	for i, lf := range ignoredLockFiles {
-		ignoredLockFiles[i] = strings.TrimSpace(lf)
+		trimmed[i] = strings.TrimSpace(lf)
 	}
+	ignoredLockFiles = trimmed
 
 	if repoFullName == "" {
 		log.Fatal("--repo-full-name is required")
