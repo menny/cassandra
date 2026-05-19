@@ -45,8 +45,6 @@ type ToolCall struct {
 	Arguments string // raw JSON
 }
 
-// UnmarshalArguments unmarshals the raw JSON Arguments into the given destination.
-// It returns a formatted error if the unmarshaling fails.
 func (tc *ToolCall) UnmarshalArguments(dest any) error {
 	if tc.Arguments == "" {
 		return nil

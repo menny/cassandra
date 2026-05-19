@@ -194,3 +194,30 @@ fmt.Fprintf(&sb, "- %s\n", name)
 
 **Why:** Idiomatic code reads faster and passes the golangci-lint
 analyzers (`mapsloop`, `QF1012`) that catch drift in new code.
+
+## Concise, High-Value Comments
+
+Avoid comments that merely paraphrase what the code already says. Use
+comments to explain *why* something is done, to document non-obvious
+side effects, or to clarify tricky logic.
+
+```go
+// bad
+// UnmarshalArguments unmarshals the raw JSON Arguments into the given destination.
+func (tc *ToolCall) UnmarshalArguments(dest any) error { ... }
+
+// WriteFileWithDirs creates any missing parent directories before writing the file.
+func WriteFileWithDirs(path string, data []byte) error { ... }
+
+// good
+// Use triple-dot for comparing the tip of head with the common ancestor of base.
+diffRange = fmt.Sprintf("%s...%s", base, head)
+
+// Resolve resolves symlinks for root because on some systems (like macOS)
+// /var is a symlink to /private/var, which can cause Rel to fail.
+if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil { ... }
+```
+
+**Why:** Redundant comments are "noise" that hinders readability. High-value
+comments capture intent and design rationale that isn't immediately obvious
+from the code itself.
