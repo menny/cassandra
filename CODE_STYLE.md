@@ -194,3 +194,40 @@ fmt.Fprintf(&sb, "- %s\n", name)
 
 **Why:** Idiomatic code reads faster and passes the golangci-lint
 analyzers (`mapsloop`, `QF1012`) that catch drift in new code.
+
+## Concise, High-Value Comments
+
+Avoid comments that merely paraphrase what the code already says. Use
+comments to explain *why* something is done, to document non-obvious
+side effects, or to clarify tricky logic.
+
+**Exported symbols** should always have a doc comment for `godoc` and IDE
+support, but these should be refined to add value (e.g., documenting error
+conditions or invariants) rather than simply echoing the function name.
+
+```go
+// bad
+i++ // increment i
+
+// redundant (echoes name without adding value)
+// FetchGitCommits retrieves a list of git commits.
+func FetchGitCommits(...) { ... }
+
+// good (adds context about format and behavior)
+// FetchGitCommits returns a bulleted list of commit subjects (first line of
+// message) between base and head, excluding merge commits.
+func FetchGitCommits(...) { ... }
+
+// good
+// Use triple-dot for comparing the tip of head with the common ancestor of base.
+diffRange = fmt.Sprintf("%s...%s", base, head)
+
+// UnmarshalArguments decodes the raw JSON Arguments into dest. It returns a
+// formatted error if unmarshaling fails, suitable for inclusion in LLM-visible
+// tool results.
+func (tc *ToolCall) UnmarshalArguments(dest any) error { ... }
+```
+
+**Why:** Redundant comments are "noise" that hinders readability. High-value
+comments capture intent and design rationale that isn't immediately obvious
+from the code itself.

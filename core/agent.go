@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	// MaxIterationsPerFile is the recommended number of iterations per changed file.
+	// MaxIterationsPerFile is the recommended number of ReAct loop iterations to
+	// allocate per changed file in the diff.
 	MaxIterationsPerFile = 5
-	// AbsoluteMaxIter is the upper bound for the ReAct loop to prevent infinite recursion.
+	// AbsoluteMaxIter is the hard upper bound for the ReAct loop to prevent
+	// infinite recursion or excessive token spend.
 	AbsoluteMaxIter = 25
 )
 
@@ -57,7 +59,6 @@ func NewDefaultReporter(w io.Writer) Reporter {
 	return &defaultReporter{w: w}
 }
 
-// defaultReporter writes progress to an io.Writer.
 type defaultReporter struct {
 	w io.Writer
 }
