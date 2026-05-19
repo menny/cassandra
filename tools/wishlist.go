@@ -45,13 +45,8 @@ func registerWishlistTool(r *Registry, wishlistDir string) {
 		},
 	}
 
-	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	RegisterToolWithArgs(r, def, func(ctx context.Context, args wishlistArgs) (string, error) {
 		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-
-		var args wishlistArgs
-		if err := tc.UnmarshalArguments(&args); err != nil {
 			return "", err
 		}
 

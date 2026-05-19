@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -121,9 +120,7 @@ func (s *Sandbox) Cleanup() {
 }
 
 func (s *Sandbox) runGit(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = s.RootDir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := util.RunGit(ctx, s.RootDir, args...); err != nil {
 		return fmt.Errorf("git %v failed in %s: %w\nOutput: %s", args, s.RootDir, err, string(out))
 	}
 	return nil

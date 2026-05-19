@@ -1,11 +1,9 @@
 package tools
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os/exec"
 	"path/filepath"
@@ -47,18 +45,15 @@ func registerLocalReadFile(r *Registry, root string) {
 		},
 	}
 
-	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		var args struct {
-			FilePath      string `json:"file_path"`
-			LineStart     int    `json:"line_start"`
-			LineEnd       int    `json:"line_end"`
-			TailLines     int    `json:"tail_lines"`
-			MaxReadLength int    `json:"max_read_length"`
-		}
-		if err := tc.UnmarshalArguments(&args); err != nil {
-			return "", err
-		}
+	type args struct {
+		FilePath      string `json:"file_path"`
+		LineStart     int    `json:"line_start"`
+		LineEnd       int    `json:"line_end"`
+		TailLines     int    `json:"tail_lines"`
+		MaxReadLength int    `json:"max_read_length"`
+	}
 
+	RegisterToolWithArgs(r, def, func(ctx context.Context, args args) (string, error) {
 		const (
 			absoluteMaxReadLength = 40000
 			absoluteMaxTailLines  = 10000
@@ -71,222 +66,30 @@ func registerLocalReadFile(r *Registry, root string) {
 			maxOutput = absoluteMaxReadLength
 		}
 
-		f, err := util.OpenInRoot(root, args.FilePath)
+		tailLines := args.TailLines
+		if tailLines > absoluteMaxTailLines {
+			tailLines = absoluteMaxTailLines
+		}
+
+		isWholeFileRead := args.LineStart <= 0 && args.LineEnd <= 0 && args.TailLines <= 0
+
+		opts := util.ReadFileOptions{
+			LineStart:             args.LineStart,
+			LineEnd:               args.LineEnd,
+			TailLines:             tailLines,
+			MaxOutputBytes:        maxOutput,
+			MaxLineLength:         maxLineLength,
+			MaxTailBufferBytes:    maxTailBufferBytes,
+			FailIfTooLarge:        isWholeFileRead,
+			MaxWholeFileReadBytes: absoluteMaxReadLength,
+		}
+
+		content, err := util.ReadBoundedFile(ctx, root, args.FilePath, opts)
 		if err != nil {
 			return "", fmt.Errorf("read_file failed: %w", err)
 		}
-		defer f.Close()
-
-		// If no line limits, read up to absoluteMaxReadLength.
-		// Use LimitReader to protect against infinite pseudo-files (e.g. /dev/zero).
-		if args.LineStart <= 0 && args.LineEnd <= 0 && args.TailLines <= 0 {
-			lr := io.LimitReader(f, int64(absoluteMaxReadLength)+1)
-			b, err := io.ReadAll(lr)
-			if err != nil {
-				return "", fmt.Errorf("read_file failed: %w", err)
-			}
-			if len(b) > absoluteMaxReadLength {
-				return "", fmt.Errorf("read_file failed: file too large for whole-file read. Use line limits")
-			}
-			content := string(b)
-			if len(content) > maxOutput {
-				return content[:maxOutput] + "\n... (truncated)", nil
-			}
-			return content, nil
-		}
-
-		var sb strings.Builder
-		reader := bufio.NewReader(f)
-
-		if args.TailLines > 0 {
-			limit := args.TailLines
-			if limit > absoluteMaxTailLines {
-				limit = absoluteMaxTailLines
-			}
-
-			tb := newTailBuffer(limit, maxTailBufferBytes)
-			for {
-				if err := ctx.Err(); err != nil {
-					return "", err
-				}
-
-				line, err := readLimitedLine(ctx, reader, maxLineLength)
-				if len(line) == 0 && err != nil {
-					if err == io.EOF {
-						break
-					}
-					return "", fmt.Errorf("read_file failed while reading: %w", err)
-				}
-				tb.Add(line)
-				if err == io.EOF {
-					break
-				}
-			}
-
-			for i, line := range tb.Lines() {
-				if stop := writeLine(&sb, line, i > 0, maxOutput); stop {
-					break
-				}
-			}
-			return sb.String(), nil
-		}
-
-		start := args.LineStart
-		if start <= 0 {
-			start = 1
-		}
-		end := args.LineEnd
-
-		currentLine := 0
-		started := false
-		for {
-			if err := ctx.Err(); err != nil {
-				return "", err
-			}
-
-			line, err := readLimitedLine(ctx, reader, maxLineLength)
-			if len(line) == 0 && err != nil {
-				if err == io.EOF {
-					break
-				}
-				return "", fmt.Errorf("read_file failed while reading: %w", err)
-			}
-
-			currentLine++
-			if currentLine >= start && (end <= 0 || currentLine <= end) {
-				if stop := writeLine(&sb, line, started, maxOutput); stop {
-					break
-				}
-				started = true
-			}
-
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return "", fmt.Errorf("read_file failed while reading: %w", err)
-			}
-			if end > 0 && currentLine >= end {
-				break
-			}
-		}
-
-		return sb.String(), nil
+		return content, nil
 	})
-}
-
-// writeLine appends a line to sb, adding a newline if started is true.
-// Returns true if the output was truncated and no more lines should be written.
-func writeLine(sb *strings.Builder, line []byte, started bool, maxOutput int) bool {
-	prefix := ""
-	if started {
-		prefix = "\n"
-	}
-
-	if sb.Len()+len(prefix)+len(line) > maxOutput {
-		remain := maxOutput - sb.Len() - len(prefix)
-		if remain > 0 {
-			sb.WriteString(prefix)
-			sb.Write(line[:remain])
-		}
-		sb.WriteString("\n... (truncated)")
-		return true
-	}
-
-	sb.WriteString(prefix)
-	sb.Write(line)
-	return false
-}
-
-type tailBuffer struct {
-	lines     [][]byte
-	limit     int
-	maxBytes  int
-	curBytes  int
-	count     int
-	oldestIdx int
-}
-
-func newTailBuffer(limit, maxBytes int) *tailBuffer {
-	return &tailBuffer{
-		lines:    make([][]byte, limit),
-		limit:    limit,
-		maxBytes: maxBytes,
-	}
-}
-
-func (b *tailBuffer) Add(line []byte) {
-	idx := b.count % b.limit
-	if b.lines[idx] != nil {
-		b.curBytes -= len(b.lines[idx])
-		b.oldestIdx = (idx + 1) % b.limit
-	}
-	b.lines[idx] = line
-	b.curBytes += len(line)
-	b.count++
-
-	for b.curBytes > b.maxBytes {
-		if b.lines[b.oldestIdx] != nil {
-			b.curBytes -= len(b.lines[b.oldestIdx])
-			b.lines[b.oldestIdx] = nil
-		}
-		b.oldestIdx = (b.oldestIdx + 1) % b.limit
-
-		if b.curBytes <= 0 {
-			b.curBytes = 0
-			break
-		}
-	}
-}
-
-func (b *tailBuffer) Lines() [][]byte {
-	res := make([][]byte, 0, b.limit)
-	for i := 0; i < b.limit; i++ {
-		idx := (b.oldestIdx + i) % b.limit
-		if b.lines[idx] != nil {
-			res = append(res, b.lines[idx])
-		}
-	}
-	return res
-}
-
-func readLimitedLine(ctx context.Context, r *bufio.Reader, limit int) ([]byte, error) {
-	line, isPrefix, err := r.ReadLine()
-	if err != nil && err != io.EOF {
-		return nil, err
-	}
-
-	res := make([]byte, 0, len(line))
-	res = append(res, line...)
-
-	for isPrefix && len(res) < limit {
-		if errCtx := ctx.Err(); errCtx != nil {
-			return res, errCtx
-		}
-		line, isPrefix, err = r.ReadLine()
-		if err != nil {
-			break
-		}
-		toAppend := limit - len(res)
-		if toAppend > len(line) {
-			toAppend = len(line)
-		}
-		res = append(res, line[:toAppend]...)
-	}
-
-	if isPrefix {
-		for isPrefix {
-			if errCtx := ctx.Err(); errCtx != nil {
-				return res, errCtx
-			}
-			_, isPrefix, err = r.ReadLine()
-			if err != nil {
-				break
-			}
-		}
-	}
-
-	return res, err
 }
 
 func registerLocalGlobFiles(r *Registry, root string) {
@@ -309,15 +112,12 @@ func registerLocalGlobFiles(r *Registry, root string) {
 		},
 	}
 
-	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		var args struct {
-			Directory string `json:"directory"`
-			Query     string `json:"query"`
-		}
-		if err := tc.UnmarshalArguments(&args); err != nil {
-			return "", err
-		}
+	type args struct {
+		Directory string `json:"directory"`
+		Query     string `json:"query"`
+	}
 
+	RegisterToolWithArgs(r, def, func(ctx context.Context, args args) (string, error) {
 		dir := args.Directory
 		if dir == "" {
 			dir = "."
@@ -390,16 +190,13 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 		},
 	}
 
-	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		var args struct {
-			Query           string `json:"query"`
-			Directory       string `json:"directory"`
-			CaseInsensitive bool   `json:"case_insensitive"`
-		}
-		if err := tc.UnmarshalArguments(&args); err != nil {
-			return "", err
-		}
+	type args struct {
+		Query           string `json:"query"`
+		Directory       string `json:"directory"`
+		CaseInsensitive bool   `json:"case_insensitive"`
+	}
 
+	RegisterToolWithArgs(r, def, func(ctx context.Context, args args) (string, error) {
 		cmdArgs := []string{"grep", "--line-number", "--column", "--extended-regexp", "--untracked"}
 		if args.CaseInsensitive {
 			cmdArgs = append(cmdArgs, "-i")
@@ -422,7 +219,7 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 
 		cmdArgs = util.AppendGitExcludeArgs(cmdArgs, ignoredLockFiles)
 
-		out, err := runGit(ctx, root, cmdArgs...)
+		out, err := util.RunGit(ctx, root, cmdArgs...)
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(out) == 0 {

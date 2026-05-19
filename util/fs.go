@@ -1,11 +1,247 @@
 package util
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+// ReadFileOptions configures how a file should be read by ReadBoundedFile.
+type ReadFileOptions struct {
+	// LineStart is the 1-based line number to start reading from.
+	LineStart int
+	// LineEnd is the 1-based line number to stop reading at (inclusive).
+	LineEnd int
+	// TailLines is the number of lines to read from the end of the file.
+	// If set, LineStart and LineEnd are ignored.
+	TailLines int
+	// MaxOutputBytes is the maximum number of bytes to return.
+	MaxOutputBytes int
+	// MaxLineLength is the maximum length of a single line.
+	MaxLineLength int
+	// MaxTailBufferBytes is the maximum memory to use for the tail buffer.
+	MaxTailBufferBytes int
+	// FailIfTooLarge, when true, causes ReadBoundedFile to return an error if
+	// the file content (when reading whole file) exceeds MaxWholeFileReadBytes.
+	FailIfTooLarge bool
+	// MaxWholeFileReadBytes is the maximum bytes allowed for a whole file read.
+	MaxWholeFileReadBytes int
+}
+
+// ReadBoundedFile reads a file from the root according to the provided options.
+// It handles line ranges, tailing, and memory bounds to ensure safe reading.
+func ReadBoundedFile(ctx context.Context, root, path string, opts ReadFileOptions) (string, error) {
+	f, err := OpenInRoot(root, path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	if opts.MaxLineLength <= 0 {
+		opts.MaxLineLength = 65536
+	}
+	if opts.MaxOutputBytes <= 0 {
+		opts.MaxOutputBytes = 40000
+	}
+	if opts.MaxWholeFileReadBytes <= 0 {
+		opts.MaxWholeFileReadBytes = opts.MaxOutputBytes
+	}
+
+	// If no line limits, read up to MaxWholeFileReadBytes.
+	if opts.LineStart <= 0 && opts.LineEnd <= 0 && opts.TailLines <= 0 {
+		lr := io.LimitReader(f, int64(opts.MaxWholeFileReadBytes)+1)
+		b, err := io.ReadAll(lr)
+		if err != nil {
+			return "", err
+		}
+		if len(b) > opts.MaxWholeFileReadBytes {
+			if opts.FailIfTooLarge {
+				return "", fmt.Errorf("file too large for whole-file read. Use line limits")
+			}
+		}
+		return TruncateString(string(b), opts.MaxOutputBytes), nil
+	}
+
+	reader := bufio.NewReader(f)
+
+	if opts.TailLines > 0 {
+		if opts.MaxTailBufferBytes <= 0 {
+			opts.MaxTailBufferBytes = 1024 * 1024
+		}
+		tb := NewTailBuffer(opts.TailLines, opts.MaxTailBufferBytes)
+		for {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+
+			line, err := ReadLimitedLine(ctx, reader, opts.MaxLineLength)
+			if len(line) == 0 && err != nil {
+				if err == io.EOF {
+					break
+				}
+				return "", err
+			}
+			tb.Add(line)
+			if err == io.EOF {
+				break
+			}
+		}
+
+		lines := tb.Lines()
+		strLines := make([]string, len(lines))
+		for i, l := range lines {
+			strLines[i] = string(l)
+		}
+		return TruncateLines(strLines, opts.MaxOutputBytes), nil
+	}
+
+	start := opts.LineStart
+	if start <= 0 {
+		start = 1
+	}
+	end := opts.LineEnd
+
+	var resLines []string
+	currentLine := 0
+	accumulatedBytes := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		line, err := ReadLimitedLine(ctx, reader, opts.MaxLineLength)
+		if len(line) == 0 && err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+
+		currentLine++
+		if currentLine >= start && (end <= 0 || currentLine <= end) {
+			resLines = append(resLines, string(line))
+			accumulatedBytes += len(line) + 1 // +1 for newline
+			// Early exit if we have already exceeded the output limit to prevent OOM.
+			// We check against MaxOutputBytes + buffer for suffix.
+			if accumulatedBytes > opts.MaxOutputBytes+32 {
+				break
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+		if end > 0 && currentLine >= end {
+			break
+		}
+	}
+
+	return TruncateLines(resLines, opts.MaxOutputBytes), nil
+}
+
+// ReadLimitedLine reads a single line from r, up to limit bytes. It respects
+// context cancellation.
+func ReadLimitedLine(ctx context.Context, r *bufio.Reader, limit int) ([]byte, error) {
+	line, isPrefix, err := r.ReadLine()
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	res := make([]byte, 0, len(line))
+	res = append(res, line...)
+
+	for isPrefix && len(res) < limit {
+		if errCtx := ctx.Err(); errCtx != nil {
+			return res, errCtx
+		}
+		line, isPrefix, err = r.ReadLine()
+		if err != nil {
+			break
+		}
+		toAppend := limit - len(res)
+		if toAppend > len(line) {
+			toAppend = len(line)
+		}
+		res = append(res, line[:toAppend]...)
+	}
+
+	if isPrefix {
+		for isPrefix {
+			if errCtx := ctx.Err(); errCtx != nil {
+				return res, errCtx
+			}
+			_, isPrefix, err = r.ReadLine()
+			if err != nil {
+				break
+			}
+		}
+	}
+
+	return res, err
+}
+
+// TailBuffer maintains a fixed number of lines with a maximum byte size.
+type TailBuffer struct {
+	lines     [][]byte
+	limit     int
+	maxBytes  int
+	curBytes  int
+	count     int
+	oldestIdx int
+}
+
+// NewTailBuffer creates a new TailBuffer.
+func NewTailBuffer(limit, maxBytes int) *TailBuffer {
+	return &TailBuffer{
+		lines:    make([][]byte, limit),
+		limit:    limit,
+		maxBytes: maxBytes,
+	}
+}
+
+// Add appends a line to the buffer, potentially removing the oldest line(s).
+func (b *TailBuffer) Add(line []byte) {
+	idx := b.count % b.limit
+	if b.lines[idx] != nil {
+		b.curBytes -= len(b.lines[idx])
+		b.oldestIdx = (idx + 1) % b.limit
+	}
+	b.lines[idx] = line
+	b.curBytes += len(line)
+	b.count++
+
+	for b.curBytes > b.maxBytes {
+		if b.lines[b.oldestIdx] != nil {
+			b.curBytes -= len(b.lines[b.oldestIdx])
+			b.lines[b.oldestIdx] = nil
+		}
+		b.oldestIdx = (b.oldestIdx + 1) % b.limit
+
+		if b.curBytes <= 0 {
+			b.curBytes = 0
+			break
+		}
+	}
+}
+
+// Lines returns the lines currently in the buffer in order.
+func (b *TailBuffer) Lines() [][]byte {
+	res := make([][]byte, 0, b.limit)
+	for i := 0; i < b.limit; i++ {
+		idx := (b.oldestIdx + i) % b.limit
+		if b.lines[idx] != nil {
+			res = append(res, b.lines[idx])
+		}
+	}
+	return res
+}
 
 // WriteFileWithDirs creates any missing parent directories before writing the
 // file with 0o644 permissions. It uses 0o755 for any created directories.
