@@ -213,6 +213,11 @@ i++ // increment i
 // FetchGitCommits retrieves a list of git commits.
 func FetchGitCommits(...) { ... }
 
+// good (adds context about format and behavior)
+// FetchGitCommits returns a bulleted list of commit subjects (first line of
+// message) between base and head, excluding merge commits.
+func FetchGitCommits(...) { ... }
+
 // good
 // Use triple-dot for comparing the tip of head with the common ancestor of base.
 diffRange = fmt.Sprintf("%s...%s", base, head)

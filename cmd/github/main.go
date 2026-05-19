@@ -67,6 +67,7 @@ func main() {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, post-structured-review, get-metadata, get-diff, get-files, get-commits)")
 	}
 
+	// Process tag: only the inner text is provided (e.g. 'cassandra-ai-review').
 	if tag == "" {
 		tag = "cassandra-ai-review"
 	}

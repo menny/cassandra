@@ -64,7 +64,8 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	return diffText, filteredFiles, nil
 }
 
-// FetchGitCommits retrieves a list of commit messages between base and head.
+// FetchGitCommits returns a bulleted list of commit subjects (first line of
+// message) between base and head, excluding merge commits.
 func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string, error) {
 	var commitRange string
 	if head == "HEAD" {
@@ -75,6 +76,8 @@ func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string
 
 	out, err := runGit(ctx, workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
 	if err != nil {
+		// If git log fails (e.g., due to a shallow clone missing history), we
+		// return an error to be handled by the caller.
 		return "", fmt.Errorf("git log %s failed: %w. Output: %s", commitRange, err, string(out))
 	}
 
