@@ -45,6 +45,9 @@ type ToolCall struct {
 	Arguments string // raw JSON
 }
 
+// UnmarshalArguments decodes the raw JSON Arguments into dest. It returns a
+// formatted error if unmarshaling fails, suitable for inclusion in LLM-visible
+// tool results.
 func (tc *ToolCall) UnmarshalArguments(dest any) error {
 	if tc.Arguments == "" {
 		return nil

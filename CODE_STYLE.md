@@ -201,21 +201,26 @@ Avoid comments that merely paraphrase what the code already says. Use
 comments to explain *why* something is done, to document non-obvious
 side effects, or to clarify tricky logic.
 
+**Exported symbols** should always have a doc comment for `godoc` and IDE
+support, but these should be refined to add value (e.g., documenting error
+conditions or invariants) rather than simply echoing the function name.
+
 ```go
 // bad
-// UnmarshalArguments unmarshals the raw JSON Arguments into the given destination.
-func (tc *ToolCall) UnmarshalArguments(dest any) error { ... }
+i++ // increment i
 
-// WriteFileWithDirs creates any missing parent directories before writing the file.
-func WriteFileWithDirs(path string, data []byte) error { ... }
+// redundant (echoes name without adding value)
+// FetchGitCommits retrieves a list of git commits.
+func FetchGitCommits(...) { ... }
 
 // good
 // Use triple-dot for comparing the tip of head with the common ancestor of base.
 diffRange = fmt.Sprintf("%s...%s", base, head)
 
-// Resolve resolves symlinks for root because on some systems (like macOS)
-// /var is a symlink to /private/var, which can cause Rel to fail.
-if resolvedRoot, err := filepath.EvalSymlinks(root); err == nil { ... }
+// UnmarshalArguments decodes the raw JSON Arguments into dest. It returns a
+// formatted error if unmarshaling fails, suitable for inclusion in LLM-visible
+// tool results.
+func (tc *ToolCall) UnmarshalArguments(dest any) error { ... }
 ```
 
 **Why:** Redundant comments are "noise" that hinders readability. High-value
