@@ -3,24 +3,10 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/menny/cassandra/util"
 )
-
-// runGit invokes `git <args>` in the given working directory (or the current
-// directory when dir is empty) and returns combined stdout+stderr. Callers
-// wrap the returned error with their own context; runGit itself does not
-// format the error so callers can inspect the exit code via errors.As
-// (*exec.ExitError) where relevant.
-func runGit(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	return cmd.CombinedOutput()
-}
 
 func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLockFiles []string) (string, []string, error) {
 	var diffRange string
@@ -36,7 +22,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	cmdArgs = append(cmdArgs, "--", ".")
 	cmdArgs = util.AppendGitExcludeArgs(cmdArgs, ignoredLockFiles)
 
-	out, err := runGit(ctx, workingDir, cmdArgs...)
+	out, err := util.RunGit(ctx, workingDir, cmdArgs...)
 	if err != nil {
 		return "", nil, fmt.Errorf("git diff %s failed in %s: %w\nOutput: %s", diffRange, workingDir, err, string(out))
 	}
@@ -49,7 +35,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	// Get file list
 	nameOnlyArgs := []string{"diff", "--name-only", diffRange, "--", "."}
 	nameOnlyArgs = util.AppendGitExcludeArgs(nameOnlyArgs, ignoredLockFiles)
-	nameOnlyOut, err := runGit(ctx, workingDir, nameOnlyArgs...)
+	nameOnlyOut, err := util.RunGit(ctx, workingDir, nameOnlyArgs...)
 	if err != nil {
 		return diffText, nil, nil // Fallback if name-only fails
 	}
@@ -69,7 +55,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string, error) {
 	commitRange := fmt.Sprintf("%s..%s", base, head)
 
-	out, err := runGit(ctx, workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
+	out, err := util.RunGit(ctx, workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
 	if err != nil {
 		// If git log fails (e.g., due to a shallow clone missing history), we
 		// return an error to be handled by the caller.

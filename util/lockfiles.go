@@ -1,7 +1,6 @@
 package util
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -41,17 +40,4 @@ func IsLockFile(path string, ignoredLockFiles []string) bool {
 		}
 	}
 	return false
-}
-
-// AppendGitExcludeArgs appends git pathspec exclude arguments for each entry in
-// ignoredLockFiles to the provided args slice and returns the updated slice.
-// For example, if "go.sum" is in the list, it appends ":(exclude)*go.sum".
-func AppendGitExcludeArgs(args []string, ignoredLockFiles []string) []string {
-	for _, lf := range ignoredLockFiles {
-		if lf == "" {
-			continue
-		}
-		args = append(args, fmt.Sprintf(":(exclude)*%s", lf))
-	}
-	return args
 }

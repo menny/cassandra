@@ -155,14 +155,16 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("respects max_read_length", func(t *testing.T) {
+	t.Run("RespectsMaxReadLength", func(t *testing.T) {
 		smallFile := filepath.Join(tmpDir, "max_len.txt")
-		content := "1234567890"
+		content := "1234567890" + strings.Repeat("a", 100)
 		if err := os.WriteFile(smallFile, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 
-		args, _ := json.Marshal(map[string]any{"file_path": smallFile, "max_read_length": 5})
+		// Use a limit that is larger than the truncation suffix (approx 16 bytes)
+		// but smaller than the total content.
+		args, _ := json.Marshal(map[string]any{"file_path": smallFile, "max_read_length": 30})
 		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "read_file",
 			Arguments: string(args),
@@ -170,11 +172,14 @@ func TestLocalReadFile_SafetyLimits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(result, "12345") {
-			t.Errorf("expected prefix 12345, got %q", result)
+		if !strings.HasPrefix(result, "1234567890") {
+			t.Errorf("expected prefix 1234567890, got %q", result)
 		}
 		if !strings.Contains(result, "truncated") {
 			t.Error("expected truncation message in output")
+		}
+		if len(result) > 30 {
+			t.Errorf("expected result length <= 30, got %d", len(result))
 		}
 	})
 }

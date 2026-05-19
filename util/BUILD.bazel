@@ -4,7 +4,9 @@ go_library(
     name = "util",
     srcs = [
         "fs.go",
+        "git.go",
         "lockfiles.go",
+        "strings.go",
     ],
     importpath = "github.com/menny/cassandra/util",
     visibility = ["//visibility:public"],

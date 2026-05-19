@@ -38,6 +38,19 @@ func (r *Registry) HandleCall(ctx context.Context, tc llm.ToolCall) (string, err
 	return handler(ctx, tc)
 }
 
+// RegisterToolWithArgs registers a tool that uses a specific struct for its
+// arguments. It handles unmarshaling the arguments and returns an error if
+// they are malformed.
+func RegisterToolWithArgs[T any](r *Registry, def llm.ToolDef, handler func(context.Context, T) (string, error)) {
+	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		var args T
+		if err := tc.UnmarshalArguments(&args); err != nil {
+			return "", err
+		}
+		return handler(ctx, args)
+	})
+}
+
 func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string) {
 	if root != "" {
 		if resolved, err := filepath.EvalSymlinks(root); err == nil {
