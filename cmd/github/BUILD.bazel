@@ -7,7 +7,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//core",
-        "//tools",
+        "//util",
         "@com_github_google_go_github_v69//github",
         "@com_github_spf13_pflag//:pflag",
     ],

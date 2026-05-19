@@ -420,7 +420,7 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 			cmdArgs = append(cmdArgs, "--", ".")
 		}
 
-		cmdArgs = appendLockFileExcludes(cmdArgs, ignoredLockFiles)
+		cmdArgs = util.AppendGitExcludeArgs(cmdArgs, ignoredLockFiles)
 
 		out, err := runGit(ctx, root, cmdArgs...)
 		if err != nil {
