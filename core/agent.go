@@ -14,8 +14,12 @@ import (
 )
 
 const (
+	// MaxIterationsPerFile is the recommended number of ReAct loop iterations to
+	// allocate per changed file in the diff.
 	MaxIterationsPerFile = 5
-	AbsoluteMaxIter      = 25
+	// AbsoluteMaxIter is the hard upper bound for the ReAct loop to prevent
+	// infinite recursion or excessive token spend.
+	AbsoluteMaxIter = 25
 )
 
 // CalculateMaxIterations returns a sensible iteration cap based on the number

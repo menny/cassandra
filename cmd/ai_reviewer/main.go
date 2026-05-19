@@ -73,6 +73,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	targetDir := cfg.WorkingDir
 	if targetDir == "" {
+		// If executing via 'bazel run', BUILD_WORKSPACE_DIRECTORY points to the
+		// source root. Otherwise, we default to the current directory.
 		targetDir = os.Getenv("BUILD_WORKSPACE_DIRECTORY")
 	}
 	if targetDir != "" {

@@ -245,6 +245,9 @@ func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), 
 // wrapTag wraps a raw slug into a hidden HTML comment tag with an optional prefix.
 // It sanitizes the slug to ensure it cannot break out of the HTML comment.
 func wrapTag(slug, prefix string) string {
+	// Sanitize slug to ensure it cannot break out of the HTML comment:
+	// 1. Replace '--' with '__' because HTML comments cannot contain '--'.
+	// 2. Remove '<' and '>' to prevent potential tag injection.
 	s := strings.ReplaceAll(slug, "--", "__")
 	s = strings.ReplaceAll(s, "<", "")
 	s = strings.ReplaceAll(s, ">", "")
