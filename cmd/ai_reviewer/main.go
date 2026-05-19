@@ -67,12 +67,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return err
 	}
 
-	// Error if there are dangling positional arguments
 	if len(fs.Args()) > 0 {
 		return fmt.Errorf("unknown or positional arguments provided: %v", fs.Args())
 	}
 
-	// Move to the intended working directory if executing via bazel or explicitly requested
 	targetDir := cfg.WorkingDir
 	if targetDir == "" {
 		targetDir = os.Getenv("BUILD_WORKSPACE_DIRECTORY")
@@ -179,7 +177,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	stderr.Println("  API Key: [PROVIDED]")
 	stderr.Println("===============================")
 
-	// Initialize Reviewer
 	reporter := core.NewDefaultReporter(stderr.Writer())
 	reviewer, err := core.NewReviewer(ctx, cfg, targetDir, reporter)
 	if err != nil {
@@ -187,7 +184,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 	defer reviewer.Close()
 
-	// Ensure metrics are written even on failure
 	if cfg.MetricsJSONFile != "" {
 		defer func() {
 			metrics := reviewer.Agent.GetMetrics()
@@ -292,7 +288,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reviewer.Agent.Reporter().ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
 
-	// Final review goes to stdout so it can be captured cleanly.
 	fmt.Println(result)
 
 	if cfg.ReviewOutputFile != "" {

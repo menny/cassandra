@@ -67,8 +67,6 @@ func main() {
 		log.Fatal("Action required (add-reaction, remove-reaction, post-comment, post-structured-review, get-metadata, get-diff, get-files, get-commits)")
 	}
 
-	// Process tag: only the inner text is provided.
-	// Default to 'cassandra-ai-review' if empty.
 	if tag == "" {
 		tag = "cassandra-ai-review"
 	}
@@ -247,9 +245,6 @@ func retryGitHubWrite(ctx context.Context, fn func() (*github.Response, error), 
 // wrapTag wraps a raw slug into a hidden HTML comment tag with an optional prefix.
 // It sanitizes the slug to ensure it cannot break out of the HTML comment.
 func wrapTag(slug, prefix string) string {
-	// Sanitize slug:
-	// 1. Replace '--' with '__' because HTML comments cannot contain '--'.
-	// 2. Remove '<' and '>' to prevent breakout.
 	s := strings.ReplaceAll(slug, "--", "__")
 	s = strings.ReplaceAll(s, "<", "")
 	s = strings.ReplaceAll(s, ">", "")
