@@ -67,12 +67,7 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 // FetchGitCommits returns a bulleted list of commit subjects (first line of
 // message) between base and head, excluding merge commits.
 func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string, error) {
-	var commitRange string
-	if head == "HEAD" {
-		commitRange = base + "..HEAD"
-	} else {
-		commitRange = fmt.Sprintf("%s..%s", base, head)
-	}
+	commitRange := fmt.Sprintf("%s..%s", base, head)
 
 	out, err := runGit(ctx, workingDir, "log", "--pretty=format:- %s", "--no-merges", commitRange)
 	if err != nil {
