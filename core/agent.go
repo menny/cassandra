@@ -364,6 +364,15 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()
 
+			if err := ctx.Err(); err != nil {
+				toolMsg.ToolResults[i] = llm.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    fmt.Sprintf("error: context canceled: %v", err),
+				}
+				return
+			}
+
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()
@@ -372,6 +381,15 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 					ToolCallID: tc.ID,
 					Name:       tc.Name,
 					Content:    fmt.Sprintf("error: context canceled: %v", ctx.Err()),
+				}
+				return
+			}
+
+			if err := ctx.Err(); err != nil {
+				toolMsg.ToolResults[i] = llm.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    fmt.Sprintf("error: context canceled: %v", err),
 				}
 				return
 			}
