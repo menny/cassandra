@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"testing"
+	"time"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -905,5 +906,42 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 	// At least emptyResponseMaxAttempts calls must have been made.
 	if lm.callIdx < emptyResponseMaxAttempts {
 		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}
+
+func TestExecuteToolCalls_Parallel(t *testing.T) {
+	dispatcher := newMockDispatcher()
+	// Each tool takes 100ms.
+	dispatcher.handlers["slow_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		time.Sleep(100 * time.Millisecond)
+		return "done", nil
+	}
+
+	agent := newTestAgent(&mockLLM{}, dispatcher)
+	toolCalls := []llm.ToolCall{
+		{ID: "1", Name: "slow_tool"},
+		{ID: "2", Name: "slow_tool"},
+	}
+
+	start := time.Now()
+	msg := agent.executeToolCalls(context.Background(), toolCalls)
+	elapsed := time.Since(start)
+
+	if len(msg.ToolResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
+	}
+
+	// Results should be in order.
+	if msg.ToolResults[0].ToolCallID != "1" || msg.ToolResults[1].ToolCallID != "2" {
+		t.Errorf("results out of order: %+v", msg.ToolResults)
+	}
+
+	// If sequential, would take at least 200ms.
+	// If parallel, should take slightly more than 100ms.
+	if elapsed >= 200*time.Millisecond {
+		t.Errorf("execution took %v, which suggests sequential execution (>= 200ms)", elapsed)
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Errorf("execution took %v, which is impossibly fast (< 100ms)", elapsed)
 	}
 }

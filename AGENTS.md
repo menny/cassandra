@@ -85,6 +85,9 @@ Progress reporting is abstracted via the `core.Reporter` interface.
 ### 7. Defensive Tool Implementation
 Tools that interact with external data (files, network, pipes) MUST be resilient to resource exhaustion and hangs. See [`tools/AGENTS.md`](tools/AGENTS.md) for the full requirements and security test mandates.
 
+### 8. Parallel Execution Patterns
+When parallelizing tool execution or background tasks, state updates (counters, logs, metrics) MUST be performed sequentially in the main loop before spawning goroutines. This ensures that log order remains predictable and eliminates the need for mutexes or atomic operations on shared counters during the parallel phase.
+
 ## Security Standards
 
 ### 1. GitHub Action Input Safety
