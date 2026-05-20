@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 
 	"google.golang.org/genai"
 
@@ -38,6 +39,37 @@ func clampInt32(n int) int32 {
 		return math.MinInt32
 	}
 	return int32(n) //nolint:gosec // bounds-checked above
+}
+
+// parseThinkingBudget safely coerces a thinking budget option of unknown type (e.g. from JSON/Viper)
+// into an int32 representation. Returns the parsed value and true if conversion succeeded, or (0, false) otherwise.
+func parseThinkingBudget(opt any) (int32, bool) {
+	switch v := opt.(type) {
+	case int:
+		return int32(v), true
+	case int32:
+		return v, true
+	case int64:
+		if v > math.MaxInt32 || v < math.MinInt32 {
+			return 0, false
+		}
+		return int32(v), true
+	case float64:
+		if v > float64(math.MaxInt32) || v < float64(math.MinInt32) {
+			return 0, false
+		}
+		return int32(v), true
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		if parsed > math.MaxInt32 || parsed < math.MinInt32 {
+			return 0, false
+		}
+		return int32(parsed), true
+	}
+	return 0, false
 }
 
 // jsonSchemaTypes maps JSON Schema type names (lowercase) to their
@@ -85,12 +117,13 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
 		config.ThinkingConfig.IncludeThoughts = true
 	}
-	if budget, ok := p.options["thinking-budget"].(float64); ok {
-		if config.ThinkingConfig == nil {
-			config.ThinkingConfig = &genai.ThinkingConfig{}
+	if opt, ok := p.options["thinking-budget"]; ok {
+		if budget, parsed := parseThinkingBudget(opt); parsed {
+			if config.ThinkingConfig == nil {
+				config.ThinkingConfig = &genai.ThinkingConfig{}
+			}
+			config.ThinkingConfig.ThinkingBudget = &budget
 		}
-		b := int32(budget)
-		config.ThinkingConfig.ThinkingBudget = &b
 	}
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
@@ -128,12 +161,13 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		genaiConfig.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
 		genaiConfig.ThinkingConfig.IncludeThoughts = true
 	}
-	if budget, ok := p.options["thinking-budget"].(float64); ok {
-		if genaiConfig.ThinkingConfig == nil {
-			genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+	if opt, ok := p.options["thinking-budget"]; ok {
+		if budget, parsed := parseThinkingBudget(opt); parsed {
+			if genaiConfig.ThinkingConfig == nil {
+				genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+			}
+			genaiConfig.ThinkingConfig.ThinkingBudget = &budget
 		}
-		b := int32(budget)
-		genaiConfig.ThinkingConfig.ThinkingBudget = &b
 	}
 	if systemInstruction != nil {
 		genaiConfig.SystemInstruction = systemInstruction

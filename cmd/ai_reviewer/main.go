@@ -59,7 +59,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
 	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
-	fs.StringToString("provider-options", map[string]string{}, "Provider-specific options in key=value format (can be used multiple times)")
+	fs.StringVar(&cfg.ProviderOptionsFile, "provider-options-file", "", "Path to a JSON file containing provider-specific options")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -122,15 +122,16 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
-	// Flag overrides for map types need manual merging because viper.Unmarshal
-	// often overwrites the entire map if any part is set via flags.
-	if opts := v.GetStringMap("provider-options"); len(opts) > 0 {
-		if cfg.ProviderOptions == nil {
-			cfg.ProviderOptions = make(map[string]any)
+	if cfg.ProviderOptionsFile != "" {
+		data, err := os.ReadFile(cfg.ProviderOptionsFile)
+		if err != nil {
+			return fmt.Errorf("failed to read provider options file %q: %w", cfg.ProviderOptionsFile, err)
 		}
-		for k, val := range opts {
-			cfg.ProviderOptions[k] = val
+		var opts map[string]any
+		if err := json.Unmarshal(data, &opts); err != nil {
+			return fmt.Errorf("failed to parse provider options file %q as JSON: %w", cfg.ProviderOptionsFile, err)
 		}
+		cfg.ProviderOptions = opts
 	}
 
 	trimmed := make([]string, len(cfg.IgnoredLockFiles))

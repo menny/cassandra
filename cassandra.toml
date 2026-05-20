@@ -17,5 +17,4 @@ supplemental-guidelines = [
     ".cassandra/drive-by-fixes.md"
 ]
 
-[provider-options]
-thinking-level = "high"
+provider-options-file = "scratch/provider_options.json"

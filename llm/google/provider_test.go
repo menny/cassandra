@@ -1,6 +1,7 @@
 package google
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -345,4 +346,38 @@ func TestParseGenaiResponse_NoCandidates(t *testing.T) {
 	resp := &genai.GenerateContentResponse{}
 	_, err := parseGenaiResponse(resp)
 	assert.Error(t, err)
+}
+
+func TestParseThinkingBudget(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      any
+		wantVal    int32
+		wantParsed bool
+	}{
+		{"nil input", nil, 0, false},
+		{"int input", 1024, 1024, true},
+		{"int32 input", int32(2048), 2048, true},
+		{"int64 input", int64(4096), 4096, true},
+		{"int64 out of bounds positive", int64(math.MaxInt32 + 1), 0, false},
+		{"int64 out of bounds negative", int64(math.MinInt32 - 1), 0, false},
+		{"float64 input", float64(2048), 2048, true},
+		{"float64 out of bounds positive", float64(math.MaxInt32) + 1.0, 0, false},
+		{"float64 out of bounds negative", float64(math.MinInt32) - 1.0, 0, false},
+		{"string numeric input", "4096", 4096, true},
+		{"string non-numeric input", "invalid", 0, false},
+		{"string out of bounds positive", "2147483648", 0, false},
+		{"string out of bounds negative", "-2147483649", 0, false},
+		{"invalid type struct", struct{}{}, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, parsed := parseThinkingBudget(tt.input)
+			assert.Equal(t, tt.wantParsed, parsed)
+			if tt.wantParsed {
+				assert.Equal(t, tt.wantVal, val)
+			}
+		})
+	}
 }

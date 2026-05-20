@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -39,7 +40,8 @@ type Config struct {
 	IgnoredLockFiles             []string       `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string         `mapstructure:"config"`
 	WishlistDir                  string         `mapstructure:"wishlist-dir"`
-	ProviderOptions              map[string]any `mapstructure:"provider-options"`
+	ProviderOptionsFile          string         `mapstructure:"provider-options-file"`
+	ProviderOptions              map[string]any `mapstructure:"-"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.
@@ -93,6 +95,18 @@ func Load(configFile string) (*Config, error) {
 		trimmed[i] = strings.TrimSpace(lf)
 	}
 	cfg.IgnoredLockFiles = trimmed
+
+	if cfg.ProviderOptionsFile != "" {
+		data, err := os.ReadFile(cfg.ProviderOptionsFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read provider options file %q: %w", cfg.ProviderOptionsFile, err)
+		}
+		var opts map[string]any
+		if err := json.Unmarshal(data, &opts); err != nil {
+			return nil, fmt.Errorf("failed to parse provider options file %q as JSON: %w", cfg.ProviderOptionsFile, err)
+		}
+		cfg.ProviderOptions = opts
+	}
 
 	return cfg, nil
 }
