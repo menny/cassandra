@@ -24,13 +24,22 @@ const submitReviewToolName = "submit_review"
 type Provider struct {
 	client    anthropicsdk.Client
 	modelName string
+	options   map[string]any
 }
 
 // New creates a Provider for the given model. Extra SDK options (e.g.
 // option.WithBaseURL) can be passed for testing or proxying.
-func New(apiKey, modelName string, opts ...option.RequestOption) *Provider {
+//
+// Note: the options map is currently ignored by this provider but is received
+// to maintain architectural parity with other providers (e.g. Google) that
+// support model-specific tuning via the configuration file.
+func New(apiKey, modelName string, options map[string]any, opts ...option.RequestOption) *Provider {
 	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
-	return &Provider{client: anthropicsdk.NewClient(allOpts...), modelName: modelName}
+	return &Provider{
+		client:    anthropicsdk.NewClient(allOpts...),
+		modelName: modelName,
+		options:   options,
+	}
 }
 
 // GenerateContent sends messages to the Anthropic Messages API and returns a

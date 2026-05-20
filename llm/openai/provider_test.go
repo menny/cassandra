@@ -359,7 +359,7 @@ func TestNew_BaseURL_GenerateContent(t *testing.T) {
 	// parses the response correctly.
 	srv, capturedPath := newFakeChatServer(t, chatCompletionResponse("hello from custom url"))
 
-	p := New("fake-api-key", "test-model", srv.URL)
+	p := New("fake-api-key", "test-model", srv.URL, nil)
 	resp, err := p.GenerateContent(context.Background(), []llm.Message{
 		{Role: llm.RoleUser, Text: "ping"},
 	}, nil, 100)
@@ -374,7 +374,7 @@ func TestNew_BaseURL_GenerateStructuredContent(t *testing.T) {
 	// Verify that GenerateStructuredContent also honours the custom base URL.
 	srv, capturedPath := newFakeChatServer(t, chatCompletionResponse(`{"key":"value"}`))
 
-	p := New("fake-api-key", "test-model", srv.URL)
+	p := New("fake-api-key", "test-model", srv.URL, nil)
 	schema := map[string]any{"type": "object"}
 	resp, err := p.GenerateStructuredContent(context.Background(), []llm.Message{
 		{Role: llm.RoleUser, Text: "extract"},
@@ -390,7 +390,7 @@ func TestNew_EmptyBaseURL_UsesDefault(t *testing.T) {
 	// Passing an empty baseURL must not modify the client in any way that
 	// breaks construction. We just verify that New succeeds and returns a
 	// non-nil provider (no live request is made in this test).
-	p := New("fake-api-key", "test-model", "")
+	p := New("fake-api-key", "test-model", "", nil)
 	assert.NotNil(t, p)
 	assert.Equal(t, "test-model", p.modelName)
 }

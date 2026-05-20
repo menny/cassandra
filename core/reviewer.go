@@ -33,7 +33,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		reporter = NewDefaultReporter(os.Stderr)
 	}
 
-	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL)
+	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL, cfg.ProviderOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize LLM: %w", err)
 	}

@@ -80,6 +80,10 @@ inputs:
   max_tokens:
     description: 'Max tokens for the LLM response'
     required: false
+  provider_options:
+    description: 'Multiline string where each line is a provider-specific option (e.g. thinking-level=high)'
+    required: false
+    default: ''
 outputs:
   review_file:
     description: 'Path to the generated markdown review file.'
@@ -281,6 +285,7 @@ runs:
         ALLOW_URL_FETCH: ${{ inputs.allow_url_fetch }}
         IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
         MAX_TOKENS: ${{ inputs.max_tokens }}
+        PROVIDER_OPTIONS: ${{ inputs.provider_options }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
@@ -359,6 +364,13 @@ runs:
         if [[ -n "$IGNORED_LOCK_FILES" ]]; then
           JOINED_IGNORED_LOCK_FILES=$(echo "$IGNORED_LOCK_FILES" | tr -d '\r' | tr '\n' ',' | sed 's/,,*/,/g' | sed 's/^,//;s/,$//')
           ARGS+=(--ignored-lock-files "$JOINED_IGNORED_LOCK_FILES")
+        fi
+
+        if [[ -n "$PROVIDER_OPTIONS" ]]; then
+          while read -r line || [[ -n "$line" ]]; do
+            if [[ -z "$line" ]]; then continue; fi
+            ARGS+=(--provider-options "$line")
+          done <<< "$PROVIDER_OPTIONS"
         fi
 
         if [[ -f "$METADATA_FILE" ]]; then

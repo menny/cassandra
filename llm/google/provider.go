@@ -55,15 +55,16 @@ var jsonSchemaTypes = map[string]genai.Type{
 type Provider struct {
 	client    *genai.Client
 	modelName string
+	options   map[string]any
 }
 
 // New creates a Provider for the given model using the Gemini Developer API.
-func New(ctx context.Context, apiKey, modelName string) (*Provider, error) {
+func New(ctx context.Context, apiKey, modelName string, options map[string]any) (*Provider, error) {
 	c, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey})
 	if err != nil {
 		return nil, fmt.Errorf("google: failed to create client: %w", err)
 	}
-	return &Provider{client: c, modelName: modelName}, nil
+	return &Provider{client: c, modelName: modelName, options: options}, nil
 }
 
 // GenerateContent sends messages to the Gemini API and returns a normalised
@@ -76,6 +77,20 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: clampInt32(maxTokens),
+	}
+	if level, ok := p.options["thinking-level"].(string); ok {
+		if config.ThinkingConfig == nil {
+			config.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
+		config.ThinkingConfig.IncludeThoughts = true
+	}
+	if budget, ok := p.options["thinking-budget"].(float64); ok {
+		if config.ThinkingConfig == nil {
+			config.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		b := int32(budget)
+		config.ThinkingConfig.ThinkingBudget = &b
 	}
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
@@ -105,6 +120,20 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		MaxOutputTokens:  clampInt32(maxTokens),
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   convertSchema(schema),
+	}
+	if level, ok := p.options["thinking-level"].(string); ok {
+		if genaiConfig.ThinkingConfig == nil {
+			genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		genaiConfig.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
+		genaiConfig.ThinkingConfig.IncludeThoughts = true
+	}
+	if budget, ok := p.options["thinking-budget"].(float64); ok {
+		if genaiConfig.ThinkingConfig == nil {
+			genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		b := int32(budget)
+		genaiConfig.ThinkingConfig.ThinkingBudget = &b
 	}
 	if systemInstruction != nil {
 		genaiConfig.SystemInstruction = systemInstruction

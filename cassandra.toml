@@ -3,7 +3,7 @@
 # Precedence: CLI Arguments > Configuration File > Defaults
 
 provider = "google"
-model = "gemini-3.1-pro-preview"
+model = "gemini-3.5-flash"
 allow-url-fetch = true
 
 # Path to an MCP configuration file.
@@ -16,3 +16,6 @@ supplemental-guidelines = [
     ".cassandra/self-preservation.md",
     ".cassandra/drive-by-fixes.md"
 ]
+
+[provider-options]
+thinking-level = "high"

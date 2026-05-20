@@ -371,7 +371,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 				toolMsg.ToolResults[i] = llm.ToolResult{
 					ToolCallID: tc.ID,
 					Name:       tc.Name,
-					Content:    fmt.Sprintf("error: %v", ctx.Err()),
+					Content:    fmt.Sprintf("error: context canceled: %v", ctx.Err()),
 				}
 				return
 			}

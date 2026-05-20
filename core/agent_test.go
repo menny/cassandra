@@ -8,8 +8,8 @@ import (
 	"io"
 	"maps"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -298,7 +298,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		if len(msg.ToolResults) != 1 {
 			t.Fatal("expected 1 result")
 		}
-		if msg.ToolResults[0].Content != "error: context canceled" {
+		if msg.ToolResults[0].Content != "error: context canceled: context canceled" {
 			t.Errorf("expected context canceled error, got: %q", msg.ToolResults[0].Content)
 		}
 	})
@@ -912,49 +912,43 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 
 func TestExecuteToolCalls_Parallel(t *testing.T) {
 	dispatcher := newMockDispatcher()
-	ready := make(chan struct{}, 2)
-	block := make(chan struct{})
-	dispatcher.handlers["slow_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		ready <- struct{}{}
-		select {
-		case <-block:
-			return "done", nil
-		case <-ctx.Done():
-			return "", ctx.Err()
-		}
+
+	var entered sync.WaitGroup
+	entered.Add(2)
+	release := make(chan struct{})
+
+	dispatcher.handlers["parallel_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		entered.Done()
+		<-release
+		return "done", nil
 	}
 
 	agent := newTestAgent(&mockLLM{}, dispatcher)
 	toolCalls := []llm.ToolCall{
-		{ID: "1", Name: "slow_tool"},
-		{ID: "2", Name: "slow_tool"},
+		{ID: "1", Name: "parallel_tool"},
+		{ID: "2", Name: "parallel_tool"},
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan llm.Message, 1)
+	// Run in parallel and wait for both to enter.
+	resChan := make(chan llm.Message)
 	go func() {
-		done <- agent.executeToolCalls(ctx, toolCalls)
+		resChan <- agent.executeToolCalls(context.Background(), toolCalls)
 	}()
 
-	// Wait for both tools to start executing concurrently;
-	for range 2 {
-		select {
-		case <-ready:
-		case <-time.After(2 * time.Second):
-			t.Fatal("Timeout waiting for tool to start. Execution is likely sequential.")
-		}
-	}
+	// If they are parallel, both will call entered.Done() and wait on release.
+	// We wait for both to enter here.
+	entered.Wait()
 
-	close(block) // Unblock both tools
-	msg := <-done
+	// Now release both.
+	close(release)
+
+	msg := <-resChan
 
 	if len(msg.ToolResults) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
 	}
 
-	// Results should be in order.
+	// Results should be in order regardless of execution order.
 	if msg.ToolResults[0].ToolCallID != "1" || msg.ToolResults[1].ToolCallID != "2" {
 		t.Errorf("results out of order: %+v", msg.ToolResults)
 	}

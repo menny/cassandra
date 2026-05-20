@@ -21,19 +21,28 @@ const submitReviewToolName = "submit_review"
 type Provider struct {
 	client    openaisdk.Client
 	modelName string
+	options   map[string]any
 }
 
 // New creates a Provider for the given model. baseURL overrides the default
 // OpenAI API endpoint — pass an empty string to use the official API. This
 // allows targeting OpenAI-compatible providers (e.g. Ollama, local LLMs).
 // Extra SDK options can be passed for testing or additional configuration.
-func New(apiKey, modelName, baseURL string, opts ...option.RequestOption) *Provider {
+//
+// Note: the options map is currently ignored by this provider but is received
+// to maintain architectural parity with other providers (e.g. Google) that
+// support model-specific tuning via the configuration file.
+func New(apiKey, modelName, baseURL string, options map[string]any, opts ...option.RequestOption) *Provider {
 	allOpts := []option.RequestOption{option.WithAPIKey(apiKey)}
 	if baseURL != "" {
 		allOpts = append(allOpts, option.WithBaseURL(baseURL))
 	}
 	allOpts = append(allOpts, opts...)
-	return &Provider{client: openaisdk.NewClient(allOpts...), modelName: modelName}
+	return &Provider{
+		client:    openaisdk.NewClient(allOpts...),
+		modelName: modelName,
+		options:   options,
+	}
 }
 
 // GenerateContent sends messages to the OpenAI Chat Completions API and
