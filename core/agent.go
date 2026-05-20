@@ -364,8 +364,17 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()
 
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				toolMsg.ToolResults[i] = llm.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    fmt.Sprintf("error: %v", ctx.Err()),
+				}
+				return
+			}
 
 			defer func() {
 				if r := recover(); r != nil {

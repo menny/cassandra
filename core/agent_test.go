@@ -916,8 +916,12 @@ func TestExecuteToolCalls_Parallel(t *testing.T) {
 	block := make(chan struct{})
 	dispatcher.handlers["slow_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		ready <- struct{}{}
-		<-block // wait until both tools are ready
-		return "done", nil
+		select {
+		case <-block:
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
 
 	agent := newTestAgent(&mockLLM{}, dispatcher)
@@ -929,7 +933,7 @@ func TestExecuteToolCalls_Parallel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := make(chan llm.Message)
+	done := make(chan llm.Message, 1)
 	go func() {
 		done <- agent.executeToolCalls(ctx, toolCalls)
 	}()
