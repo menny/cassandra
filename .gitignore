@@ -29,6 +29,7 @@ bazel-testlogs
 
 # temp stuff
 scratch/
+.antigravitycli/
 
 # Conductor
 conductor/plan.md
