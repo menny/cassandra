@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -911,9 +912,11 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 
 func TestExecuteToolCalls_Parallel(t *testing.T) {
 	dispatcher := newMockDispatcher()
-	// Each tool takes 100ms.
+	ready := make(chan struct{}, 2)
+	block := make(chan struct{})
 	dispatcher.handlers["slow_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		time.Sleep(100 * time.Millisecond)
+		ready <- struct{}{}
+		<-block // wait until both tools are ready
 		return "done", nil
 	}
 
@@ -923,9 +926,25 @@ func TestExecuteToolCalls_Parallel(t *testing.T) {
 		{ID: "2", Name: "slow_tool"},
 	}
 
-	start := time.Now()
-	msg := agent.executeToolCalls(context.Background(), toolCalls)
-	elapsed := time.Since(start)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan llm.Message)
+	go func() {
+		done <- agent.executeToolCalls(ctx, toolCalls)
+	}()
+
+	// Wait for both tools to start executing concurrently;
+	for range 2 {
+		select {
+		case <-ready:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timeout waiting for tool to start. Execution is likely sequential.")
+		}
+	}
+
+	close(block) // Unblock both tools
+	msg := <-done
 
 	if len(msg.ToolResults) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
@@ -935,13 +954,36 @@ func TestExecuteToolCalls_Parallel(t *testing.T) {
 	if msg.ToolResults[0].ToolCallID != "1" || msg.ToolResults[1].ToolCallID != "2" {
 		t.Errorf("results out of order: %+v", msg.ToolResults)
 	}
+}
 
-	// If sequential, would take at least 200ms.
-	// If parallel, should take slightly more than 100ms.
-	if elapsed >= 200*time.Millisecond {
-		t.Errorf("execution took %v, which suggests sequential execution (>= 200ms)", elapsed)
+func TestExecuteToolCalls_PanicRecovery(t *testing.T) {
+	dispatcher := newMockDispatcher()
+	dispatcher.handlers["panicking_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		panic("boom")
 	}
-	if elapsed < 100*time.Millisecond {
-		t.Errorf("execution took %v, which is impossibly fast (< 100ms)", elapsed)
+	dispatcher.handlers["normal_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		return "ok", nil
+	}
+
+	agent := newTestAgent(&mockLLM{}, dispatcher)
+	toolCalls := []llm.ToolCall{
+		{ID: "1", Name: "panicking_tool"},
+		{ID: "2", Name: "normal_tool"},
+	}
+
+	msg := agent.executeToolCalls(context.Background(), toolCalls)
+
+	if len(msg.ToolResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
+	}
+
+	// Check that the normal tool finished normally
+	if msg.ToolResults[1].Content != "ok" {
+		t.Errorf("expected normal tool result 'ok', got %q", msg.ToolResults[1].Content)
+	}
+
+	// Check that the panicking tool result contains the panic message
+	if !strings.Contains(msg.ToolResults[0].Content, "tool panicked: boom") {
+		t.Errorf("expected panic error message, got %q", msg.ToolResults[0].Content)
 	}
 }

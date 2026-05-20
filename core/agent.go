@@ -367,6 +367,16 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			defer func() {
+				if r := recover(); r != nil {
+					toolMsg.ToolResults[i] = llm.ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    fmt.Sprintf("error: tool panicked: %v", r),
+					}
+				}
+			}()
+
 			// Dispatch; on error, surface the message as the tool result so the
 			// LLM can reason about it rather than crashing the whole loop.
 			result, toolErr := a.registry.HandleCall(ctx, tc)
