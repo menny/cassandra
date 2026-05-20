@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/menny/cassandra/llm"
@@ -20,6 +21,9 @@ const (
 	// AbsoluteMaxIter is the hard upper bound for the ReAct loop to prevent
 	// infinite recursion or excessive token spend.
 	AbsoluteMaxIter = 25
+	// MaxToolConcurrency is the maximum number of tools allowed to run
+	// in parallel in a single turn.
+	MaxToolConcurrency = 8
 )
 
 // CalculateMaxIterations returns a sensible iteration cap based on the number
@@ -346,26 +350,58 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 	// role alternation (no consecutive same-role turns).
 	toolMsg := llm.Message{
 		Role:        llm.RoleTool,
-		ToolResults: make([]llm.ToolResult, 0, len(toolCalls)),
+		ToolResults: make([]llm.ToolResult, len(toolCalls)),
 	}
 
-	for _, tc := range toolCalls {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, MaxToolConcurrency)
+
+	for i, tc := range toolCalls {
 		a.toolCalls[tc.Name]++
 		a.reporter.ReportToolCall(tc)
 
-		// Dispatch; on error, surface the message as the tool result so the
-		// LLM can reason about it rather than crashing the whole loop.
-		result, toolErr := a.registry.HandleCall(ctx, tc)
-		if toolErr != nil {
-			result = fmt.Sprintf("error: %v", toolErr)
-		}
+		wg.Add(1)
+		go func(i int, tc llm.ToolCall) {
+			defer wg.Done()
 
-		toolMsg.ToolResults = append(toolMsg.ToolResults, llm.ToolResult{
-			ToolCallID: tc.ID,
-			Name:       tc.Name,
-			Content:    result,
-		})
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				toolMsg.ToolResults[i] = llm.ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Name,
+					Content:    fmt.Sprintf("error: %v", ctx.Err()),
+				}
+				return
+			}
+
+			defer func() {
+				if r := recover(); r != nil {
+					toolMsg.ToolResults[i] = llm.ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Name,
+						Content:    fmt.Sprintf("error: tool panicked: %v", r),
+					}
+				}
+			}()
+
+			// Dispatch; on error, surface the message as the tool result so the
+			// LLM can reason about it rather than crashing the whole loop.
+			result, toolErr := a.registry.HandleCall(ctx, tc)
+			if toolErr != nil {
+				result = fmt.Sprintf("error: %v", toolErr)
+			}
+
+			toolMsg.ToolResults[i] = llm.ToolResult{
+				ToolCallID: tc.ID,
+				Name:       tc.Name,
+				Content:    result,
+			}
+		}(i, tc)
 	}
+
+	wg.Wait()
 	return toolMsg
 }
 

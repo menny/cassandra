@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -905,5 +907,87 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 	// At least emptyResponseMaxAttempts calls must have been made.
 	if lm.callIdx < emptyResponseMaxAttempts {
 		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}
+
+func TestExecuteToolCalls_Parallel(t *testing.T) {
+	dispatcher := newMockDispatcher()
+	ready := make(chan struct{}, 2)
+	block := make(chan struct{})
+	dispatcher.handlers["slow_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		ready <- struct{}{}
+		select {
+		case <-block:
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+
+	agent := newTestAgent(&mockLLM{}, dispatcher)
+	toolCalls := []llm.ToolCall{
+		{ID: "1", Name: "slow_tool"},
+		{ID: "2", Name: "slow_tool"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan llm.Message, 1)
+	go func() {
+		done <- agent.executeToolCalls(ctx, toolCalls)
+	}()
+
+	// Wait for both tools to start executing concurrently;
+	for range 2 {
+		select {
+		case <-ready:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Timeout waiting for tool to start. Execution is likely sequential.")
+		}
+	}
+
+	close(block) // Unblock both tools
+	msg := <-done
+
+	if len(msg.ToolResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
+	}
+
+	// Results should be in order.
+	if msg.ToolResults[0].ToolCallID != "1" || msg.ToolResults[1].ToolCallID != "2" {
+		t.Errorf("results out of order: %+v", msg.ToolResults)
+	}
+}
+
+func TestExecuteToolCalls_PanicRecovery(t *testing.T) {
+	dispatcher := newMockDispatcher()
+	dispatcher.handlers["panicking_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		panic("boom")
+	}
+	dispatcher.handlers["normal_tool"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		return "ok", nil
+	}
+
+	agent := newTestAgent(&mockLLM{}, dispatcher)
+	toolCalls := []llm.ToolCall{
+		{ID: "1", Name: "panicking_tool"},
+		{ID: "2", Name: "normal_tool"},
+	}
+
+	msg := agent.executeToolCalls(context.Background(), toolCalls)
+
+	if len(msg.ToolResults) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(msg.ToolResults))
+	}
+
+	// Check that the normal tool finished normally
+	if msg.ToolResults[1].Content != "ok" {
+		t.Errorf("expected normal tool result 'ok', got %q", msg.ToolResults[1].Content)
+	}
+
+	// Check that the panicking tool result contains the panic message
+	if !strings.Contains(msg.ToolResults[0].Content, "tool panicked: boom") {
+		t.Errorf("expected panic error message, got %q", msg.ToolResults[0].Content)
 	}
 }
