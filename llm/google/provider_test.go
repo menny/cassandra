@@ -409,12 +409,12 @@ func TestApplyThinkingConfig(t *testing.T) {
 			},
 		},
 		{
-			name:     "thinking level only - lowercase gets normalized",
+			name:     "thinking level only - lowercase passed raw",
 			options:  map[string]any{"thinking-level": "high"},
 			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
 			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
 				require.NotNil(t, cfg.ThinkingConfig)
-				assert.Equal(t, genai.ThinkingLevel("HIGH"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.Equal(t, genai.ThinkingLevel("high"), cfg.ThinkingConfig.ThinkingLevel)
 				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
 				assert.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
 			},
@@ -439,7 +439,7 @@ func TestApplyThinkingConfig(t *testing.T) {
 			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
 			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
 				require.NotNil(t, cfg.ThinkingConfig)
-				assert.Equal(t, genai.ThinkingLevel("MEDIUM"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.Equal(t, genai.ThinkingLevel("medium"), cfg.ThinkingConfig.ThinkingLevel)
 				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
 				require.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
 				assert.Equal(t, int32(2048), *cfg.ThinkingConfig.ThinkingBudget)
