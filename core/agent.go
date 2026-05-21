@@ -276,7 +276,28 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 			ProviderMetadata: resp.ProviderMetadata,
 		})
 
-		messages = append(messages, a.executeToolCalls(ctx, resp.ToolCalls))
+		toolMsg := a.executeToolCalls(ctx, resp.ToolCalls)
+		// executeToolCalls returns a ToolResults slice with len(toolCalls) elements.
+		// Since len(resp.ToolCalls) > 0, len(toolMsg.ToolResults) is guaranteed to be > 0.
+		// The guard is a defensive check to prevent out-of-bounds access.
+		if len(toolMsg.ToolResults) > 0 {
+			remaining := maxIterations - (iter + 1)
+			// Only append budget notes if there is at least one remaining tool iteration.
+			// When remaining == 0, the next turn will hit the end of the loop and trigger
+			// handleCapReached unconditionally, which appends its own forced-final cap message.
+			// Thus, a remaining == 0 budget note is intentionally omitted to avoid redundant notes.
+			if remaining > 0 {
+				lastIdx := len(toolMsg.ToolResults) - 1
+				var note string
+				if remaining == 1 {
+					note = fmt.Sprintf(budgetNoteLastTurn, iter+1, maxIterations)
+				} else {
+					note = fmt.Sprintf(budgetNoteGeneral, iter+1, maxIterations, remaining)
+				}
+				toolMsg.ToolResults[lastIdx].Content += note
+			}
+		}
+		messages = append(messages, toolMsg)
 	}
 
 	return a.handleCapReached(ctx, messages, maxIterations, maxTokens)
@@ -290,6 +311,10 @@ const extractionMaxAttempts = 3
 // returns a successful (nil-error) response with empty content. This is a
 // distinct failure mode from a hard error and needs its own retry budget.
 const emptyResponseMaxAttempts = 3
+
+const budgetNoteLastTurn = "\n\n---\n[SYSTEM NOTE] Iteration %d of %d. 1 more turn left. This is your last turn to call tools! In the next turn, you will be forced to finalize your review without tools. Formulate your final review now if you have enough information."
+
+const budgetNoteGeneral = "\n\n---\n[SYSTEM NOTE] Iteration %d of %d. Budget remaining: %d turns.\nPlease minimize iterations: only request further tool calls if needed to resolve remaining information gaps. If you already have enough context, formulate and return your final review now."
 
 // ExtractStructuredReview takes a raw markdown review and converts it into a
 // machine-readable StructuredReview using a second LLM pass.

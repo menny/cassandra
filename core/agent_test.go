@@ -369,8 +369,9 @@ func TestRunReview_SingleToolCall(t *testing.T) {
 	if len(toolMsg.ToolResults) != 1 {
 		t.Fatalf("tool-result message: expected 1 result, got %d", len(toolMsg.ToolResults))
 	}
-	if toolMsg.ToolResults[0].Content != wantResult {
-		t.Errorf("tool result content: got %q, want %q", toolMsg.ToolResults[0].Content, wantResult)
+	expectedContent := wantResult + fmt.Sprintf(budgetNoteGeneral, 1, 5, 4)
+	if toolMsg.ToolResults[0].Content != expectedContent {
+		t.Errorf("tool result content: got %q, want %q", toolMsg.ToolResults[0].Content, expectedContent)
 	}
 }
 
@@ -983,5 +984,99 @@ func TestExecuteToolCalls_PanicRecovery(t *testing.T) {
 	// Check that the panicking tool result contains the panic message
 	if !strings.Contains(msg.ToolResults[0].Content, "tool panicked: boom") {
 		t.Errorf("expected panic error message, got %q", msg.ToolResults[0].Content)
+	}
+}
+
+func TestRunReview_IterationBudgetNote(t *testing.T) {
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
+			toolCallsResponse(makeToolCall("tc2", "read_file", map[string]any{"file_path": "bar.go"})),
+			toolCallsResponse(makeToolCall("tc3", "read_file", map[string]any{"file_path": "baz.go"})),
+			textResponse("forced final review done"),
+		},
+	}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		var args map[string]any
+		_ = tc.UnmarshalArguments(&args)
+		return fmt.Sprintf("content of %s", args["file_path"]), nil
+	}
+
+	agent := newTestAgent(lm, d)
+	got, err := agent.RunReview(context.Background(), "sys", "", "req", 3, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "forced final review done" {
+		t.Errorf("got final review %q, expected %q", got, "forced final review done")
+	}
+
+	// We expect 4 LLM calls in total (3 loop turns + 1 forced final review).
+	if len(lm.calls) != 4 {
+		t.Fatalf("expected 4 LLM calls, got %d", len(lm.calls))
+	}
+
+	// lm.calls[1] is the second call (Turn 2). The last message in history should be a ToolResult message.
+	history2 := lm.calls[1]
+	lastMsg2 := history2[len(history2)-1]
+	if lastMsg2.Role != llm.RoleTool {
+		t.Fatalf("expected last message in Turn 2 history to be RoleTool, got %v", lastMsg2.Role)
+	}
+	if len(lastMsg2.ToolResults) != 1 {
+		t.Fatalf("expected 1 tool result in Turn 2, got %d", len(lastMsg2.ToolResults))
+	}
+	resultContent2 := lastMsg2.ToolResults[0].Content
+	if !strings.Contains(resultContent2, "[SYSTEM NOTE] Iteration 1 of 3. Budget remaining: 2 turns.") {
+		t.Errorf("expected Turn 2 ToolResult to contain Case A budget note, got:\n%s", resultContent2)
+	}
+	if !strings.Contains(resultContent2, "Please minimize iterations: only request further tool calls if needed") {
+		t.Errorf("expected Turn 2 ToolResult to contain relaxed Case A warning, got:\n%s", resultContent2)
+	}
+
+	// lm.calls[2] is the third call (Turn 3). The last message in history should be the next ToolResult message.
+	history3 := lm.calls[2]
+	lastMsg3 := history3[len(history3)-1]
+	if lastMsg3.Role != llm.RoleTool {
+		t.Fatalf("expected last message in Turn 3 history to be RoleTool, got %v", lastMsg3.Role)
+	}
+	if len(lastMsg3.ToolResults) != 1 {
+		t.Fatalf("expected 1 tool result in Turn 3, got %d", len(lastMsg3.ToolResults))
+	}
+	resultContent3 := lastMsg3.ToolResults[0].Content
+	if !strings.Contains(resultContent3, "[SYSTEM NOTE] Iteration 2 of 3. 1 more turn left.") {
+		t.Errorf("expected Turn 3 ToolResult to contain Case B budget note, got:\n%s", resultContent3)
+	}
+	if !strings.Contains(resultContent3, "This is your last turn to call tools! In the next turn, you will be forced to finalize") {
+		t.Errorf("expected Turn 3 ToolResult to contain Case B last-turn warning, got:\n%s", resultContent3)
+	}
+
+	// lm.calls[3] is the fourth call (forced final review).
+	// The last message in history must be the RoleUser cap message, and the second-to-last
+	// must be the RoleTool message for tc3 containing NO budget note at all (remaining == 0).
+	history4 := lm.calls[3]
+	if len(history4) < 2 {
+		t.Fatalf("expected at least 2 messages in Turn 4 history, got %d", len(history4))
+	}
+
+	capMsg := history4[len(history4)-1]
+	if capMsg.Role != llm.RoleUser {
+		t.Errorf("expected last message in Turn 4 history to be RoleUser capMsg, got role %v", capMsg.Role)
+	}
+	if !strings.Contains(capMsg.Text, "[SYSTEM] The maximum number of tool-call iterations (3) has been reached.") {
+		t.Errorf("expected last message to contain cap message, got %q", capMsg.Text)
+	}
+
+	lastToolMsg := history4[len(history4)-2]
+	if lastToolMsg.Role != llm.RoleTool {
+		t.Fatalf("expected second-to-last message in Turn 4 history to be RoleTool, got %v", lastToolMsg.Role)
+	}
+	if len(lastToolMsg.ToolResults) != 1 {
+		t.Fatalf("expected 1 tool result in lastToolMsg, got %d", len(lastToolMsg.ToolResults))
+	}
+	resultContent4 := lastToolMsg.ToolResults[0].Content
+	// Since remaining was 0, it should be exactly the raw output "content of baz.go" with NO [SYSTEM NOTE].
+	if resultContent4 != "content of baz.go" {
+		t.Errorf("expected Turn 4 ToolResult to be exactly raw content, got %q", resultContent4)
 	}
 }
