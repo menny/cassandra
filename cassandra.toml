@@ -17,4 +17,4 @@ supplemental-guidelines = [
     ".cassandra/drive-by-fixes.md"
 ]
 
-provider-options-file = "scratch/provider_options.json"
+provider-options-file = ".cassandra.google.provider.settings.json"

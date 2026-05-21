@@ -99,17 +99,9 @@ func New(ctx context.Context, apiKey, modelName string, options map[string]any) 
 	return &Provider{client: c, modelName: modelName, options: options}, nil
 }
 
-// GenerateContent sends messages to the Gemini API and returns a normalised
-// llm.Response.
-func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
-	contents, systemInstruction, err := toContents(messages)
-	if err != nil {
-		return nil, fmt.Errorf("google: building contents: %w", err)
-	}
-
-	config := &genai.GenerateContentConfig{
-		MaxOutputTokens: clampInt32(maxTokens),
-	}
+// applyThinkingConfig extracts, parses, and applies the "thinking-level" and "thinking-budget"
+// options onto the genai.GenerateContentConfig struct if present.
+func (p *Provider) applyThinkingConfig(config *genai.GenerateContentConfig) {
 	if level, ok := p.options["thinking-level"].(string); ok {
 		if config.ThinkingConfig == nil {
 			config.ThinkingConfig = &genai.ThinkingConfig{}
@@ -125,6 +117,20 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 			config.ThinkingConfig.ThinkingBudget = &budget
 		}
 	}
+}
+
+// GenerateContent sends messages to the Gemini API and returns a normalised
+// llm.Response.
+func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
+	contents, systemInstruction, err := toContents(messages)
+	if err != nil {
+		return nil, fmt.Errorf("google: building contents: %w", err)
+	}
+
+	config := &genai.GenerateContentConfig{
+		MaxOutputTokens: clampInt32(maxTokens),
+	}
+	p.applyThinkingConfig(config)
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
 	}
@@ -154,21 +160,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   convertSchema(schema),
 	}
-	if level, ok := p.options["thinking-level"].(string); ok {
-		if genaiConfig.ThinkingConfig == nil {
-			genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
-		}
-		genaiConfig.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
-		genaiConfig.ThinkingConfig.IncludeThoughts = true
-	}
-	if opt, ok := p.options["thinking-budget"]; ok {
-		if budget, parsed := parseThinkingBudget(opt); parsed {
-			if genaiConfig.ThinkingConfig == nil {
-				genaiConfig.ThinkingConfig = &genai.ThinkingConfig{}
-			}
-			genaiConfig.ThinkingConfig.ThinkingBudget = &budget
-		}
-	}
+	p.applyThinkingConfig(genaiConfig)
 	if systemInstruction != nil {
 		genaiConfig.SystemInstruction = systemInstruction
 	}
