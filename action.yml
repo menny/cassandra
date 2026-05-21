@@ -80,6 +80,10 @@ inputs:
   max_tokens:
     description: 'Max tokens for the LLM response'
     required: false
+  provider_options_file:
+    description: 'Path to a JSON file containing provider-specific options'
+    required: false
+    default: ''
 outputs:
   review_file:
     description: 'Path to the generated markdown review file.'
@@ -281,6 +285,7 @@ runs:
         ALLOW_URL_FETCH: ${{ inputs.allow_url_fetch }}
         IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
         MAX_TOKENS: ${{ inputs.max_tokens }}
+        PROVIDER_OPTIONS_FILE: ${{ inputs.provider_options_file }}
       run: |
         # Use temporary files for the review outputs
         REVIEW_FILE="${{ runner.temp }}/cassandra_review.md"
@@ -359,6 +364,15 @@ runs:
         if [[ -n "$IGNORED_LOCK_FILES" ]]; then
           JOINED_IGNORED_LOCK_FILES=$(echo "$IGNORED_LOCK_FILES" | tr -d '\r' | tr '\n' ',' | sed 's/,,*/,/g' | sed 's/^,//;s/,$//')
           ARGS+=(--ignored-lock-files "$JOINED_IGNORED_LOCK_FILES")
+        fi
+
+        if [[ -n "$PROVIDER_OPTIONS_FILE" ]]; then
+          RESOLVED_OPTS="${{ github.workspace }}/$WORKING_DIRECTORY/$PROVIDER_OPTIONS_FILE"
+          if [[ -f "$RESOLVED_OPTS" ]]; then
+            ARGS+=(--provider-options-file "$RESOLVED_OPTS")
+          else
+            ARGS+=(--provider-options-file "$PROVIDER_OPTIONS_FILE")
+          fi
         fi
 
         if [[ -f "$METADATA_FILE" ]]; then

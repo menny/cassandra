@@ -1,6 +1,7 @@
 package google
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -345,4 +346,113 @@ func TestParseGenaiResponse_NoCandidates(t *testing.T) {
 	resp := &genai.GenerateContentResponse{}
 	_, err := parseGenaiResponse(resp)
 	assert.Error(t, err)
+}
+
+func TestParseThinkingBudget(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      any
+		wantVal    int32
+		wantParsed bool
+	}{
+		{"nil input", nil, 0, false},
+		{"int input", 1024, 1024, true},
+		{"int32 input", int32(2048), 2048, true},
+		{"int64 input", int64(4096), 4096, true},
+		{"int64 out of bounds positive", int64(math.MaxInt32 + 1), 0, false},
+		{"int64 out of bounds negative", int64(math.MinInt32 - 1), 0, false},
+		{"float64 input", float64(2048), 2048, true},
+		{"float64 out of bounds positive", float64(math.MaxInt32) + 1.0, 0, false},
+		{"float64 out of bounds negative", float64(math.MinInt32) - 1.0, 0, false},
+		{"string numeric input", "4096", 4096, true},
+		{"string non-numeric input", "invalid", 0, false},
+		{"string out of bounds positive", "2147483648", 0, false},
+		{"string out of bounds negative", "-2147483649", 0, false},
+		{"invalid type struct", struct{}{}, 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val, parsed := parseThinkingBudget(tt.input)
+			assert.Equal(t, tt.wantParsed, parsed)
+			if tt.wantParsed {
+				assert.Equal(t, tt.wantVal, val)
+			}
+		})
+	}
+}
+
+func TestApplyThinkingConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  map[string]any
+		setupCfg func() *genai.GenerateContentConfig
+		verify   func(t *testing.T, cfg *genai.GenerateContentConfig)
+	}{
+		{
+			name:     "no options",
+			options:  nil,
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				assert.Nil(t, cfg.ThinkingConfig)
+			},
+		},
+		{
+			name:     "thinking level only - uppercase",
+			options:  map[string]any{"thinking-level": "THINKING_LEVEL_ON"},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("THINKING_LEVEL_ON"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				assert.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+		{
+			name:     "thinking level only - lowercase passed raw",
+			options:  map[string]any{"thinking-level": "high"},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("high"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				assert.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+		{
+			name:     "thinking budget only - valid int",
+			options:  map[string]any{"thinking-budget": 1024},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				require.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
+				assert.Equal(t, int32(1024), *cfg.ThinkingConfig.ThinkingBudget)
+				assert.False(t, cfg.ThinkingConfig.IncludeThoughts)
+			},
+		},
+		{
+			name: "both level and budget",
+			options: map[string]any{
+				"thinking-level":  "medium",
+				"thinking-budget": "2048",
+			},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("medium"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				require.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
+				assert.Equal(t, int32(2048), *cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{options: tt.options}
+			cfg := tt.setupCfg()
+			p.applyThinkingConfig(cfg)
+			tt.verify(t, cfg)
+		})
+	}
 }

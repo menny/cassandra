@@ -59,6 +59,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
 	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
+	fs.StringVar(&cfg.ProviderOptionsFile, "provider-options-file", "", "Path to a JSON file containing provider-specific options")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -121,6 +122,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
+	if err := cfg.LoadProviderOptions(); err != nil {
+		return err
+	}
+
 	trimmed := make([]string, len(cfg.IgnoredLockFiles))
 	for i, lf := range cfg.IgnoredLockFiles {
 		trimmed[i] = strings.TrimSpace(lf)
@@ -152,6 +157,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		stderr.Printf("  LLM Provider URL: %s\n", cfg.ProviderURL)
 	}
 	stderr.Printf("  Max Tokens: %d\n", cfg.MaxTokens)
+	if len(cfg.ProviderOptions) > 0 {
+		stderr.Printf("  Provider Options: %+v\n", cfg.ProviderOptions)
+	}
 	if cfg.MainGuidelines != "" {
 		stderr.Printf("  Main Guidelines: %s\n", cfg.MainGuidelines)
 	}

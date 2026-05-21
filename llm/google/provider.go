@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 
 	"google.golang.org/genai"
 
@@ -40,6 +41,37 @@ func clampInt32(n int) int32 {
 	return int32(n) //nolint:gosec // bounds-checked above
 }
 
+// parseThinkingBudget safely coerces a thinking budget option of unknown type (e.g. from JSON/Viper)
+// into an int32 representation. Returns the parsed value and true if conversion succeeded, or (0, false) otherwise.
+func parseThinkingBudget(opt any) (int32, bool) {
+	switch v := opt.(type) {
+	case int:
+		return int32(v), true
+	case int32:
+		return v, true
+	case int64:
+		if v > math.MaxInt32 || v < math.MinInt32 {
+			return 0, false
+		}
+		return int32(v), true
+	case float64:
+		if v > float64(math.MaxInt32) || v < float64(math.MinInt32) {
+			return 0, false
+		}
+		return int32(v), true
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		if parsed > math.MaxInt32 || parsed < math.MinInt32 {
+			return 0, false
+		}
+		return int32(parsed), true
+	}
+	return 0, false
+}
+
 // jsonSchemaTypes maps JSON Schema type names (lowercase) to their
 // genai.Type counterparts (uppercase enum). Used by convertSchema.
 var jsonSchemaTypes = map[string]genai.Type{
@@ -55,15 +87,36 @@ var jsonSchemaTypes = map[string]genai.Type{
 type Provider struct {
 	client    *genai.Client
 	modelName string
+	options   map[string]any
 }
 
 // New creates a Provider for the given model using the Gemini Developer API.
-func New(ctx context.Context, apiKey, modelName string) (*Provider, error) {
+func New(ctx context.Context, apiKey, modelName string, options map[string]any) (*Provider, error) {
 	c, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey})
 	if err != nil {
 		return nil, fmt.Errorf("google: failed to create client: %w", err)
 	}
-	return &Provider{client: c, modelName: modelName}, nil
+	return &Provider{client: c, modelName: modelName, options: options}, nil
+}
+
+// applyThinkingConfig extracts, parses, and applies the "thinking-level" and "thinking-budget"
+// options onto the genai.GenerateContentConfig struct if present.
+func (p *Provider) applyThinkingConfig(config *genai.GenerateContentConfig) {
+	if level, ok := p.options["thinking-level"].(string); ok {
+		if config.ThinkingConfig == nil {
+			config.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
+		config.ThinkingConfig.IncludeThoughts = true
+	}
+	if opt, ok := p.options["thinking-budget"]; ok {
+		if budget, parsed := parseThinkingBudget(opt); parsed {
+			if config.ThinkingConfig == nil {
+				config.ThinkingConfig = &genai.ThinkingConfig{}
+			}
+			config.ThinkingConfig.ThinkingBudget = &budget
+		}
+	}
 }
 
 // GenerateContent sends messages to the Gemini API and returns a normalised
@@ -77,6 +130,7 @@ func (p *Provider) GenerateContent(ctx context.Context, messages []llm.Message, 
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: clampInt32(maxTokens),
 	}
+	p.applyThinkingConfig(config)
 	if systemInstruction != nil {
 		config.SystemInstruction = systemInstruction
 	}
@@ -106,6 +160,7 @@ func (p *Provider) GenerateStructuredContent(ctx context.Context, messages []llm
 		ResponseMIMEType: "application/json",
 		ResponseSchema:   convertSchema(schema),
 	}
+	p.applyThinkingConfig(genaiConfig)
 	if systemInstruction != nil {
 		genaiConfig.SystemInstruction = systemInstruction
 	}

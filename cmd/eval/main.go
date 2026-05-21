@@ -88,7 +88,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("judge configuration is incomplete (judge-provider, judge-model, and judge-api-key are required)")
 	}
 
-	judge, err := factory.New(ctx, judgeProvider, judgeModel, judgeAPIKey, judgeURL)
+	judge, err := factory.New(ctx, judgeProvider, judgeModel, judgeAPIKey, judgeURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to init judge: %w", err)
 	}

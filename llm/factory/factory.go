@@ -27,30 +27,30 @@ const (
 // providerFactory constructs a provider-specific llm.Model. Implementations
 // may use ctx (e.g. to dial eagerly) or ignore it. baseURL overrides the
 // provider's default API endpoint; pass an empty string for the default.
-type providerFactory func(ctx context.Context, apiKey, modelName, baseURL string) (llm.Model, error)
+type providerFactory func(ctx context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error)
 
 // providers is the registry of supported Providers. Adding a new provider
 // is a single entry here; factory.New and the "unsupported provider" error
 // message derive from this map automatically.
 var providers = map[Provider]providerFactory{
-	ProviderAnthropic: func(_ context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {
+	ProviderAnthropic: func(_ context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error) {
 		if baseURL != "" {
 			fmt.Fprintf(os.Stderr, "Warning: baseURL %q is ignored by the anthropic provider\n", baseURL)
 		}
 		// Anthropic client is constructed synchronously; ctx is unused at
 		// construction time (the SDK dials lazily per request).
-		return anthropic.New(apiKey, modelName), nil
+		return anthropic.New(apiKey, modelName, options), nil
 	},
-	ProviderGoogle: func(ctx context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {
+	ProviderGoogle: func(ctx context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error) {
 		if baseURL != "" {
 			fmt.Fprintf(os.Stderr, "Warning: baseURL %q is ignored by the google provider\n", baseURL)
 		}
-		return google.New(ctx, apiKey, modelName)
+		return google.New(ctx, apiKey, modelName, options)
 	},
-	ProviderOpenAI: func(_ context.Context, apiKey, modelName, baseURL string) (llm.Model, error) {
+	ProviderOpenAI: func(_ context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error) {
 		// OpenAI client is constructed synchronously; ctx is unused at
 		// construction time (the SDK dials lazily per request).
-		return openai.New(apiKey, modelName, baseURL), nil
+		return openai.New(apiKey, modelName, baseURL, options), nil
 	},
 }
 
@@ -60,13 +60,13 @@ var providers = map[Provider]providerFactory{
 // allowing callers to target OpenAI-compatible services (e.g. Ollama).
 // The returned model automatically retries transient errors with exponential
 // back-off using llm.DefaultRetryAttempts and llm.DefaultRetryBaseDelay.
-func New(ctx context.Context, provider, modelName, apiKey, baseURL string) (llm.Model, error) {
+func New(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error) {
 	f, ok := providers[Provider(provider)]
 	if !ok {
 		return nil, fmt.Errorf("unsupported provider %q: supported providers are %s",
 			provider, supportedProviders())
 	}
-	inner, err := f(ctx, apiKey, modelName, baseURL)
+	inner, err := f(ctx, apiKey, modelName, baseURL, options)
 	if err != nil {
 		return nil, err
 	}
