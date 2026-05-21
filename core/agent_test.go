@@ -298,7 +298,7 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		if len(msg.ToolResults) != 1 {
 			t.Fatal("expected 1 result")
 		}
-		if msg.ToolResults[0].Content != "error: context canceled: context canceled" {
+		if msg.ToolResults[0].Content != "error: context canceled" {
 			t.Errorf("expected context canceled error, got: %q", msg.ToolResults[0].Content)
 		}
 	})

@@ -381,3 +381,78 @@ func TestParseThinkingBudget(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyThinkingConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		options  map[string]any
+		setupCfg func() *genai.GenerateContentConfig
+		verify   func(t *testing.T, cfg *genai.GenerateContentConfig)
+	}{
+		{
+			name:     "no options",
+			options:  nil,
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				assert.Nil(t, cfg.ThinkingConfig)
+			},
+		},
+		{
+			name:     "thinking level only - uppercase",
+			options:  map[string]any{"thinking-level": "THINKING_LEVEL_ON"},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("THINKING_LEVEL_ON"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				assert.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+		{
+			name:     "thinking level only - lowercase gets normalized",
+			options:  map[string]any{"thinking-level": "high"},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("HIGH"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				assert.Nil(t, cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+		{
+			name:     "thinking budget only - valid int",
+			options:  map[string]any{"thinking-budget": 1024},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				require.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
+				assert.Equal(t, int32(1024), *cfg.ThinkingConfig.ThinkingBudget)
+				assert.False(t, cfg.ThinkingConfig.IncludeThoughts)
+			},
+		},
+		{
+			name: "both level and budget",
+			options: map[string]any{
+				"thinking-level":  "medium",
+				"thinking-budget": "2048",
+			},
+			setupCfg: func() *genai.GenerateContentConfig { return &genai.GenerateContentConfig{} },
+			verify: func(t *testing.T, cfg *genai.GenerateContentConfig) {
+				require.NotNil(t, cfg.ThinkingConfig)
+				assert.Equal(t, genai.ThinkingLevel("MEDIUM"), cfg.ThinkingConfig.ThinkingLevel)
+				assert.True(t, cfg.ThinkingConfig.IncludeThoughts)
+				require.NotNil(t, cfg.ThinkingConfig.ThinkingBudget)
+				assert.Equal(t, int32(2048), *cfg.ThinkingConfig.ThinkingBudget)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{options: tt.options}
+			cfg := tt.setupCfg()
+			p.applyThinkingConfig(cfg)
+			tt.verify(t, cfg)
+		})
+	}
+}

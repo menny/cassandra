@@ -122,16 +122,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
 	}
 
-	if cfg.ProviderOptionsFile != "" {
-		data, err := os.ReadFile(cfg.ProviderOptionsFile)
-		if err != nil {
-			return fmt.Errorf("failed to read provider options file %q: %w", cfg.ProviderOptionsFile, err)
-		}
-		var opts map[string]any
-		if err := json.Unmarshal(data, &opts); err != nil {
-			return fmt.Errorf("failed to parse provider options file %q as JSON: %w", cfg.ProviderOptionsFile, err)
-		}
-		cfg.ProviderOptions = opts
+	if err := cfg.LoadProviderOptions(); err != nil {
+		return err
 	}
 
 	trimmed := make([]string, len(cfg.IgnoredLockFiles))

@@ -27,9 +27,6 @@ const (
 // providerFactory constructs a provider-specific llm.Model. Implementations
 // may use ctx (e.g. to dial eagerly) or ignore it. baseURL overrides the
 // provider's default API endpoint; pass an empty string for the default.
-// providerFactory constructs a provider-specific llm.Model. Implementations
-// may use ctx (e.g. to dial eagerly) or ignore it. baseURL overrides the
-// provider's default API endpoint; pass an empty string for the default.
 type providerFactory func(ctx context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error)
 
 // providers is the registry of supported Providers. Adding a new provider

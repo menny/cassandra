@@ -96,19 +96,28 @@ func Load(configFile string) (*Config, error) {
 	}
 	cfg.IgnoredLockFiles = trimmed
 
-	if cfg.ProviderOptionsFile != "" {
-		data, err := os.ReadFile(cfg.ProviderOptionsFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read provider options file %q: %w", cfg.ProviderOptionsFile, err)
-		}
-		var opts map[string]any
-		if err := json.Unmarshal(data, &opts); err != nil {
-			return nil, fmt.Errorf("failed to parse provider options file %q as JSON: %w", cfg.ProviderOptionsFile, err)
-		}
-		cfg.ProviderOptions = opts
+	if err := cfg.LoadProviderOptions(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// LoadProviderOptions loads provider options from the configured ProviderOptionsFile.
+func (cfg *Config) LoadProviderOptions() error {
+	if cfg.ProviderOptionsFile == "" {
+		return nil
+	}
+	data, err := os.ReadFile(cfg.ProviderOptionsFile)
+	if err != nil {
+		return fmt.Errorf("failed to read provider options file %q: %w", cfg.ProviderOptionsFile, err)
+	}
+	var opts map[string]any
+	if err := json.Unmarshal(data, &opts); err != nil {
+		return fmt.Errorf("failed to parse provider options file %q as JSON: %w", cfg.ProviderOptionsFile, err)
+	}
+	cfg.ProviderOptions = opts
+	return nil
 }
 
 // ResolveGuidelinesContent fetches the content of a guideline, either from a file or the library.

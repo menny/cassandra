@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 
 	"google.golang.org/genai"
 
@@ -106,7 +107,7 @@ func (p *Provider) applyThinkingConfig(config *genai.GenerateContentConfig) {
 		if config.ThinkingConfig == nil {
 			config.ThinkingConfig = &genai.ThinkingConfig{}
 		}
-		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(level)
+		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevel(strings.ToUpper(level))
 		config.ThinkingConfig.IncludeThoughts = true
 	}
 	if opt, ok := p.options["thinking-budget"]; ok {
