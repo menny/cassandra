@@ -19,6 +19,7 @@ go_test(
     srcs = [
         "client_test.go",
         "config_test.go",
+        "main_test.go",
     ],
     embed = [":mcp"],
     deps = [
@@ -26,5 +27,6 @@ go_test(
         "@com_github_modelcontextprotocol_go_sdk//mcp",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@org_uber_go_goleak//:goleak",
     ],
 )

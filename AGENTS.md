@@ -88,6 +88,35 @@ Tools that interact with external data (files, network, pipes) MUST be resilient
 ### 8. Parallel Execution Patterns
 When parallelizing tool execution or background tasks, state updates (counters, logs, metrics) MUST be performed sequentially in the main loop before spawning goroutines. This ensures that log order remains predictable and eliminates the need for mutexes or atomic operations on shared counters during the parallel phase.
 
+### 9. Goroutine Leak Prevention
+To guarantee that background tasks do not leak system resources and stack memory:
+
+#### A. Preventing Goroutine Leaks in Tests (goleak Usage)
+- **Rule**: Packages implementing concurrent or asynchronous logic (such as background workers, dispatchers, mock servers, or context cancellation paths) **MUST** configure package-level leak detection.
+- **Implementation**: Define a `TestMain` function in a `main_test.go` file within the package that delegates to `goleak`:
+  ```go
+  func TestMain(m *testing.M) {
+  	goleak.VerifyTestMain(m)
+  }
+  ```
+- **Third-Party Exclusions**: If a third-party dependency spawns untyped background singletons or leaks internally, register an exclusion at the package level instead of disabling checks entirely:
+  ```go
+  goleak.VerifyTestMain(m,
+  	goleak.IgnoreTopFunction("github.com/some/dependency.init"),
+  )
+  ```
+- **When NOT to Use**: Purely synchronous packages with zero concurrent paths (no goroutines or channels spawned) should omit `goleak` to avoid unnecessary execution overhead.
+
+#### B. Preventing Goroutine Leaks in Production (The "Always Buffer" Pattern)
+- **Rule**: Spawning a one-shot background goroutine that writes to a channel exactly once (e.g., returning a task result or error) **MUST** use a buffered channel of at least size `1` (e.g. `ch := make(chan result, 1)`).
+- **Rationale**: If the parent thread times out, panics, or exits early (e.g., via `t.Fatal` or a select branch), it stops reading from the channel. An unbuffered channel will block the worker goroutine forever. A buffered channel allows the worker to write its single result, terminate, and be garbage collected.
+- **When to Use**:
+  - When returning a single value or error from a background task.
+  - When the receiving side can abandon the read operation (e.g. using `select` with `time.After`, `ctx.Done()`, or multiple channels).
+- **When NOT to Use**:
+  - When you explicitly require **synchronous handoff** (rendezvous), where the sender goroutine must block until the receiver has actively received the data.
+  - When streaming multiple values where flow control (backpressure) is needed, in which case unbuffered or size-limited buffers are used to throttle the sender.
+
 ## Security Standards
 
 ### 1. GitHub Action Input Safety

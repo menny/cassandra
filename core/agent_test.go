@@ -931,7 +931,7 @@ func TestExecuteToolCalls_Parallel(t *testing.T) {
 	}
 
 	// Run in parallel and wait for both to enter.
-	resChan := make(chan llm.Message)
+	resChan := make(chan llm.Message, 1)
 	go func() {
 		resChan <- agent.executeToolCalls(context.Background(), toolCalls)
 	}()

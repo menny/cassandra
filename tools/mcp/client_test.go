@@ -92,11 +92,6 @@ func TestManager_RegisterServers_Reporting(t *testing.T) {
 	manager := NewManager()
 	defer manager.Close()
 
-	// 1. Success case
-	serverTransport, _ := mcp.NewInMemoryTransports()
-	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
-	go func() { _ = server.Run(ctx, serverTransport) }()
-
 	// We'll mock registerServer by temporarily overriding the transport creation logic if it were possible,
 	// but since RegisterServers uses registerServer which creates transports based on config,
 	// we'll just test the reporting flow by providing a config that will fail and one that will (hypothetically) succeed if we could mock the transport.

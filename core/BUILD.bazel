@@ -24,6 +24,7 @@ go_test(
     name = "core_test",
     srcs = [
         "agent_test.go",
+        "main_test.go",
         "metrics_test.go",
         "review_types_test.go",
     ],
@@ -32,5 +33,6 @@ go_test(
         "//llm",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
+        "@org_uber_go_goleak//:goleak",
     ],
 )
