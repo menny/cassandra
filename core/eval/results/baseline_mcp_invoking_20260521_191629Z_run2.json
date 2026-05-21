@@ -1,0 +1,68 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the compilation error and specifically referenced the correct method (Execute) that should be used instead. It performed the necessary verification against the package source and provided a clear, actionable path to resolution.",
+      "findings": [
+        "Correctly identified that ExecuteAsync is not a valid method.",
+        "Provided the correct alternative method (Execute).",
+        "Explained the impact of the error (compile-time failure).",
+        "Tone was professional and constructive."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 17899,
+        "output": 216,
+        "thinking": 1688,
+        "cached": 0,
+        "total_input": 17899,
+        "total_output": 1904
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "glob_files": 2,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review failed the primary requirement of the rubric: it did not fetch or analyze the documentation at the provided URL to verify the API usage. Instead, it ignored the core instruction and provided general feedback about the code structure. Furthermore, the review approved the code despite the explicit bug mentioned in the comments, without verifying if the path is actually correct according to the official documentation.",
+      "findings": [
+        "Failed to fetch and evaluate the documentation at the specified URL.",
+        "Ignored the rubric requirement to verify API usage against documentation.",
+        "Approved code that contains a known bug/todo without verification.",
+        "Provided generic feedback rather than technical validation of the API implementation."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8680,
+        "output": 158,
+        "thinking": 2511,
+        "cached": 4399,
+        "total_input": 13079,
+        "total_output": 2669
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]
