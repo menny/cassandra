@@ -1,0 +1,132 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical missing check for division by zero. It explained the technical impact (runtime panic), provided a clear, idiomatic solution, and maintained a professional tone while encouraging the necessary safety improvements.",
+      "findings": [
+        "Accurately identified the lack of division by zero checks.",
+        "Provided a clear and idiomatic Go refactoring solution.",
+        "Explained the consequences of the missing check (runtime panic).",
+        "Balanced constructive feedback with positive reinforcement regarding the logic fix."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6259,
+        "output": 216,
+        "thinking": 1648,
+        "cached": 0,
+        "total_input": 6259,
+        "total_output": 1864
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "glob_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the potential nil pointer dereference issue in service.go as specified in the rubric. It correctly explained why this is a problem and offered a constructive, professional recommendation to handle the edge case by validating input before calling the repository layer.",
+      "findings": [
+        "Correctly identified the nil pointer pass to SaveUser.",
+        "Provided a clear and constructive recommendation for remediation.",
+        "Professional and actionable feedback tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11721,
+        "output": 204,
+        "thinking": 1452,
+        "cached": 0,
+        "total_input": 11721,
+        "total_output": 1656
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the path traversal vulnerability as requested by the rubric. It also provided a clear, secure remediation strategy using path verification. The review went above and beyond by identifying additional issues in the diff (unhandled file read error and server error) that were not in the rubric, which demonstrates high-quality code review standards.",
+      "findings": [
+        "Correctly identified path traversal vulnerability in /file handler",
+        "Provided a secure remediation approach for path traversal",
+        "Identified additional production-readiness issues (error handling for os.ReadFile and ListenAndServe)",
+        "Provided clear and actionable code snippets for fixes"
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8687,
+        "output": 537,
+        "thinking": 2426,
+        "cached": 4559,
+        "total_input": 13246,
+        "total_output": 2963
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the violation of the project's internal documentation (internal/db/AGENTS.md) regarding the use of 'SafeQuery'. It also provided additional value by spotting a functional logic error where the query results were never scanned, making the review highly effective and professional.",
+      "findings": [
+        "Correctly identified violation of mandatory SafeQuery wrapper pattern.",
+        "Identified functional bug regarding unconsumed database rows.",
+        "Provided clear and actionable feedback for remediation.",
+        "Maintained a professional and constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8307,
+        "output": 214,
+        "thinking": 3174,
+        "cached": 4407,
+        "total_input": 12714,
+        "total_output": 3388
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "grep_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]
