@@ -45,10 +45,16 @@ jobs:
             "gemini-3.1-flash-lite" \
             "$GEMINI_API_KEY" \
             "$EVAL_REPEATS"
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: 3562238
+          private-key: ${{ secrets.CASSANDRA_APP_PRIVATE_KEY }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commit-message: "docs: update evaluation results for '${{ github.event.inputs.id }}'"
           title: "Evaluation Results: ${{ github.event.inputs.id }}"
           body: "Automated evaluation results for configuration `${{ github.event.inputs.config }}` using ID `${{ github.event.inputs.id }}`."
