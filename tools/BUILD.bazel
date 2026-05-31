@@ -4,6 +4,7 @@ go_library(
     name = "tools",
     srcs = [
         "diff.go",
+        "emit_reviewer_state.go",
         "local_tools.go",
         "registry.go",
         "wishlist.go",
@@ -20,6 +21,7 @@ go_test(
     name = "tools_test",
     srcs = [
         "diff_test.go",
+        "emit_reviewer_state_test.go",
         "local_tools_safety_test.go",
         "local_tools_test.go",
         "wishlist_test.go",

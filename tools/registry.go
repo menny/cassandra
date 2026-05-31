@@ -61,4 +61,5 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 	registerLocalGlobFiles(r, root)
 	registerLocalGrepFiles(r, root, ignoredLockFiles)
 	registerWishlistTool(r, wishlistDir)
+	registerEmitReviewerState(r)
 }
