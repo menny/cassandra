@@ -20,6 +20,8 @@ Use the grep_files tool when you need to find where a specific symbol, string, o
 
 When multiple tool calls are needed (for example, to read multiple files, search for multiple symbols, or run multiple commands), you MUST request them all in a single response so they are executed in parallel. Do not make tool calls one-by-one in subsequent turns.
 
+Before invoking file-system tools, or when changing your review strategy, you MUST call `emit_reviewer_state` to explain your rationale. Do not output raw text to think.
+
 ## Behavior
 
 - **Iteration Budget**: You have a cap on the number of iterations (tool-call turns) allowed for this review. This budget is a maximum ceiling, not a target. You should aim to complete your review in as few iterations as possible to conserve tokens and reduce latency. Only request additional tool calls if needed to resolve remaining information gaps.

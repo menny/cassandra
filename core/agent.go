@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 )
 
 const (
@@ -140,7 +141,10 @@ type AgentOption func(*Agent)
 // WithStderr redirects diagnostic/progress output to w instead of os.Stderr.
 // Useful in tests to suppress noise (pass io.Discard).
 func WithStderr(w io.Writer) AgentOption {
-	return func(a *Agent) { a.reporter = &defaultReporter{w: w} }
+	return func(a *Agent) {
+		a.reporter = &defaultReporter{w: w}
+		a.stderr = w
+	}
 }
 
 // WithReporter sets a custom reporter for the Agent.
@@ -160,6 +164,7 @@ type Agent struct {
 	totalUsage llm.Usage
 	toolCalls  map[string]int
 	iterations int
+	stderr     io.Writer
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -171,6 +176,7 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 		registry:  registry,
 		reporter:  &defaultReporter{w: os.Stderr},
 		toolCalls: make(map[string]int),
+		stderr:    os.Stderr,
 	}
 	for _, o := range opts {
 		o(a)
@@ -219,6 +225,7 @@ func (a *Agent) GetMetrics() SessionMetrics {
 // loop is forcibly terminated. Pass 0 to use the default cap.
 // maxTokens limits the length of the LLM response.
 func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requestText string, maxIterations, maxTokens int) (string, error) {
+	ctx = tools.ContextWithStateWriter(ctx, a.stderr)
 	if maxIterations <= 0 {
 		maxIterations = AbsoluteMaxIter
 	}
