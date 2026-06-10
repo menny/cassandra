@@ -48,7 +48,7 @@ type ToolDispatcher interface {
 // Reporter defines how the Agent reports progress and diagnostics.
 type Reporter interface {
 	ReportIteration(iter int)
-	ReportToolCall(tc llm.ToolCall)
+	ReportToolCalls(tcs []llm.ToolCall)
 	ReportUsage(usage llm.Usage)
 	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
@@ -149,8 +149,46 @@ func (r *consoleReporter) ReportIteration(iter int) {
 	r.writer.WriteStderr(fmt.Sprintf("🔍 [Iter %d] Reviewing...\n", iter))
 }
 
-func (r *consoleReporter) ReportToolCall(tc llm.ToolCall) {
-	r.writer.WriteStderr(fmt.Sprintf("🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc)))
+func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
+	var standardCalls []llm.ToolCall
+	var emitReviewerStates []llm.ToolCall
+
+	for _, tc := range tcs {
+		if tc.Name == "emit_reviewer_state" {
+			emitReviewerStates = append(emitReviewerStates, tc)
+		} else {
+			standardCalls = append(standardCalls, tc)
+		}
+	}
+
+	var sb strings.Builder
+
+	if len(standardCalls) > 0 {
+		for _, tc := range standardCalls {
+			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
+		}
+	}
+
+	for _, tc := range emitReviewerStates {
+		var args struct {
+			Message   string `json:"message"`
+			FocusArea string `json:"focus_area"`
+		}
+		_ = json.Unmarshal([]byte(tc.Arguments), &args)
+
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("## emit_reviewer_state\n\n")
+		fmt.Fprintf(&sb, "| focus_area | %s |\n", args.FocusArea)
+		sb.WriteString("| --- | --- |\n\n")
+		fmt.Fprintf(&sb, "%s\n", args.Message)
+	}
+
+	if sb.Len() > 0 {
+		r.writer.WriteStderr(sb.String())
+	}
 }
 
 func (r *consoleReporter) ReportUsage(usage llm.Usage) {
@@ -214,45 +252,45 @@ func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model
 
 func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	var sb strings.Builder
-	sb.WriteString("=== Cassandra Configuration ===\n")
-	fmt.Fprintf(&sb, "  Working Directory: %s\n", targetDir)
-	fmt.Fprintf(&sb, "  Base: %s\n", cfg.Base)
-	fmt.Fprintf(&sb, "  Head: %s\n", cfg.Head)
-	fmt.Fprintf(&sb, "  LLM Provider: %s\n", cfg.Provider)
-	fmt.Fprintf(&sb, "  LLM Model: %s\n", cfg.Model)
+	sb.WriteString("| Configuration | Value |\n")
+	sb.WriteString("| --- | --- |\n")
+	fmt.Fprintf(&sb, "| **Working Directory** | `%s` |\n", targetDir)
+	fmt.Fprintf(&sb, "| **Base** | `%s` |\n", cfg.Base)
+	fmt.Fprintf(&sb, "| **Head** | `%s` |\n", cfg.Head)
+	fmt.Fprintf(&sb, "| **LLM Provider** | `%s` |\n", cfg.Provider)
+	fmt.Fprintf(&sb, "| **LLM Model** | `%s` |\n", cfg.Model)
 	if cfg.ProviderURL != "" {
-		fmt.Fprintf(&sb, "  LLM Provider URL: %s\n", cfg.ProviderURL)
+		fmt.Fprintf(&sb, "| **LLM Provider URL** | `%s` |\n", cfg.ProviderURL)
 	}
-	fmt.Fprintf(&sb, "  Max Tokens: %d\n", cfg.MaxTokens)
+	fmt.Fprintf(&sb, "| **Max Tokens** | `%d` |\n", cfg.MaxTokens)
 	if len(cfg.ProviderOptions) > 0 {
-		fmt.Fprintf(&sb, "  Provider Options: %+v\n", cfg.ProviderOptions)
+		fmt.Fprintf(&sb, "| **Provider Options** | `%+v` |\n", cfg.ProviderOptions)
 	}
 	if cfg.MainGuidelines != "" {
-		fmt.Fprintf(&sb, "  Main Guidelines: %s\n", cfg.MainGuidelines)
+		fmt.Fprintf(&sb, "| **Main Guidelines** | `%s` |\n", cfg.MainGuidelines)
 	}
 	if cfg.WishlistDir != "" {
-		fmt.Fprintf(&sb, "  Wishlist Directory: %s\n", cfg.WishlistDir)
+		fmt.Fprintf(&sb, "| **Wishlist Directory** | `%s` |\n", cfg.WishlistDir)
 	}
 	if len(cfg.SupplementalGuidelines) > 0 {
-		fmt.Fprintf(&sb, "  Supplemental Guidelines: %s\n", strings.Join(cfg.SupplementalGuidelines, ", "))
+		fmt.Fprintf(&sb, "| **Supplemental Guidelines** | `%s` |\n", strings.Join(cfg.SupplementalGuidelines, ", "))
 	}
 	if cfg.OutputJSONFile != "" {
-		fmt.Fprintf(&sb, "  Structured Output JSON: %s\n", cfg.OutputJSONFile)
+		fmt.Fprintf(&sb, "| **Structured Output JSON** | `%s` |\n", cfg.OutputJSONFile)
 		if cfg.ExtractionModel != "" {
-			fmt.Fprintf(&sb, "  Extraction Model: %s\n", cfg.ExtractionModel)
+			fmt.Fprintf(&sb, "| **Extraction Model** | `%s` |\n", cfg.ExtractionModel)
 		}
 	}
 	if cfg.MetricsJSONFile != "" {
-		fmt.Fprintf(&sb, "  Session Metrics JSON: %s\n", cfg.MetricsJSONFile)
+		fmt.Fprintf(&sb, "| **Session Metrics JSON** | `%s` |\n", cfg.MetricsJSONFile)
 	}
 	if cfg.MetadataJSONFile != "" {
-		fmt.Fprintf(&sb, "  Metadata JSON: %s\n", cfg.MetadataJSONFile)
+		fmt.Fprintf(&sb, "| **Metadata JSON** | `%s` |\n", cfg.MetadataJSONFile)
 	}
 	if cfg.ApprovalEvaluationPromptFile != "" {
-		fmt.Fprintf(&sb, "  Approval Evaluation Prompt File: %s\n", cfg.ApprovalEvaluationPromptFile)
+		fmt.Fprintf(&sb, "| **Approval Evaluation Prompt File** | `%s` |\n", cfg.ApprovalEvaluationPromptFile)
 	}
-	sb.WriteString("  API Key: [PROVIDED]\n")
-	sb.WriteString("===============================\n")
+	sb.WriteString("| **API Key** | `[PROVIDED]` |\n")
 	r.writer.WriteStderr(sb.String())
 }
 
@@ -550,9 +588,10 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, MaxToolConcurrency)
 
+	a.reporter.ReportToolCalls(toolCalls)
+
 	for i, tc := range toolCalls {
 		a.toolCalls[tc.Name]++
-		a.reporter.ReportToolCall(tc)
 
 		wg.Add(1)
 		go func(i int, tc llm.ToolCall) {

@@ -140,7 +140,11 @@ type reviewHeaderInfo struct {
 func (s *spyReporter) ReportIteration(iter int) {
 	s.iterations = append(s.iterations, iter)
 }
-func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
+
+func (s *spyReporter) ReportToolCalls(tcs []llm.ToolCall) {
+	s.toolCalls = append(s.toolCalls, tcs...)
+}
+
 func (s *spyReporter) ReportUsage(usage llm.Usage) {
 	s.usage = append(s.usage, usage)
 }
