@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/menny/cassandra/llm"
 )
@@ -57,18 +56,15 @@ func registerEmitReviewerState(r *Registry) {
 		}
 
 		writer := StateWriterFromContext(ctx)
-		if writer == nil {
-			writer = os.Stderr
+		if writer != nil {
+			var output string
+			if args.FocusArea != "" {
+				output = fmt.Sprintf("[focus on '%s'] %s\n", args.FocusArea, args.Message)
+			} else {
+				output = fmt.Sprintf("[reviewing] %s\n", args.Message)
+			}
+			_, _ = fmt.Fprint(writer, output)
 		}
-
-		var output string
-		if args.FocusArea != "" {
-			output = fmt.Sprintf("[focus on '%s'] %s\n", args.FocusArea, args.Message)
-		} else {
-			output = fmt.Sprintf("[reviewing] %s\n", args.Message)
-		}
-
-		_, _ = fmt.Fprint(writer, output)
 
 		return `{"status": "state_recorded"}`, nil
 	})

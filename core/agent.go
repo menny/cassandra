@@ -16,7 +16,6 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
-	"github.com/menny/cassandra/tools"
 	"golang.org/x/term"
 )
 
@@ -473,7 +472,6 @@ func (a *Agent) GetMetrics() SessionMetrics {
 // loop is forcibly terminated. Pass 0 to use the default cap.
 // maxTokens limits the length of the LLM response.
 func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requestText string, maxIterations, maxTokens int) (string, error) {
-	ctx = tools.ContextWithStateWriter(ctx, a.stderr)
 	if maxIterations <= 0 {
 		maxIterations = AbsoluteMaxIter
 	}
