@@ -342,7 +342,7 @@ func TestLocalGrepFiles(t *testing.T) {
 	t.Run("truncation limit", func(t *testing.T) {
 		truncFile := filepath.Join(tmpDir, "truncation.txt")
 		var sb strings.Builder
-		for i := 0; i < 110; i++ {
+		for i := 0; i < 2000; i++ {
 			sb.WriteString(fmt.Sprintf("TruncMatch line %d\n", i))
 		}
 		if err := os.WriteFile(truncFile, []byte(sb.String()), 0o644); err != nil {
@@ -352,6 +352,57 @@ func TestLocalGrepFiles(t *testing.T) {
 
 		args, _ := json.Marshal(map[string]any{"query": "TruncMatch"})
 		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name: "grep_files",
+
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify result is truncated to 40k bytes (plus message)
+		if len(result) > 42000 {
+			t.Errorf("result is too large: %d bytes", len(result))
+		}
+		if !strings.Contains(result, "truncated to 40k bytes") {
+			t.Errorf("expected truncation message, got: %s", result)
+		}
+
+		lines := strings.Split(strings.TrimSpace(result), "\n")
+		if len(lines) < 2 {
+			t.Fatalf("expected multiple lines, got: %v", lines)
+		}
+		matchLines := lines[:len(lines)-1]
+
+		// Parse the remaining matches from the truncation message:
+		// "... (truncated to 40k bytes, there are 84 more matches. Please refine your query)"
+		lastLine := lines[len(lines)-1]
+		var remainingMatches int
+		_, err = fmt.Sscanf(lastLine, "... (truncated to 40k bytes, there are %d more matches. Please refine your query)", &remainingMatches)
+		if err != nil {
+			t.Fatalf("failed to parse remaining matches from last line %q: %v", lastLine, err)
+		}
+
+		totalMatches := len(matchLines) + remainingMatches
+		if totalMatches != 2000 {
+			t.Errorf("expected total matches to sum to 2000, got %d (returned) + %d (remaining) = %d", len(matchLines), remainingMatches, totalMatches)
+		}
+	})
+
+	t.Run("scan truncation limit", func(t *testing.T) {
+		truncFile := filepath.Join(tmpDir, "scan_truncation.txt")
+		var sb strings.Builder
+		// Write 6000 lines of ~25 bytes each (~150 KB), exceeding the 100 KB scan limit.
+		for i := 0; i < 6000; i++ {
+			sb.WriteString(fmt.Sprintf("ScanTruncMatch line %d\n", i))
+		}
+		if err := os.WriteFile(truncFile, []byte(sb.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, tmpDir, "add", "scan_truncation.txt")
+
+		args, _ := json.Marshal(map[string]any{"query": "ScanTruncMatch"})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
 			Name:      "grep_files",
 			Arguments: string(args),
 		})
@@ -359,13 +410,90 @@ func TestLocalGrepFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		lines := strings.Split(strings.TrimSpace(result), "\n")
-		// 100 lines of matches + 1 line for "truncated" message
-		if len(lines) != 101 {
-			t.Errorf("expected 101 lines, got %d", len(lines))
-		}
-		if !strings.Contains(result, "... (truncated, 10 more matches)") {
-			t.Errorf("expected truncation message, got: %s", result)
+		if !strings.Contains(result, "there are many more matches") {
+			t.Errorf("expected 'there are many more matches' in truncation message indicating scan limit was reached, got: %s", result)
 		}
 	})
+
+	t.Run("grep with glob pattern", func(t *testing.T) {
+		subdir := filepath.Join(tmpDir, "globdir")
+		if err := os.Mkdir(subdir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		matchFile := filepath.Join(subdir, "match.txt")
+		if err := os.WriteFile(matchFile, []byte("GlobMatch here"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		noMatchFile := filepath.Join(subdir, "nomatch.go")
+		if err := os.WriteFile(noMatchFile, []byte("GlobMatch here too but wrong ext"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, tmpDir, "add", "globdir/match.txt", "globdir/nomatch.go")
+
+		args, _ := json.Marshal(map[string]any{"query": "GlobMatch", "directory": "globdir/*.txt"})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if !strings.Contains(result, "globdir/match.txt") {
+			t.Errorf("expected match in globdir/match.txt, got: %s", result)
+		}
+		if strings.Contains(result, "globdir/nomatch.go") {
+			t.Errorf("expected no match in globdir/nomatch.go, got: %s", result)
+		}
+	})
+
+	t.Run("grep with glob pattern and no directory base", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "GlobMatch", "directory": "*.txt"})
+		result, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if !strings.Contains(result, "globdir/match.txt") {
+			t.Errorf("expected match in globdir/match.txt, got: %s", result)
+		}
+	})
+
+	t.Run("grep path traversal prevention with glob", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "GlobMatch", "directory": "../**/*.txt"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error for path traversal directory glob pattern, got nil")
+		}
+	})
+}
+
+func TestSplitGlob(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantBase    string
+		wantPattern string
+	}{
+		{"", "", ""},
+		{"dir/sub", "dir/sub", ""},
+		{"*.go", "", "*.go"},
+		{"dir/**/*.go", "dir", "**/*.go"},
+		{"dir/file[0-9].txt", "dir", "file[0-9].txt"},
+		{"[abc]/file", "", "[abc]/file"},
+		{"dir\\sub\\*.go", "dir\\sub", "*.go"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			gotBase, gotPattern := splitGlob(tc.input)
+			if gotBase != tc.wantBase || gotPattern != tc.wantPattern {
+				t.Errorf("splitGlob(%q) = (%q, %q); want (%q, %q)",
+					tc.input, gotBase, gotPattern, tc.wantBase, tc.wantPattern)
+			}
+		})
+	}
 }
