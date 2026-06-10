@@ -15,6 +15,7 @@ import (
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/tools"
+	"golang.org/x/term"
 )
 
 const (
@@ -99,8 +100,32 @@ type glamourWriter struct {
 	stderr io.Writer
 }
 
+func (w *glamourWriter) getWidth(writer io.Writer) int {
+	if f, ok := writer.(*os.File); ok {
+		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
+			return width
+		}
+	}
+	if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+		return width
+	}
+	if width, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && width > 0 {
+		return width
+	}
+	return 0
+}
+
 func (w *glamourWriter) WriteStdout(s string) {
-	rendered, err := glamour.Render(s, "auto")
+	width := w.getWidth(w.stdout)
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		fmt.Fprint(w.stdout, s)
+		return
+	}
+	rendered, err := r.Render(s)
 	if err != nil {
 		fmt.Fprint(w.stdout, s)
 		return
@@ -111,7 +136,16 @@ func (w *glamourWriter) WriteStdout(s string) {
 }
 
 func (w *glamourWriter) WriteStderr(s string) {
-	rendered, err := glamour.Render(s, "auto")
+	width := w.getWidth(w.stderr)
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		fmt.Fprint(w.stderr, s)
+		return
+	}
+	rendered, err := r.Render(s)
 	if err != nil {
 		fmt.Fprint(w.stderr, s)
 		return
@@ -254,43 +288,48 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	var sb strings.Builder
 	sb.WriteString("| Configuration | Value |\n")
 	sb.WriteString("| --- | --- |\n")
-	fmt.Fprintf(&sb, "| **Working Directory** | `%s` |\n", targetDir)
-	fmt.Fprintf(&sb, "| **Base** | `%s` |\n", cfg.Base)
-	fmt.Fprintf(&sb, "| **Head** | `%s` |\n", cfg.Head)
-	fmt.Fprintf(&sb, "| **LLM Provider** | `%s` |\n", cfg.Provider)
-	fmt.Fprintf(&sb, "| **LLM Model** | `%s` |\n", cfg.Model)
+	fmt.Fprintf(&sb, "| **Working Directory** | %s |\n", targetDir)
+	fmt.Fprintf(&sb, "| **Base** | %s |\n", cfg.Base)
+	fmt.Fprintf(&sb, "| **Head** | %s |\n", cfg.Head)
+	fmt.Fprintf(&sb, "| **LLM Provider** | %s |\n", cfg.Provider)
+	fmt.Fprintf(&sb, "| **LLM Model** | %s |\n", cfg.Model)
 	if cfg.ProviderURL != "" {
-		fmt.Fprintf(&sb, "| **LLM Provider URL** | `%s` |\n", cfg.ProviderURL)
+		fmt.Fprintf(&sb, "| **LLM Provider URL** | %s |\n", cfg.ProviderURL)
 	}
-	fmt.Fprintf(&sb, "| **Max Tokens** | `%d` |\n", cfg.MaxTokens)
+	fmt.Fprintf(&sb, "| **Max Tokens** | %d |\n", cfg.MaxTokens)
 	if len(cfg.ProviderOptions) > 0 {
-		fmt.Fprintf(&sb, "| **Provider Options** | `%+v` |\n", cfg.ProviderOptions)
+		fmt.Fprintf(&sb, "| **Provider Options** | %+v |\n", cfg.ProviderOptions)
 	}
 	if cfg.MainGuidelines != "" {
-		fmt.Fprintf(&sb, "| **Main Guidelines** | `%s` |\n", cfg.MainGuidelines)
+		fmt.Fprintf(&sb, "| **Main Guidelines** | %s |\n", cfg.MainGuidelines)
 	}
 	if cfg.WishlistDir != "" {
-		fmt.Fprintf(&sb, "| **Wishlist Directory** | `%s` |\n", cfg.WishlistDir)
-	}
-	if len(cfg.SupplementalGuidelines) > 0 {
-		fmt.Fprintf(&sb, "| **Supplemental Guidelines** | `%s` |\n", strings.Join(cfg.SupplementalGuidelines, ", "))
+		fmt.Fprintf(&sb, "| **Wishlist Directory** | %s |\n", cfg.WishlistDir)
 	}
 	if cfg.OutputJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Structured Output JSON** | `%s` |\n", cfg.OutputJSONFile)
+		fmt.Fprintf(&sb, "| **Structured Output JSON** | %s |\n", cfg.OutputJSONFile)
 		if cfg.ExtractionModel != "" {
-			fmt.Fprintf(&sb, "| **Extraction Model** | `%s` |\n", cfg.ExtractionModel)
+			fmt.Fprintf(&sb, "| **Extraction Model** | %s |\n", cfg.ExtractionModel)
 		}
 	}
 	if cfg.MetricsJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Session Metrics JSON** | `%s` |\n", cfg.MetricsJSONFile)
+		fmt.Fprintf(&sb, "| **Session Metrics JSON** | %s |\n", cfg.MetricsJSONFile)
 	}
 	if cfg.MetadataJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Metadata JSON** | `%s` |\n", cfg.MetadataJSONFile)
+		fmt.Fprintf(&sb, "| **Metadata JSON** | %s |\n", cfg.MetadataJSONFile)
 	}
 	if cfg.ApprovalEvaluationPromptFile != "" {
-		fmt.Fprintf(&sb, "| **Approval Evaluation Prompt File** | `%s` |\n", cfg.ApprovalEvaluationPromptFile)
+		fmt.Fprintf(&sb, "| **Approval Evaluation Prompt File** | %s |\n", cfg.ApprovalEvaluationPromptFile)
 	}
 	sb.WriteString("| **API Key** | `[PROVIDED]` |\n")
+
+	if len(cfg.SupplementalGuidelines) > 0 {
+		sb.WriteString("\n**Supplemental Guidelines:**\n")
+		for _, sg := range cfg.SupplementalGuidelines {
+			fmt.Fprintf(&sb, "- %s\n", sg)
+		}
+	}
+
 	r.writer.WriteStderr(sb.String())
 }
 

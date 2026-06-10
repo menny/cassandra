@@ -29,5 +29,6 @@ use_repo(
     "com_github_modelcontextprotocol_go_sdk",
     "com_github_spf13_viper",
     "com_github_stretchr_testify",
+    "org_golang_x_term",
     "org_uber_go_goleak",
 )
