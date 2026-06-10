@@ -214,9 +214,7 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			sb.WriteString("\n")
 		}
 
-		sb.WriteString("## emit_reviewer_state\n\n")
-		fmt.Fprintf(&sb, "| focus_area | %s |\n", args.FocusArea)
-		sb.WriteString("| --- | --- |\n\n")
+		fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
 		fmt.Fprintf(&sb, "%s\n", args.Message)
 	}
 
@@ -303,6 +301,11 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	if cfg.MainGuidelines != "" {
 		fmt.Fprintf(&sb, "| **Main Guidelines** | %s |\n", cfg.MainGuidelines)
 	}
+	if len(cfg.SupplementalGuidelines) > 0 {
+		for sIndex, sg := range cfg.SupplementalGuidelines {
+			fmt.Fprintf(&sb, "| **Supplemental Guidelines %d:** | - %s |\n", sIndex+1, sg)
+		}
+	}
 	if cfg.WishlistDir != "" {
 		fmt.Fprintf(&sb, "| **Wishlist Directory** | %s |\n", cfg.WishlistDir)
 	}
@@ -321,14 +324,9 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	if cfg.ApprovalEvaluationPromptFile != "" {
 		fmt.Fprintf(&sb, "| **Approval Evaluation Prompt File** | %s |\n", cfg.ApprovalEvaluationPromptFile)
 	}
-	sb.WriteString("| **API Key** | `[PROVIDED]` |\n")
+	sb.WriteString("| **API Key** | **[PROVIDED]** |\n")
 
-	if len(cfg.SupplementalGuidelines) > 0 {
-		sb.WriteString("\n**Supplemental Guidelines:**\n")
-		for _, sg := range cfg.SupplementalGuidelines {
-			fmt.Fprintf(&sb, "- %s\n", sg)
-		}
-	}
+	sb.WriteString("\n\n")
 
 	r.writer.WriteStderr(sb.String())
 }
