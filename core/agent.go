@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/tools"
@@ -215,7 +216,8 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		}
 
 		fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
-		fmt.Fprintf(&sb, "%s\n", args.Message)
+		messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
+		sb.WriteString(messageStyle.Render(args.Message) + "\n")
 	}
 
 	if sb.Len() > 0 {
