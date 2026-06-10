@@ -30,7 +30,7 @@ type Reviewer struct {
 // targetDir is the directory where local tools (like grep) will operate.
 func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, reporter Reporter) (r *Reviewer, err error) {
 	if reporter == nil {
-		reporter = NewDefaultReporter(os.Stderr)
+		reporter = NewRawReporter(os.Stdout, os.Stderr)
 	}
 
 	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL, cfg.ProviderOptions)

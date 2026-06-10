@@ -31,7 +31,7 @@ func (r *Runner) RunCase(ctx context.Context, c EvalCase) (*CaseResult, error) {
 	defer sandbox.Cleanup()
 
 	// 2. Setup Reviewer (Subject)
-	reviewer, err := core.NewReviewer(ctx, r.SubjectConfig, sandbox.RootDir, core.NewDefaultReporter(io.Discard))
+	reviewer, err := core.NewReviewer(ctx, r.SubjectConfig, sandbox.RootDir, core.NewRawReporter(io.Discard, io.Discard))
 	if err != nil {
 		return nil, fmt.Errorf("failed to setup reviewer: %w", err)
 	}

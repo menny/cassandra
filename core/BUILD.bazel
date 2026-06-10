@@ -17,6 +17,7 @@ go_library(
         "//llm/factory",
         "//tools",
         "//tools/mcp",
+        "@com_github_charmbracelet_glamour//:glamour",
     ],
 )
 
@@ -30,6 +31,7 @@ go_test(
     ],
     embed = [":core"],
     deps = [
+        "//core/config",
         "//llm",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

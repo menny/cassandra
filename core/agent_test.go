@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 )
 
@@ -165,6 +166,16 @@ func (s *spyReporter) ReportMCPStatus(name string, status string, err error) {
 func (s *spyReporter) ReportReviewHeader(files int, guidelines string, model string) {
 	s.reviewHeaders = append(s.reviewHeaders, reviewHeaderInfo{files: files, guidelines: guidelines, model: model})
 }
+func (s *spyReporter) ReportConfig(cfg *config.Config, targetDir string) {}
+func (s *spyReporter) ReportFetchingDiff()                               {}
+func (s *spyReporter) ReportFetchingCommits()                            {}
+func (s *spyReporter) ReportNoChanges()                                  {}
+func (s *spyReporter) ReportReview(result string) error                  { return nil }
+func (s *spyReporter) ReportReviewWritten(file string)                   {}
+func (s *spyReporter) ReportStructuredReviewWritten(file string)         {}
+func (s *spyReporter) ReportMetricsWritten(file string)                  {}
+func (s *spyReporter) ReportWarning(msg string, err error)               {}
+func (s *spyReporter) ReportError(err error)                             {}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/glamour"
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/tools"
 )
@@ -57,26 +59,101 @@ type Reporter interface {
 	ReportTruncated(maxTokens int)
 	ReportMCPStatus(name string, status string, err error)
 	ReportReviewHeader(files int, guidelines string, model string)
+
+	// Additional lifecycle methods
+	ReportConfig(cfg *config.Config, targetDir string)
+	ReportFetchingDiff()
+	ReportFetchingCommits()
+	ReportNoChanges()
+	ReportReview(result string) error
+	ReportReviewWritten(file string)
+	ReportStructuredReviewWritten(file string)
+	ReportMetricsWritten(file string)
+	ReportWarning(msg string, err error)
+	ReportError(err error)
 }
 
-// NewDefaultReporter creates a reporter that writes to the provided writer.
+// consoleWriter defines how formatted strings are printed.
+type consoleWriter interface {
+	WriteStdout(s string)
+	WriteStderr(s string)
+}
+
+// rawWriter writes strings directly to stdout/stderr.
+type rawWriter struct {
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (w *rawWriter) WriteStdout(s string) {
+	fmt.Fprint(w.stdout, s)
+}
+
+func (w *rawWriter) WriteStderr(s string) {
+	fmt.Fprint(w.stderr, s)
+}
+
+// glamourWriter renders strings using Glamour before printing.
+type glamourWriter struct {
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (w *glamourWriter) WriteStdout(s string) {
+	rendered, err := glamour.Render(s, "auto")
+	if err != nil {
+		fmt.Fprint(w.stdout, s)
+		return
+	}
+	rendered = strings.TrimPrefix(rendered, "\n")
+	rendered = strings.TrimSuffix(rendered, "\n")
+	fmt.Fprint(w.stdout, rendered)
+}
+
+func (w *glamourWriter) WriteStderr(s string) {
+	rendered, err := glamour.Render(s, "auto")
+	if err != nil {
+		fmt.Fprint(w.stderr, s)
+		return
+	}
+	rendered = strings.TrimPrefix(rendered, "\n")
+	rendered = strings.TrimSuffix(rendered, "\n")
+	fmt.Fprint(w.stderr, rendered)
+}
+
+// consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
+type consoleReporter struct {
+	writer consoleWriter
+}
+
+// NewRawReporter creates a reporter that prints raw text.
+func NewRawReporter(stdout, stderr io.Writer) Reporter {
+	return &consoleReporter{
+		writer: &rawWriter{stdout: stdout, stderr: stderr},
+	}
+}
+
+// NewMarkdownReporter creates a reporter that renders markdown via glamour.
+func NewMarkdownReporter(stdout, stderr io.Writer) Reporter {
+	return &consoleReporter{
+		writer: &glamourWriter{stdout: stdout, stderr: stderr},
+	}
+}
+
+// NewDefaultReporter creates a raw reporter for backward compatibility.
 func NewDefaultReporter(w io.Writer) Reporter {
-	return &defaultReporter{w: w}
+	return NewRawReporter(w, w)
 }
 
-type defaultReporter struct {
-	w io.Writer
+func (r *consoleReporter) ReportIteration(iter int) {
+	r.writer.WriteStderr(fmt.Sprintf("🔍 [Iter %d] Reviewing...\n", iter))
 }
 
-func (r *defaultReporter) ReportIteration(iter int) {
-	fmt.Fprintf(r.w, "🔍 [Iter %d] Reviewing...\n", iter)
+func (r *consoleReporter) ReportToolCall(tc llm.ToolCall) {
+	r.writer.WriteStderr(fmt.Sprintf("🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc)))
 }
 
-func (r *defaultReporter) ReportToolCall(tc llm.ToolCall) {
-	fmt.Fprintf(r.w, "🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
-}
-
-func (r *defaultReporter) ReportUsage(usage llm.Usage) {
+func (r *consoleReporter) ReportUsage(usage llm.Usage) {
 	if usage.PromptTokens >= 0 && usage.OutputTokens >= 0 {
 		msg := fmt.Sprintf("📊 %d in, %d out", usage.TotalInput(), usage.TotalOutput())
 		var breakdown []string
@@ -89,50 +166,135 @@ func (r *defaultReporter) ReportUsage(usage llm.Usage) {
 		if len(breakdown) > 0 {
 			msg += " (" + strings.Join(breakdown, ", ") + ")"
 		}
-		fmt.Fprintln(r.w, msg)
+		r.writer.WriteStderr(msg + "\n")
 	}
 }
 
-func (r *defaultReporter) ReportUsageSummary(total llm.Usage) {
+func (r *consoleReporter) ReportUsageSummary(total llm.Usage) {
 	if total.PromptTokens > 0 || total.OutputTokens > 0 {
-		fmt.Fprintf(r.w, "📈 %d in, %d out (total)\n", total.TotalInput(), total.TotalOutput())
+		r.writer.WriteStderr(fmt.Sprintf("📈 %d in, %d out (total)\n", total.TotalInput(), total.TotalOutput()))
 	}
 }
 
-func (r *defaultReporter) ReportFinalReview() {
-	fmt.Fprintln(r.w, "📝 Formulating final review...")
+func (r *consoleReporter) ReportFinalReview() {
+	r.writer.WriteStderr("📝 Formulating final review...\n")
 }
 
-func (r *defaultReporter) ReportExtraction() {
-	fmt.Fprintln(r.w, "📦 Extracting findings...")
+func (r *consoleReporter) ReportExtraction() {
+	r.writer.WriteStderr("📦 Extracting findings...\n")
 }
 
-func (r *defaultReporter) ReportExtractionRetry(attempt int) {
-	fmt.Fprintf(r.w, "🔄 [Retry] Extraction attempt %d failed; retrying...\n", attempt)
+func (r *consoleReporter) ReportExtractionRetry(attempt int) {
+	r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] Extraction attempt %d failed; retrying...\n", attempt))
 }
 
-func (r *defaultReporter) ReportEmptyResponseRetry(attempt int) {
-	fmt.Fprintf(r.w, "🔄 [Retry] LLM returned empty response (attempt %d); retrying...\n", attempt)
+func (r *consoleReporter) ReportEmptyResponseRetry(attempt int) {
+	r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] LLM returned empty response (attempt %d); retrying...\n", attempt))
 }
 
-func (r *defaultReporter) ReportCapReached(maxIterations int) {
-	fmt.Fprintf(r.w, "⚠️  Reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations)
+func (r *consoleReporter) ReportCapReached(maxIterations int) {
+	r.writer.WriteStderr(fmt.Sprintf("⚠️  Reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations))
 }
 
-func (r *defaultReporter) ReportTruncated(maxTokens int) {
-	fmt.Fprintf(r.w, "⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens)
+func (r *consoleReporter) ReportTruncated(maxTokens int) {
+	r.writer.WriteStderr(fmt.Sprintf("⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens))
 }
 
-func (r *defaultReporter) ReportMCPStatus(name string, status string, err error) {
+func (r *consoleReporter) ReportMCPStatus(name string, status string, err error) {
 	if err != nil {
-		fmt.Fprintf(r.w, "🔌 [MCP] %s: %s: %v\n", name, status, err)
+		r.writer.WriteStderr(fmt.Sprintf("🔌 [MCP] %s: %s: %v\n", name, status, err))
 	} else {
-		fmt.Fprintf(r.w, "🔌 [MCP] %s: %s\n", name, status)
+		r.writer.WriteStderr(fmt.Sprintf("🔌 [MCP] %s: %s\n", name, status))
 	}
 }
 
-func (r *defaultReporter) ReportReviewHeader(files int, guidelines string, model string) {
-	fmt.Fprintf(r.w, "\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model)
+func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model string) {
+	r.writer.WriteStderr(fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model))
+}
+
+func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
+	var sb strings.Builder
+	sb.WriteString("=== Cassandra Configuration ===\n")
+	fmt.Fprintf(&sb, "  Working Directory: %s\n", targetDir)
+	fmt.Fprintf(&sb, "  Base: %s\n", cfg.Base)
+	fmt.Fprintf(&sb, "  Head: %s\n", cfg.Head)
+	fmt.Fprintf(&sb, "  LLM Provider: %s\n", cfg.Provider)
+	fmt.Fprintf(&sb, "  LLM Model: %s\n", cfg.Model)
+	if cfg.ProviderURL != "" {
+		fmt.Fprintf(&sb, "  LLM Provider URL: %s\n", cfg.ProviderURL)
+	}
+	fmt.Fprintf(&sb, "  Max Tokens: %d\n", cfg.MaxTokens)
+	if len(cfg.ProviderOptions) > 0 {
+		fmt.Fprintf(&sb, "  Provider Options: %+v\n", cfg.ProviderOptions)
+	}
+	if cfg.MainGuidelines != "" {
+		fmt.Fprintf(&sb, "  Main Guidelines: %s\n", cfg.MainGuidelines)
+	}
+	if cfg.WishlistDir != "" {
+		fmt.Fprintf(&sb, "  Wishlist Directory: %s\n", cfg.WishlistDir)
+	}
+	if len(cfg.SupplementalGuidelines) > 0 {
+		fmt.Fprintf(&sb, "  Supplemental Guidelines: %s\n", strings.Join(cfg.SupplementalGuidelines, ", "))
+	}
+	if cfg.OutputJSONFile != "" {
+		fmt.Fprintf(&sb, "  Structured Output JSON: %s\n", cfg.OutputJSONFile)
+		if cfg.ExtractionModel != "" {
+			fmt.Fprintf(&sb, "  Extraction Model: %s\n", cfg.ExtractionModel)
+		}
+	}
+	if cfg.MetricsJSONFile != "" {
+		fmt.Fprintf(&sb, "  Session Metrics JSON: %s\n", cfg.MetricsJSONFile)
+	}
+	if cfg.MetadataJSONFile != "" {
+		fmt.Fprintf(&sb, "  Metadata JSON: %s\n", cfg.MetadataJSONFile)
+	}
+	if cfg.ApprovalEvaluationPromptFile != "" {
+		fmt.Fprintf(&sb, "  Approval Evaluation Prompt File: %s\n", cfg.ApprovalEvaluationPromptFile)
+	}
+	sb.WriteString("  API Key: [PROVIDED]\n")
+	sb.WriteString("===============================\n")
+	r.writer.WriteStderr(sb.String())
+}
+
+func (r *consoleReporter) ReportFetchingDiff() {
+	r.writer.WriteStderr("🌿 Fetching git diff...\n")
+}
+
+func (r *consoleReporter) ReportFetchingCommits() {
+	r.writer.WriteStderr("🌿 Fetching git commits...\n")
+}
+
+func (r *consoleReporter) ReportNoChanges() {
+	r.writer.WriteStderr("⚪ No changes found.\n")
+}
+
+func (r *consoleReporter) ReportReview(result string) error {
+	r.writer.WriteStdout(result + "\n")
+	return nil
+}
+
+func (r *consoleReporter) ReportReviewWritten(file string) {
+	r.writer.WriteStderr(fmt.Sprintf("📝 Review written to %s\n", file))
+}
+
+func (r *consoleReporter) ReportStructuredReviewWritten(file string) {
+	r.writer.WriteStderr(fmt.Sprintf("📦 Structured review written to %s\n", file))
+}
+
+func (r *consoleReporter) ReportMetricsWritten(file string) {
+	r.writer.WriteStderr(fmt.Sprintf("📈 Metrics written to %s\n", file))
+}
+
+func (r *consoleReporter) ReportWarning(msg string, err error) {
+	if err != nil {
+		r.writer.WriteStderr(fmt.Sprintf("⚠️  %s: %v\n", msg, err))
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("⚠️  %s\n", msg))
+	}
+}
+
+func (r *consoleReporter) ReportError(err error) {
+	r.writer.WriteStderr(fmt.Sprintf("Error: %v\n", err))
 }
 
 // AgentOption configures an Agent.
@@ -142,7 +304,7 @@ type AgentOption func(*Agent)
 // Useful in tests to suppress noise (pass io.Discard).
 func WithStderr(w io.Writer) AgentOption {
 	return func(a *Agent) {
-		a.reporter = &defaultReporter{w: w}
+		a.reporter = NewRawReporter(io.Discard, w)
 		a.stderr = w
 	}
 }
@@ -174,7 +336,7 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 	a := &Agent{
 		llm:       model,
 		registry:  registry,
-		reporter:  &defaultReporter{w: os.Stderr},
+		reporter:  NewDefaultReporter(os.Stderr),
 		toolCalls: make(map[string]int),
 		stderr:    os.Stderr,
 	}

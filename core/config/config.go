@@ -42,6 +42,7 @@ type Config struct {
 	WishlistDir                  string         `mapstructure:"wishlist-dir"`
 	ProviderOptionsFile          string         `mapstructure:"provider-options-file"`
 	ProviderOptions              map[string]any `mapstructure:"-"`
+	Render                       string         `mapstructure:"render"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.
@@ -52,6 +53,7 @@ func NewDefaultConfig() *Config {
 		MainGuidelines:   "general",
 		MaxTokens:        llm.DefaultMaxTokens,
 		IgnoredLockFiles: util.DefaultLockFiles,
+		Render:           "raw",
 	}
 }
 
@@ -66,6 +68,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
+	v.SetDefault("render", "raw")
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)
