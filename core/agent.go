@@ -60,6 +60,7 @@ type Reporter interface {
 	ReportCapReached(maxIterations int)
 	ReportTruncated(maxTokens int)
 	ReportMCPStatus(name string, status string, err error)
+	ReportToolStatus(name string, status string, err error)
 	ReportReviewHeader(files int, guidelines string, model string)
 
 	// Additional lifecycle methods
@@ -261,6 +262,11 @@ func (r *consoleReporter) ReportMCPStatus(name string, status string, err error)
 	} else {
 		r.writer.WriteStderr(fmt.Sprintf("🔌 [MCP] %s: %s\n", name, status))
 	}
+}
+
+func (r *consoleReporter) ReportToolStatus(name string, status string, err error) {
+	// Console reporter does not display individual tool execution logs to avoid terminal clutter.
+	// In-place updates are managed by the TUI reporter.
 }
 
 func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model string) {
@@ -647,8 +653,11 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()
 
+			a.reporter.ReportToolStatus(tc.Name, "started", nil)
+
 			select {
 			case <-ctx.Done():
+				a.reporter.ReportToolStatus(tc.Name, "failed", ctx.Err())
 				toolMsg.ToolResults[i] = llm.ToolResult{
 					ToolCallID: tc.ID,
 					Name:       tc.Name,
@@ -660,6 +669,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 			}
 
 			if err := ctx.Err(); err != nil {
+				a.reporter.ReportToolStatus(tc.Name, "failed", err)
 				toolMsg.ToolResults[i] = llm.ToolResult{
 					ToolCallID: tc.ID,
 					Name:       tc.Name,
@@ -670,10 +680,12 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 
 			defer func() {
 				if r := recover(); r != nil {
+					err := fmt.Errorf("tool panicked: %v", r)
+					a.reporter.ReportToolStatus(tc.Name, "failed", err)
 					toolMsg.ToolResults[i] = llm.ToolResult{
 						ToolCallID: tc.ID,
 						Name:       tc.Name,
-						Content:    fmt.Sprintf("error: tool panicked: %v", r),
+						Content:    fmt.Sprintf("error: %v", err),
 					}
 				}
 			}()
@@ -682,7 +694,10 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 			// LLM can reason about it rather than crashing the whole loop.
 			result, toolErr := a.registry.HandleCall(ctx, tc)
 			if toolErr != nil {
+				a.reporter.ReportToolStatus(tc.Name, "failed", toolErr)
 				result = fmt.Sprintf("error: %v", toolErr)
+			} else {
+				a.reporter.ReportToolStatus(tc.Name, "completed", nil)
 			}
 
 			toolMsg.ToolResults[i] = llm.ToolResult{

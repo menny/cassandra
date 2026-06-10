@@ -122,10 +122,17 @@ type spyReporter struct {
 	capsReached          []int
 	truncated            []int
 	mcpStatuses          []mcpStatus
+	toolStatuses         []toolStatus
 	reviewHeaders        []reviewHeaderInfo
 }
 
 type mcpStatus struct {
+	name   string
+	status string
+	err    error
+}
+
+type toolStatus struct {
 	name   string
 	status string
 	err    error
@@ -165,6 +172,10 @@ func (s *spyReporter) ReportTruncated(maxTokens int) {
 
 func (s *spyReporter) ReportMCPStatus(name string, status string, err error) {
 	s.mcpStatuses = append(s.mcpStatuses, mcpStatus{name: name, status: status, err: err})
+}
+
+func (s *spyReporter) ReportToolStatus(name string, status string, err error) {
+	s.toolStatuses = append(s.toolStatuses, toolStatus{name: name, status: status, err: err})
 }
 
 func (s *spyReporter) ReportReviewHeader(files int, guidelines string, model string) {
@@ -212,6 +223,16 @@ func TestAgent_Reporter(t *testing.T) {
 		}
 		if len(spy.truncated) != 0 {
 			t.Errorf("expected 0 truncations reported, got %v", spy.truncated)
+		}
+		if len(spy.toolStatuses) != 2 {
+			t.Errorf("expected 2 tool status reports, got %d: %+v", len(spy.toolStatuses), spy.toolStatuses)
+		} else {
+			if spy.toolStatuses[0].name != "read_file" || spy.toolStatuses[0].status != "started" {
+				t.Errorf("expected first tool status to be read_file started, got %+v", spy.toolStatuses[0])
+			}
+			if spy.toolStatuses[1].name != "read_file" || spy.toolStatuses[1].status != "completed" {
+				t.Errorf("expected second tool status to be read_file completed, got %+v", spy.toolStatuses[1])
+			}
 		}
 	})
 

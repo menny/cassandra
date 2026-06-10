@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/prompts"
@@ -73,9 +74,18 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	if len(mcpConfig.MCPServers) > 0 {
 		mcpConfig.ExpandEnv()
 		mcpManager = mcp.NewManager()
-		if err := mcpManager.RegisterServers(ctx, mcpConfig, reporter.ReportMCPStatus, func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
-			registry.RegisterTool(def, handler)
-		}); err != nil {
+		var mu sync.Mutex
+		if err := mcpManager.RegisterServers(
+			ctx,
+			mcpConfig,
+			reporter.ReportMCPStatus,
+			reporter.ReportWarning,
+			func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
+				mu.Lock()
+				registry.RegisterTool(def, handler)
+				mu.Unlock()
+			},
+		); err != nil {
 			return nil, fmt.Errorf("failed to register MCP servers: %w", err)
 		}
 	}
