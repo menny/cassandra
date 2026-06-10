@@ -80,7 +80,6 @@ type Reporter interface {
 type consoleWriter interface {
 	WriteStdout(s string)
 	WriteStderr(s string)
-	WriteRawStderr(s string)
 }
 
 // rawWriter writes strings directly to stdout/stderr.
@@ -97,17 +96,7 @@ func (w *rawWriter) WriteStderr(s string) {
 	fmt.Fprint(w.stderr, s)
 }
 
-func (w *rawWriter) WriteRawStderr(s string) {
-	fmt.Fprint(w.stderr, s)
-}
-
-// glamourWriter renders strings using Glamour before printing.
-type glamourWriter struct {
-	stdout io.Writer
-	stderr io.Writer
-}
-
-func (w *glamourWriter) getWidth(writer io.Writer) int {
+func getTerminalWidth(writer io.Writer) int {
 	if f, ok := writer.(*os.File); ok {
 		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
 			return width
@@ -122,66 +111,43 @@ func (w *glamourWriter) getWidth(writer io.Writer) int {
 	return 0
 }
 
-func (w *glamourWriter) WriteStdout(s string) {
-	width := w.getWidth(w.stdout)
+func renderMarkdown(s string, writer io.Writer) string {
+	width := getTerminalWidth(writer)
 	r, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {
-		fmt.Fprint(w.stdout, s)
-		return
+		return s
 	}
 	rendered, err := r.Render(s)
 	if err != nil {
-		fmt.Fprint(w.stdout, s)
-		return
+		return s
 	}
 	rendered = strings.TrimPrefix(rendered, "\n")
 	rendered = strings.TrimSuffix(rendered, "\n")
-	fmt.Fprint(w.stdout, rendered)
-}
-
-func (w *glamourWriter) WriteStderr(s string) {
-	width := w.getWidth(w.stderr)
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-	)
-	if err != nil {
-		fmt.Fprint(w.stderr, s)
-		return
-	}
-	rendered, err := r.Render(s)
-	if err != nil {
-		fmt.Fprint(w.stderr, s)
-		return
-	}
-	rendered = strings.TrimPrefix(rendered, "\n")
-	rendered = strings.TrimSuffix(rendered, "\n")
-	fmt.Fprint(w.stderr, rendered)
-}
-
-func (w *glamourWriter) WriteRawStderr(s string) {
-	fmt.Fprint(w.stderr, s)
+	return rendered
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
 type consoleReporter struct {
-	writer consoleWriter
+	writer         consoleWriter
+	renderMarkdown bool
 }
 
 // NewRawReporter creates a reporter that prints raw text.
 func NewRawReporter(stdout, stderr io.Writer) Reporter {
 	return &consoleReporter{
-		writer: &rawWriter{stdout: stdout, stderr: stderr},
+		writer:         &rawWriter{stdout: stdout, stderr: stderr},
+		renderMarkdown: false,
 	}
 }
 
 // NewMarkdownReporter creates a reporter that renders markdown via glamour.
 func NewMarkdownReporter(stdout, stderr io.Writer) Reporter {
 	return &consoleReporter{
-		writer: &glamourWriter{stdout: stdout, stderr: stderr},
+		writer:         &rawWriter{stdout: stdout, stderr: stderr},
+		renderMarkdown: true,
 	}
 }
 
@@ -226,8 +192,12 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		}
 
 		fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
+		msg := args.Message
+		if r.renderMarkdown {
+			msg = renderMarkdown(msg, os.Stderr)
+		}
 		messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
-		sb.WriteString(messageStyle.Render(args.Message) + "\n")
+		sb.WriteString(messageStyle.Render(msg) + "\n")
 	}
 
 	if sb.Len() > 0 {
@@ -365,7 +335,7 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 			return valueStyle
 		})
 
-	r.writer.WriteRawStderr("\n" + t.Render() + "\n\n")
+	r.writer.WriteStderr("\n" + t.Render() + "\n\n")
 }
 
 func (r *consoleReporter) ReportFetchingDiff() {
@@ -381,7 +351,11 @@ func (r *consoleReporter) ReportNoChanges() {
 }
 
 func (r *consoleReporter) ReportReview(result string) error {
-	r.writer.WriteStdout(result + "\n")
+	if r.renderMarkdown {
+		r.writer.WriteStdout(renderMarkdown(result, os.Stdout) + "\n")
+	} else {
+		r.writer.WriteStdout(result + "\n")
+	}
 	return nil
 }
 
