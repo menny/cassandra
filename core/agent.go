@@ -190,13 +190,17 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			sb.WriteString("\n")
 		}
 
-		fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
+		if len(args.FocusArea) > 0 {
+			fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
+		} else {
+			sb.WriteString("[Reviewer state]\n")
+		}
 		msg := args.Message
 		if r.renderMarkdown {
 			msg = renderMarkdown(msg, os.Stderr)
 		}
 		messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
-		sb.WriteString(messageStyle.Render(msg) + "\n")
+		sb.WriteString(messageStyle.Render(msg))
 	}
 
 	if sb.Len() > 0 {
