@@ -219,3 +219,75 @@ func TestLocalReadFile_SymlinkEscape(t *testing.T) {
 		}
 	})
 }
+
+func TestLocalGrepFiles_SymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	workspaceRoot := filepath.Join(tmpDir, "workspace")
+	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRegistry()
+	RegisterLocalTools(r, workspaceRoot, nil, "")
+
+	// Create a file OUTSIDE the workspace root
+	secretDir := filepath.Join(tmpDir, "outside")
+	if err := os.Mkdir(secretDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secretFile := filepath.Join(secretDir, "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("SENSITIVE DATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Valid symlink pointing outside workspace root
+	evilSymlink := filepath.Join(workspaceRoot, "evil_symlink")
+	if err := os.Symlink(secretDir, evilSymlink); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Broken symlink
+	brokenSymlink := filepath.Join(workspaceRoot, "broken_symlink")
+	if err := os.Symlink(filepath.Join(tmpDir, "nonexistent"), brokenSymlink); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Trampoline/circular symlink
+	trampolineSymlink := filepath.Join(workspaceRoot, "trampoline")
+	if err := os.Symlink(trampolineSymlink, trampolineSymlink); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("valid symlink pointing outside should be blocked", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "SENSITIVE", "directory": "evil_symlink/*.txt"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error when querying through outside symlink base directory, got nil")
+		}
+	})
+
+	t.Run("broken symlink should be blocked", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "SENSITIVE", "directory": "broken_symlink/*.txt"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error when querying through broken symlink base directory, got nil")
+		}
+	})
+
+	t.Run("trampoline symlink should be blocked", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"query": "SENSITIVE", "directory": "trampoline/*.txt"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "grep_files",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error when querying through circular trampoline symlink base directory, got nil")
+		}
+	})
+}

@@ -179,7 +179,7 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 				},
 				"directory": map[string]any{
 					"type":        "string",
-					"description": "Optional directory to search in (relative to repository root).",
+					"description": "Optional directory or glob pattern to search in (relative to repository root), e.g., 'dir/**/*.go'.",
 				},
 				"case_insensitive": map[string]any{
 					"type":        "boolean",
@@ -204,22 +204,49 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 		cmdArgs = append(cmdArgs, "-e", args.Query)
 
 		if args.Directory != "" {
-			dir := args.Directory
-			if root != "" {
-				var err error
-				dir, err = util.ValidateAndRel(root, args.Directory)
-				if err != nil {
-					return "", fmt.Errorf("grep_files failed: %w", err)
+			// Prevent path traversal sequences (like "..") anywhere in the path.
+			for _, part := range strings.FieldsFunc(args.Directory, func(r rune) bool { return r == '/' || r == '\\' }) {
+				if part == ".." {
+					return "", fmt.Errorf("grep_files failed: path traversal ('..') not allowed in directory path: %q", args.Directory)
 				}
 			}
-			cmdArgs = append(cmdArgs, "--", dir)
+
+			base, pattern := splitGlob(args.Directory)
+			var relBase string
+			if base != "" {
+				if root != "" {
+					var err error
+					relBase, err = util.ValidateAndRel(root, base)
+					if err != nil {
+						return "", fmt.Errorf("grep_files failed: %w", err)
+					}
+				} else {
+					relBase = base
+				}
+			}
+
+			var pathspec string
+			if pattern != "" {
+				if relBase != "" {
+					pathspec = filepath.Join(relBase, pattern)
+				} else {
+					pathspec = pattern
+				}
+			} else {
+				pathspec = relBase
+			}
+			pathspec = filepath.ToSlash(pathspec)
+			cmdArgs = append(cmdArgs, "--", pathspec)
 		} else {
 			cmdArgs = append(cmdArgs, "--", ".")
 		}
 
 		cmdArgs = util.AppendGitExcludeArgs(cmdArgs, ignoredLockFiles)
 
-		out, err := util.RunGit(ctx, root, cmdArgs...)
+		const maxScanBytes = 100000
+		const maxReturnBytes = 40000
+
+		out, scannedTruncated, err := util.RunGitWithLimit(ctx, root, maxScanBytes, cmdArgs...)
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && len(out) == 0 {
@@ -228,13 +255,55 @@ func registerLocalGrepFiles(r *Registry, root string, ignoredLockFiles []string)
 			return "", fmt.Errorf("grep_files failed: %w\nOutput: %s", err, string(out))
 		}
 
-		output := string(out)
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		const maxLines = 100
-		if len(lines) > maxLines {
-			output = strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (truncated, %d more matches)", len(lines)-maxLines)
+		if len(out) == 0 {
+			return "No matches found.", nil
 		}
 
-		return strings.TrimSpace(output), nil
+		output := string(out)
+		if len(output) <= maxReturnBytes {
+			return strings.TrimSpace(output), nil
+		}
+
+		// Truncate output to 40k bytes.
+		// Find the last newline in the first maxReturnBytes.
+		cutoff := maxReturnBytes
+		if lastNL := strings.LastIndex(output[:maxReturnBytes], "\n"); lastNL != -1 {
+			cutoff = lastNL + 1
+		}
+
+		truncatedPart := output[cutoff:]
+		truncatedPart = strings.TrimSpace(truncatedPart)
+		var moreMatches int
+		if len(truncatedPart) > 0 {
+			moreMatches = strings.Count(truncatedPart, "\n") + 1
+		}
+
+		result := strings.TrimSpace(output[:cutoff])
+		if scannedTruncated {
+			result += "\n... (truncated to 40k bytes, there are many more matches. Please refine your query)"
+		} else {
+			result += fmt.Sprintf("\n... (truncated to 40k bytes, there are %d more matches. Please refine your query)", moreMatches)
+		}
+		return result, nil
 	})
+}
+
+// splitGlob splits a pathspec into a literal base directory and a glob pattern.
+// It finds the first occurrence of any wildcard character (*, ?, [) and splits the path
+// at the last directory separator before that wildcard.
+func splitGlob(path string) (string, string) {
+	idx := strings.IndexAny(path, "*?[")
+	if idx == -1 {
+		return path, ""
+	}
+	// Find the last path separator before the wildcard.
+	// We handle both '/' and '\\' separators.
+	lastSlash := strings.LastIndex(path[:idx], "/")
+	if lastSlashWin := strings.LastIndex(path[:idx], "\\"); lastSlashWin > lastSlash {
+		lastSlash = lastSlashWin
+	}
+	if lastSlash == -1 {
+		return "", path
+	}
+	return path[:lastSlash], path[lastSlash+1:]
 }
