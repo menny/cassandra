@@ -356,7 +356,7 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	t.Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
 		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == 0 {
+			if row == table.HeaderRow {
 				return headerStyle
 			}
 			if col == 0 {
