@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/tools"
@@ -79,6 +80,7 @@ type Reporter interface {
 type consoleWriter interface {
 	WriteStdout(s string)
 	WriteStderr(s string)
+	WriteRawStderr(s string)
 }
 
 // rawWriter writes strings directly to stdout/stderr.
@@ -92,6 +94,10 @@ func (w *rawWriter) WriteStdout(s string) {
 }
 
 func (w *rawWriter) WriteStderr(s string) {
+	fmt.Fprint(w.stderr, s)
+}
+
+func (w *rawWriter) WriteRawStderr(s string) {
 	fmt.Fprint(w.stderr, s)
 }
 
@@ -154,6 +160,10 @@ func (w *glamourWriter) WriteStderr(s string) {
 	rendered = strings.TrimPrefix(rendered, "\n")
 	rendered = strings.TrimSuffix(rendered, "\n")
 	fmt.Fprint(w.stderr, rendered)
+}
+
+func (w *glamourWriter) WriteRawStderr(s string) {
+	fmt.Fprint(w.stderr, s)
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
@@ -285,52 +295,77 @@ func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model
 }
 
 func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
-	var sb strings.Builder
-	sb.WriteString("| Configuration | Value |\n")
-	sb.WriteString("| --- | --- |\n")
-	fmt.Fprintf(&sb, "| **Working Directory** | %s |\n", targetDir)
-	fmt.Fprintf(&sb, "| **Base** | %s |\n", cfg.Base)
-	fmt.Fprintf(&sb, "| **Head** | %s |\n", cfg.Head)
-	fmt.Fprintf(&sb, "| **LLM Provider** | %s |\n", cfg.Provider)
-	fmt.Fprintf(&sb, "| **LLM Model** | %s |\n", cfg.Model)
+	t := table.New().Headers("Configuration", "Value")
+	t.Row("Working Directory", targetDir)
+	t.Row("Base", cfg.Base)
+	t.Row("Head", cfg.Head)
+	t.Row("LLM Provider", cfg.Provider)
+	t.Row("LLM Model", cfg.Model)
 	if cfg.ProviderURL != "" {
-		fmt.Fprintf(&sb, "| **LLM Provider URL** | %s |\n", cfg.ProviderURL)
+		t.Row("LLM Provider URL", cfg.ProviderURL)
 	}
-	fmt.Fprintf(&sb, "| **Max Tokens** | %d |\n", cfg.MaxTokens)
+	t.Row("Max Tokens", fmt.Sprintf("%d", cfg.MaxTokens))
 	if len(cfg.ProviderOptions) > 0 {
-		fmt.Fprintf(&sb, "| **Provider Options** | %+v |\n", cfg.ProviderOptions)
+		t.Row("Provider Options", fmt.Sprintf("%+v", cfg.ProviderOptions))
 	}
 	if cfg.MainGuidelines != "" {
-		fmt.Fprintf(&sb, "| **Main Guidelines** | %s |\n", cfg.MainGuidelines)
+		t.Row("Main Guidelines", cfg.MainGuidelines)
 	}
 	if len(cfg.SupplementalGuidelines) > 0 {
-		for sIndex, sg := range cfg.SupplementalGuidelines {
-			fmt.Fprintf(&sb, "| **Supplemental Guidelines %d:** | - %s |\n", sIndex+1, sg)
+		for i, sg := range cfg.SupplementalGuidelines {
+			t.Row(fmt.Sprintf("Supplemental Guidelines %d", i+1), sg)
 		}
 	}
 	if cfg.WishlistDir != "" {
-		fmt.Fprintf(&sb, "| **Wishlist Directory** | %s |\n", cfg.WishlistDir)
+		t.Row("Wishlist Directory", cfg.WishlistDir)
 	}
 	if cfg.OutputJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Structured Output JSON** | %s |\n", cfg.OutputJSONFile)
+		t.Row("Structured Output JSON", cfg.OutputJSONFile)
 		if cfg.ExtractionModel != "" {
-			fmt.Fprintf(&sb, "| **Extraction Model** | %s |\n", cfg.ExtractionModel)
+			t.Row("Extraction Model", cfg.ExtractionModel)
 		}
 	}
 	if cfg.MetricsJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Session Metrics JSON** | %s |\n", cfg.MetricsJSONFile)
+		t.Row("Session Metrics JSON", cfg.MetricsJSONFile)
 	}
 	if cfg.MetadataJSONFile != "" {
-		fmt.Fprintf(&sb, "| **Metadata JSON** | %s |\n", cfg.MetadataJSONFile)
+		t.Row("Metadata JSON", cfg.MetadataJSONFile)
 	}
 	if cfg.ApprovalEvaluationPromptFile != "" {
-		fmt.Fprintf(&sb, "| **Approval Evaluation Prompt File** | %s |\n", cfg.ApprovalEvaluationPromptFile)
+		t.Row("Approval Evaluation Prompt File", cfg.ApprovalEvaluationPromptFile)
 	}
-	sb.WriteString("| **API Key** | **[PROVIDED]** |\n")
+	t.Row("API Key", "[PROVIDED]")
 
-	sb.WriteString("\n\n")
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("205")).
+		Align(lipgloss.Left).
+		Padding(0, 1)
 
-	r.writer.WriteStderr(sb.String())
+	keyStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("81")).
+		Padding(0, 1)
+
+	valueStyle := lipgloss.NewStyle().
+		Padding(0, 1)
+
+	borderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240"))
+
+	t.Border(lipgloss.RoundedBorder()).
+		BorderStyle(borderStyle).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == 0 {
+				return headerStyle
+			}
+			if col == 0 {
+				return keyStyle
+			}
+			return valueStyle
+		})
+
+	r.writer.WriteRawStderr("\n" + t.Render() + "\n\n")
 }
 
 func (r *consoleReporter) ReportFetchingDiff() {

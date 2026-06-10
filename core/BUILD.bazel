@@ -19,6 +19,7 @@ go_library(
         "//tools/mcp",
         "@com_github_charmbracelet_glamour//:glamour",
         "@com_github_charmbracelet_lipgloss//:lipgloss",
+        "@com_github_charmbracelet_lipgloss//table",
         "@org_golang_x_term//:term",
     ],
 )
