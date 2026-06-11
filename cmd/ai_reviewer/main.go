@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -22,9 +24,15 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	stderr := log.New(os.Stderr, "", 0)
 	if err := run(ctx, os.Args[1:], stderr); err != nil {
+		if errors.Is(err, context.Canceled) {
+			stderr.Println("\nAborted.")
+			os.Exit(130)
+		}
 		stderr.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
