@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -97,18 +98,31 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	autoScroll := false
 
+	debugLog("Update received msg: %T", msg)
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		headerHeight := 3
 		footerHeight := 2
 		verticalMargin := headerHeight + footerHeight
 
+		width := msg.Width
+		if width < 1 {
+			width = 1
+		}
+		height := msg.Height - verticalMargin
+		if height < 1 {
+			height = 1
+		}
+
+		debugLog("WindowSizeMsg received: msg.Width=%d, msg.Height=%d -> viewport width=%d, height=%d", msg.Width, msg.Height, width, height)
+
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-verticalMargin)
+			m.viewport = viewport.New(width, height)
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - verticalMargin
+			m.viewport.Width = width
+			m.viewport.Height = height
 		}
 		autoScroll = true
 
@@ -224,10 +238,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.ready {
 		m.viewport.SetContent(m.renderContent())
 		if autoScroll {
+			debugLog("Scrolling to bottom")
 			m.viewport.GotoBottom()
 		}
+	} else {
+		debugLog("Model not ready, skipping content render")
 	}
 	return m, cmd
+}
+
+func debugLog(format string, args ...any) {
+	f, err := os.OpenFile("/Users/mennyevendanan/dev/menny/cassandra/tui_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "["+time.Now().Format("15:04:05.000")+"] "+format+"\n", args...)
 }
 
 func (m *tuiModel) View() string {
