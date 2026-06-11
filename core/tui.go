@@ -239,9 +239,9 @@ func (m tuiModel) View() string {
 		// Focus area / Reviewer state messages
 		if it.reviewerState != nil {
 			if len(it.reviewerState.focusArea) > 0 {
-				sb.WriteString(fmt.Sprintf("  [Reviewer state] focus area: %s\n", it.reviewerState.focusArea))
+				sb.WriteString(fmt.Sprintf("  🧠 [Reviewer state] focus area: %s\n", it.reviewerState.focusArea))
 			} else {
-				sb.WriteString("  [Reviewer state]\n")
+				sb.WriteString("  🧠 [Reviewer state]\n")
 			}
 			if len(it.reviewerState.message) > 0 {
 				msgStyle := lipgloss.NewStyle().MarginLeft(4).MarginBottom(1)

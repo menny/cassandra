@@ -192,9 +192,9 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		}
 
 		if len(args.FocusArea) > 0 {
-			fmt.Fprintf(&sb, "[Reviewer state] focus area: %s\n", args.FocusArea)
+			fmt.Fprintf(&sb, "🧠 [Reviewer state] focus area: %s\n", args.FocusArea)
 		} else {
-			sb.WriteString("[Reviewer state]\n")
+			sb.WriteString("🧠 [Reviewer state]\n")
 		}
 		msg := args.Message
 		if r.renderMarkdown {
