@@ -13,6 +13,8 @@ type stateWriterKeyType struct{}
 var stateWriterKey stateWriterKeyType
 
 // ContextWithStateWriter returns a new context carrying the given state writer.
+// This is retained for test assertions and potential downstream integrations
+// where state is logged directly via context (rather than through reporter callbacks).
 func ContextWithStateWriter(ctx context.Context, w io.Writer) context.Context {
 	return context.WithValue(ctx, stateWriterKey, w)
 }

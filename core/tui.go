@@ -79,15 +79,16 @@ type iterationState struct {
 }
 
 type tuiModel struct {
-	mcpServers map[string]*mcpServerState
-	mcpList    []string
-	iterations []*iterationState
-	warnings   []string
-	quitting   bool
-	spinner    spinner.Model
-	viewport   viewport.Model
-	ready      bool
-	configText string
+	mcpServers  map[string]*mcpServerState
+	mcpList     []string
+	iterations  []*iterationState
+	warnings    []string
+	quitting    bool
+	spinner     spinner.Model
+	viewport    viewport.Model
+	ready       bool
+	configText  string
+	userAborted bool
 }
 
 func (m *tuiModel) Init() tea.Cmd {
@@ -126,6 +127,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			m.quitting = true
+			m.userAborted = true
 			return m, tea.Quit
 		}
 		m.viewport, cmd = m.viewport.Update(msg)
@@ -421,7 +423,7 @@ func (r *tuiReporter) startLocked() {
 			fmt.Fprintf(r.stderr, "TUI program error: %v\n", err)
 		}
 		close(r.done)
-		if r.cancel != nil {
+		if r.model.userAborted && r.cancel != nil {
 			r.cancel()
 		}
 	}()
@@ -458,46 +460,7 @@ func (r *tuiReporter) Close() error {
 }
 
 func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {
-	t := table.New().Headers("Configuration", "Value")
-	t.Row("Working Directory", targetDir)
-	t.Row("Base", cfg.Base)
-	t.Row("Head", cfg.Head)
-	t.Row("LLM Provider", cfg.Provider)
-	t.Row("LLM Model", cfg.Model)
-	if cfg.ProviderURL != "" {
-		t.Row("LLM Provider URL", cfg.ProviderURL)
-	}
-	t.Row("Max Tokens", fmt.Sprintf("%d", cfg.MaxTokens))
-	if len(cfg.ProviderOptions) > 0 {
-		t.Row("Provider Options", fmt.Sprintf("%+v", cfg.ProviderOptions))
-	}
-	if cfg.MainGuidelines != "" {
-		t.Row("Main Guidelines", cfg.MainGuidelines)
-	}
-	if len(cfg.SupplementalGuidelines) > 0 {
-		for i, sg := range cfg.SupplementalGuidelines {
-			t.Row(fmt.Sprintf("Supplemental Guidelines %d", i+1), sg)
-		}
-	}
-	if cfg.WishlistDir != "" {
-		t.Row("Wishlist Directory", cfg.WishlistDir)
-	}
-	if cfg.OutputJSONFile != "" {
-		t.Row("Structured Output JSON", cfg.OutputJSONFile)
-		if cfg.ExtractionModel != "" {
-			t.Row("Extraction Model", cfg.ExtractionModel)
-		}
-	}
-	if cfg.MetricsJSONFile != "" {
-		t.Row("Session Metrics JSON", cfg.MetricsJSONFile)
-	}
-	if cfg.MetadataJSONFile != "" {
-		t.Row("Metadata JSON", cfg.MetadataJSONFile)
-	}
-	if cfg.ApprovalEvaluationPromptFile != "" {
-		t.Row("Approval Evaluation Prompt File", cfg.ApprovalEvaluationPromptFile)
-	}
-	t.Row("API Key", "[PROVIDED]")
+	t := buildConfigTable(cfg, targetDir)
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -616,6 +579,8 @@ func (r *tuiReporter) ReportToolStatus(name string, status string, err error) {
 }
 
 func (r *tuiReporter) ReportReviewHeader(files int, guidelines string, model string) {
+	_ = r.Close()
+
 	// Print once the TUI finishes to head the review output
 	success := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("✅ Review generated successfully.")
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render(fmt.Sprintf("# 📝 Review for %d files using %s (%s)", files, guidelines, model))

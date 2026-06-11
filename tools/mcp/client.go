@@ -54,20 +54,26 @@ func (m *Manager) RegisterServers(
 	var successCount int
 	var wg sync.WaitGroup
 
+	safeReportWarning := func(msg string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		reportWarning(msg, err)
+	}
+
 	for name, server := range config.MCPServers {
 		report(name, "started", nil)
 		wg.Add(1)
 		go func(name string, server ServerConfig) {
 			defer wg.Done()
 
-			if err := m.registerServer(ctx, name, server, reportWarning, register); err != nil {
-				report(name, "failed to load", err)
+			if err := m.registerServer(ctx, name, server, safeReportWarning, register); err != nil {
 				mu.Lock()
+				report(name, "failed to load", err)
 				lastErr = err
 				mu.Unlock()
 			} else {
-				report(name, "loaded", nil)
 				mu.Lock()
+				report(name, "loaded", nil)
 				successCount++
 				mu.Unlock()
 			}

@@ -162,12 +162,12 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', or 'tui')", cfg.Render)
 	}
 
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
 
 	var reporter core.Reporter
 	if cfg.Render == "tui" {
-		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancel)
+		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancelSession)
 	} else if cfg.Render == "markdown" {
 		reporter = core.NewMarkdownReporter(os.Stdout, stderr.Writer())
 	} else {
@@ -180,7 +180,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reporter.ReportConfig(cfg, targetDir)
 
-	reviewer, err := core.NewReviewer(cancelCtx, cfg, targetDir, reporter)
+	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
 	if err != nil {
 		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
@@ -283,7 +283,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 	}
 
-	result, err := reviewer.Run(cancelCtx, changedFiles, requestText)
+	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
