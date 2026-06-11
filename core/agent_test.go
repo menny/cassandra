@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1114,5 +1115,45 @@ func TestRunReview_IterationBudgetNote(t *testing.T) {
 	// Since remaining was 0, it should be exactly the raw output "content of baz.go" with NO [SYSTEM NOTE].
 	if resultContent4 != "content of baz.go" {
 		t.Errorf("expected Turn 4 ToolResult to be exactly raw content, got %q", resultContent4)
+	}
+}
+
+func TestTuiReporter(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	reporter := NewTuiReporter(&stdout, &stderr)
+
+	cfg := &config.Config{
+		Provider: "google",
+		Model:    "gemini-1.5-flash",
+	}
+	reporter.ReportConfig(cfg, "/tmp")
+
+	reporter.ReportMCPStatus("mcp-server-test", "started", nil)
+	reporter.ReportMCPStatus("mcp-server-test", "loaded", nil)
+
+	reporter.ReportIteration(1)
+	reporter.ReportToolCalls([]llm.ToolCall{
+		{ID: "1", Name: "test_tool", Arguments: "{}"},
+	})
+	reporter.ReportToolStatus("test_tool", "started", nil)
+	reporter.ReportToolStatus("test_tool", "completed", nil)
+
+	reporter.ReportWarning("some warning", nil)
+
+	err := reporter.ReportReview("LGTM!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that the final review content is written to stdout
+	if !strings.Contains(stdout.String(), "LGTM!") {
+		t.Errorf("expected stdout to contain final review content, got %q", stdout.String())
+	}
+
+	// Verify that the config table was printed to stderr
+	if !strings.Contains(stderr.String(), "gemini-1.5-flash") {
+		t.Errorf("expected stderr to contain config table, got %q", stderr.String())
 	}
 }

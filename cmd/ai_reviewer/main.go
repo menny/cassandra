@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -60,7 +61,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 	fs.StringVar(&cfg.ProviderOptionsFile, "provider-options-file", "", "Path to a JSON file containing provider-specific options")
-	fs.StringVar(&cfg.Render, "render", "raw", "Output render format: 'raw' (default) or 'markdown'")
+	fs.StringVar(&cfg.Render, "render", "raw", "Output render format: 'raw' (default), 'markdown', or 'tui'")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -149,15 +150,21 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("missing required arguments:\n  - %s", strings.Join(missing, "\n  - "))
 	}
 
-	if cfg.Render != "raw" && cfg.Render != "markdown" {
-		return fmt.Errorf("invalid value for --render: %q (must be 'raw' or 'markdown')", cfg.Render)
+	if cfg.Render != "raw" && cfg.Render != "markdown" && cfg.Render != "tui" {
+		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', or 'tui')", cfg.Render)
 	}
 
 	var reporter core.Reporter
-	if cfg.Render == "markdown" {
+	if cfg.Render == "tui" {
+		reporter = core.NewTuiReporter(os.Stdout, os.Stderr)
+	} else if cfg.Render == "markdown" {
 		reporter = core.NewMarkdownReporter(os.Stdout, stderr.Writer())
 	} else {
 		reporter = core.NewRawReporter(os.Stdout, stderr.Writer())
+	}
+
+	if closer, ok := reporter.(io.Closer); ok {
+		defer closer.Close()
 	}
 
 	reporter.ReportConfig(cfg, targetDir)
