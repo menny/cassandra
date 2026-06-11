@@ -34,3 +34,8 @@ scratch/
 # Conductor
 conductor/plan.md
 conductor/tracks/**/plan.md
+
+# Codecov uploader files (downloaded during CI)
+codecov
+codecov.SHA256SUM
+codecov.SHA256SUM.sig
