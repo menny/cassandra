@@ -86,11 +86,11 @@ type tuiModel struct {
 	spinner    spinner.Model
 }
 
-func (m tuiModel) Init() tea.Cmd {
+func (m *tuiModel) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -198,7 +198,7 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m tuiModel) View() string {
+func (m *tuiModel) View() string {
 	if m.quitting {
 		return ""
 	}
