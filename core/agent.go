@@ -157,7 +157,12 @@ func NewDefaultReporter(w io.Writer) Reporter {
 }
 
 func (r *consoleReporter) ReportIteration(iter int) {
-	r.writer.WriteStderr(fmt.Sprintf("🔍 [Iter %d] Reviewing...\n", iter))
+	if r.renderMarkdown {
+		iterStr := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render(fmt.Sprintf("🔍 [Iteration %d]", iter))
+		r.writer.WriteStderr(iterStr + "\n")
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("🔍 [Iter %d] Reviewing...\n", iter))
+	}
 }
 
 func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
@@ -175,8 +180,17 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	var sb strings.Builder
 
 	if len(standardCalls) > 0 {
-		for _, tc := range standardCalls {
-			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
+		if r.renderMarkdown {
+			toolNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("216")) // Warm Amber / Peach
+			toolArgsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")) // Muted Stone Grey
+			for _, tc := range standardCalls {
+				argsStr := compactToolCallArgs(tc)
+				fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", toolNameStyle.Render(tc.Name), toolArgsStyle.Render(argsStr))
+			}
+		} else {
+			for _, tc := range standardCalls {
+				fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
+			}
 		}
 	}
 
@@ -191,12 +205,27 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			sb.WriteString("\n")
 		}
 
-		stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-		focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
-		reviewerStateTitle := stateStyle.Render("[Reviewer state]")
+		var reviewerStateTitle string
+		var focusAreaTitle string
+		if r.renderMarkdown {
+			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167")) // Terracotta / Warm Clay
+			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
+			reviewerStateTitle = stateStyle.Render("[Reviewer state]")
+
+			if len(args.FocusArea) > 0 {
+				focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+			}
+		} else {
+			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
+			reviewerStateTitle = stateStyle.Render("[Reviewer state]")
+
+			if len(args.FocusArea) > 0 {
+				focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+			}
+		}
 
 		if len(args.FocusArea) > 0 {
-			focusAreaTitle := focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
 			fmt.Fprintf(&sb, "🧠 %s %s\n", reviewerStateTitle, focusAreaTitle)
 		} else {
 			fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
@@ -238,27 +267,57 @@ func (r *consoleReporter) ReportUsageSummary(total llm.Usage) {
 }
 
 func (r *consoleReporter) ReportFinalReview() {
-	r.writer.WriteStderr("📝 Formulating final review...\n")
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render("📝 Formulating final review...")
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr("📝 Formulating final review...\n")
+	}
 }
 
 func (r *consoleReporter) ReportExtraction() {
-	r.writer.WriteStderr("📦 Extracting findings...\n")
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render("📦 Extracting findings...")
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr("📦 Extracting findings...\n")
+	}
 }
 
 func (r *consoleReporter) ReportExtractionRetry(attempt int) {
-	r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] Extraction attempt %d failed; retrying...\n", attempt))
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render(fmt.Sprintf("🔄 [Retry] Extraction attempt %d failed; retrying...", attempt))
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] Extraction attempt %d failed; retrying...\n", attempt))
+	}
 }
 
 func (r *consoleReporter) ReportEmptyResponseRetry(attempt int) {
-	r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] LLM returned empty response (attempt %d); retrying...\n", attempt))
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render(fmt.Sprintf("🔄 [Retry] LLM returned empty response (attempt %d); retrying...", attempt))
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("🔄 [Retry] LLM returned empty response (attempt %d); retrying...\n", attempt))
+	}
 }
 
 func (r *consoleReporter) ReportCapReached(maxIterations int) {
-	r.writer.WriteStderr(fmt.Sprintf("⚠️  Reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations))
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render(fmt.Sprintf("⚠️  Reached maximum ReAct iterations (%d). Forcing final review.", maxIterations))
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("⚠️  Reached maximum ReAct iterations (%d). Forcing final review.\n", maxIterations))
+	}
 }
 
 func (r *consoleReporter) ReportTruncated(maxTokens int) {
-	r.writer.WriteStderr(fmt.Sprintf("⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens))
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render(fmt.Sprintf("⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.", maxTokens))
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.\n", maxTokens))
+	}
 }
 
 func (r *consoleReporter) ReportMCPStatus(name string, status string, err error) {
@@ -275,7 +334,13 @@ func (r *consoleReporter) ReportToolStatus(name string, status string, err error
 }
 
 func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model string) {
-	r.writer.WriteStderr(fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model))
+	if r.renderMarkdown {
+		success := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("✅ Review generated successfully.")
+		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render(fmt.Sprintf("# 📝 Review for %d files using %s (%s)", files, guidelines, model))
+		r.writer.WriteStderr(fmt.Sprintf("\n%s\n\n\n%s\n\n", success, title))
+	} else {
+		r.writer.WriteStderr(fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model))
+	}
 }
 
 func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
@@ -320,22 +385,33 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	}
 	t.Row("API Key", "[PROVIDED]")
 
+	var headerColor, keyColor, borderColor string
+	if r.renderMarkdown {
+		headerColor = "107" // Laurel Green
+		keyColor = "179"    // Warm Ochre
+		borderColor = "241" // Dusty/Stone Grey
+	} else {
+		headerColor = "205"
+		keyColor = "81"
+		borderColor = "240"
+	}
+
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("205")).
+		Foreground(lipgloss.Color(headerColor)).
 		Align(lipgloss.Left).
 		Padding(0, 1)
 
 	keyStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("81")).
+		Foreground(lipgloss.Color(keyColor)).
 		Padding(0, 1)
 
 	valueStyle := lipgloss.NewStyle().
 		Padding(0, 1)
 
 	borderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(lipgloss.Color(borderColor))
 
 	t.Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
@@ -353,15 +429,30 @@ func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 }
 
 func (r *consoleReporter) ReportFetchingDiff() {
-	r.writer.WriteStderr("🌿 Fetching git diff...\n")
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Render("🌿 Fetching git diff...")
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr("🌿 Fetching git diff...\n")
+	}
 }
 
 func (r *consoleReporter) ReportFetchingCommits() {
-	r.writer.WriteStderr("🌿 Fetching git commits...\n")
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Render("🌿 Fetching git commits...")
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr("🌿 Fetching git commits...\n")
+	}
 }
 
 func (r *consoleReporter) ReportNoChanges() {
-	r.writer.WriteStderr("⚪ No changes found.\n")
+	if r.renderMarkdown {
+		styled := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("⚪ No changes found.")
+		r.writer.WriteStderr(styled + "\n")
+	} else {
+		r.writer.WriteStderr("⚪ No changes found.\n")
+	}
 }
 
 func (r *consoleReporter) ReportReview(result string) error {
@@ -386,11 +477,16 @@ func (r *consoleReporter) ReportMetricsWritten(file string) {
 }
 
 func (r *consoleReporter) ReportWarning(msg string, err error) {
+	var warnStr string
 	if err != nil {
-		r.writer.WriteStderr(fmt.Sprintf("⚠️  %s: %v\n", msg, err))
+		warnStr = fmt.Sprintf("⚠️  %s: %v", msg, err)
 	} else {
-		r.writer.WriteStderr(fmt.Sprintf("⚠️  %s\n", msg))
+		warnStr = fmt.Sprintf("⚠️  %s", msg)
 	}
+	if r.renderMarkdown {
+		warnStr = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render(warnStr)
+	}
+	r.writer.WriteStderr(warnStr + "\n")
 }
 
 func (r *consoleReporter) ReportError(err error) {

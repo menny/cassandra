@@ -87,6 +87,7 @@ type tuiModel struct {
 	spinner    spinner.Model
 	viewport   viewport.Model
 	ready      bool
+	configText string
 }
 
 func (m *tuiModel) Init() tea.Cmd {
@@ -265,6 +266,10 @@ func (m *tuiModel) View() string {
 
 func (m *tuiModel) renderContent() string {
 	var sb strings.Builder
+
+	if m.configText != "" {
+		sb.WriteString(m.configText)
+	}
 
 	// Section 1: MCP Servers
 	if len(m.mcpList) > 0 {
@@ -523,7 +528,7 @@ func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {
 			return valueStyle
 		})
 
-	fmt.Fprint(r.stderr, "\n"+t.Render()+"\n\n")
+	r.model.configText = "\n" + t.Render() + "\n\n"
 
 	// Trigger the lazy start of the TUI loop immediately after config display
 	r.mu.Lock()
@@ -612,7 +617,9 @@ func (r *tuiReporter) ReportToolStatus(name string, status string, err error) {
 
 func (r *tuiReporter) ReportReviewHeader(files int, guidelines string, model string) {
 	// Print once the TUI finishes to head the review output
-	fmt.Fprintf(r.stderr, "\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model)
+	success := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("✅ Review generated successfully.")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render(fmt.Sprintf("# 📝 Review for %d files using %s (%s)", files, guidelines, model))
+	fmt.Fprintf(r.stderr, "\n%s\n\n\n%s\n\n", success, title)
 }
 
 func (r *tuiReporter) ReportReview(result string) error {
