@@ -142,6 +142,9 @@ func registerAskDeveloper(r *Registry, notifier UserNotifier) {
 			return string(jsonBytes), nil
 		}
 
+		// We do not enforce a 40 KB output size cap on developer responses because
+		// it is direct, trusted interactive developer input specifically gathered
+		// to clarify review context, rather than unverified external file/network data.
 		res := map[string]string{
 			"status":   "answered",
 			"response": response,

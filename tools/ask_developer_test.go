@@ -93,6 +93,7 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 	registerAskDeveloper(r, &mockNotifier{})
 
 	inR, inW := io.Pipe()
+	defer inW.Close()
 	var outBuf bytes.Buffer
 
 	ctx := WithTestStreams(context.Background(), inR, &outBuf)
@@ -115,8 +116,6 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(res), &payload))
 	require.Equal(t, "timeout", payload["status"])
 	require.Contains(t, payload["message"], "The developer did not respond within")
-
-	inW.Close()
 }
 
 func TestAskDeveloper_Cancelled(t *testing.T) {
