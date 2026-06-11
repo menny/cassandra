@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 
@@ -244,8 +245,9 @@ func (m tuiModel) View() string {
 				sb.WriteString("  🧠 [Reviewer state]\n")
 			}
 			if len(it.reviewerState.message) > 0 {
+				renderedMsg := renderMarkdown(it.reviewerState.message, os.Stderr)
 				msgStyle := lipgloss.NewStyle().MarginLeft(4).MarginBottom(1)
-				sb.WriteString(msgStyle.Render(it.reviewerState.message) + "\n")
+				sb.WriteString(msgStyle.Render(renderedMsg) + "\n")
 			}
 		}
 
@@ -534,7 +536,7 @@ func (r *tuiReporter) ReportReviewHeader(files int, guidelines string, model str
 
 func (r *tuiReporter) ReportReview(result string) error {
 	_ = r.Close()
-	fmt.Fprint(r.stdout, result+"\n")
+	fmt.Fprint(r.stdout, renderMarkdown(result, r.stdout)+"\n")
 	return nil
 }
 
