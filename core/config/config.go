@@ -37,6 +37,7 @@ type Config struct {
 	CommitsFile                  string         `mapstructure:"commits-file"`
 	MCPConfigFile                string         `mapstructure:"mcp-config"`
 	AllowURLFetch                bool           `mapstructure:"allow-url-fetch"`
+	AllowAskDeveloper            bool           `mapstructure:"allow-ask-developer"`
 	IgnoredLockFiles             []string       `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string         `mapstructure:"config"`
 	WishlistDir                  string         `mapstructure:"wishlist-dir"`
@@ -48,12 +49,13 @@ type Config struct {
 // NewDefaultConfig returns a Config with default values populated.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Base:             "main",
-		Head:             "HEAD",
-		MainGuidelines:   "general",
-		MaxTokens:        llm.DefaultMaxTokens,
-		IgnoredLockFiles: util.DefaultLockFiles,
-		Render:           "raw",
+		Base:              "main",
+		Head:              "HEAD",
+		MainGuidelines:    "general",
+		MaxTokens:         llm.DefaultMaxTokens,
+		IgnoredLockFiles:  util.DefaultLockFiles,
+		Render:            "raw",
+		AllowAskDeveloper: false,
 	}
 }
 
@@ -68,6 +70,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
+	v.SetDefault("allow-ask-developer", false)
 	v.SetDefault("render", "raw")
 
 	if configFile != "" {

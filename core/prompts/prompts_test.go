@@ -53,7 +53,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", nil, "")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", nil, "", false)
 	require.NoError(t, err)
 
 	// Combine for checks that don't care about the split point.
@@ -121,7 +121,7 @@ func TestBuildSystemPrompt_DeterministicZone3Ordering(t *testing.T) {
 	const runs = 20
 	var firstDynamic string
 	for i := range runs {
-		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", nil, "")
+		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", nil, "", false)
 		require.NoError(t, err)
 		if i == 0 {
 			firstDynamic = dynamic
@@ -153,7 +153,7 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", nil, "CUSTOM APPROVAL HERE")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", nil, "CUSTOM APPROVAL HERE", false)
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "You are a code review bot - named Cassandra - for the provided codebase."))
@@ -191,7 +191,7 @@ func TestBuildSystemPrompt_Summary(t *testing.T) {
 	))
 
 	changedFiles := []string{"main.go", "pkg/sub/helper.go"}
-	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", nil, "")
+	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", nil, "", false)
 	require.NoError(t, err)
 
 	// Lengths must match the actual strings.
@@ -226,7 +226,7 @@ func TestBuildSystemPrompt_SupplementalGuidelines(t *testing.T) {
 	main := "MAIN GUIDELINES"
 	supplemental := []string{"SUPP 1", "SUPP 2"}
 
-	stable, _, _, err := BuildSystemPrompt(tmpDir, nil, main, supplemental, "")
+	stable, _, _, err := BuildSystemPrompt(tmpDir, nil, main, supplemental, "", false)
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "<code_review_guidelines>\nMAIN GUIDELINES\n</code_review_guidelines>"))
@@ -237,4 +237,21 @@ func TestBuildSystemPrompt_SupplementalGuidelines(t *testing.T) {
 	supp1Idx := strings.Index(stable, "SUPP 1")
 	supp2Idx := strings.Index(stable, "SUPP 2")
 	require.True(t, supp1Idx < supp2Idx, "supplemental guidelines should maintain provided order")
+}
+
+func TestBuildSystemPrompt_AllowAskDeveloper(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	t.Run("when allowAskDeveloper is true", func(t *testing.T) {
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true)
+		require.NoError(t, err)
+		require.Contains(t, stable, "You have access to the `ask_developer` tool.")
+	})
+
+	t.Run("when allowAskDeveloper is false", func(t *testing.T) {
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false)
+		require.NoError(t, err)
+		require.NotContains(t, stable, "You have access to the `ask_developer` tool.")
+	})
 }

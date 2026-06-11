@@ -80,7 +80,7 @@ type PromptSummary struct {
 // Dynamic (Zone 3):
 //  6. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
 //  7. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string) (stable, dynamic string, summary PromptSummary, err error) {
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -105,6 +105,10 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		stable += fmt.Sprintf("\n<personal_review_guidelines>\n%s\n</personal_review_guidelines>\n", string(personalBytes))
 		relPersonal := util.SafeRel(workspaceRoot, personalPath)
 		summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: relPersonal, Type: "personal"})
+	}
+
+	if allowAskDeveloper {
+		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. If the tool returns a timeout message, do your best to assume the answer and document your assumption.\n"
 	}
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.

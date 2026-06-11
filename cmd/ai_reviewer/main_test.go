@@ -230,3 +230,39 @@ func TestResolveGuidelinesContent(t *testing.T) {
 		require.Contains(t, err.Error(), "prompt \"non-existent-at-all\" not found in library")
 	})
 }
+
+func TestRun_AllowAskDeveloperValidation(t *testing.T) {
+	ctx := context.Background()
+	stderr := log.New(os.Stderr, "", 0)
+
+	t.Run("errors when allow-ask-developer is true but render is raw", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--allow-ask-developer",
+			"--render", "raw",
+		}
+
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+	})
+
+	t.Run("proceeds past validation when allow-ask-developer is true and render is markdown", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--allow-ask-developer",
+			"--render", "markdown",
+			"--diff-file", "non-existent-diff",
+			"--files-list-file", "non-existent-files",
+		}
+
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		// It should pass the validation check and fail on reading the non-existent diff file.
+		require.Contains(t, err.Error(), "failed to read diff file")
+	})
+}

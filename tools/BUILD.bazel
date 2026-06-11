@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "tools",
     srcs = [
+        "ask_developer.go",
         "diff.go",
         "emit_reviewer_state.go",
         "local_tools.go",
@@ -14,12 +15,16 @@ go_library(
     deps = [
         "//llm",
         "//util",
+        "@com_github_charmbracelet_huh//:huh",
+        "@com_github_charmbracelet_lipgloss//:lipgloss",
+        "@org_golang_x_term//:term",
     ],
 )
 
 go_test(
     name = "tools_test",
     srcs = [
+        "ask_developer_test.go",
         "diff_test.go",
         "emit_reviewer_state_test.go",
         "local_tools_safety_test.go",
@@ -30,5 +35,6 @@ go_test(
     deps = [
         "//llm",
         "//util",
+        "@com_github_stretchr_testify//require",
     ],
 )
