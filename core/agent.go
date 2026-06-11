@@ -765,10 +765,12 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 
 	a.reporter.ReportToolCalls(toolCalls)
 
-	for i, tc := range toolCalls {
+	for _, tc := range toolCalls {
 		a.toolCalls[tc.Name]++
 		a.reporter.ReportToolStatus(tc.Name, "started", nil)
+	}
 
+	for i, tc := range toolCalls {
 		wg.Add(1)
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()

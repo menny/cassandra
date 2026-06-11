@@ -60,8 +60,11 @@ func (m *Manager) RegisterServers(
 		reportWarning(msg, err)
 	}
 
-	for name, server := range config.MCPServers {
+	for name := range config.MCPServers {
 		report(name, "started", nil)
+	}
+
+	for name, server := range config.MCPServers {
 		wg.Add(1)
 		go func(name string, server ServerConfig) {
 			defer wg.Done()
