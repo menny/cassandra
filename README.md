@@ -2,6 +2,8 @@
 
 > *The truth about your code. Seeing bugs before the fall of production. Ignore at your own peril.*
 
+[![codecov](https://codecov.io/gh/menny/cassandra/graph/badge.svg?branch=main)](https://codecov.io/gh/menny/cassandra)
+
 An autonomous code review tool built in Go. This tool provides structured, actionable code reviews using a configurable and adjustable feedback framework.
 
 ## Features
