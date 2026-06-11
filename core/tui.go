@@ -204,7 +204,7 @@ func (m tuiModel) View() string {
 	var sb strings.Builder
 
 	// Header
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86")).Render("🛸 Cassandra AI Reviewer") + "\n\n")
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render("🛸 Cassandra AI Reviewer") + "\n\n")
 
 	// Section 1: MCP Servers
 	if len(m.mcpList) > 0 {
@@ -229,7 +229,7 @@ func (m tuiModel) View() string {
 
 	// Section 2: LLM Loop Progress (Iteration Blocks)
 	for _, it := range m.iterations {
-		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99")).Render(fmt.Sprintf("🔍 [Iteration %d]", it.iter)) + "\n")
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render(fmt.Sprintf("🔍 [Iteration %d]", it.iter)) + "\n")
 
 		if it.llmWaiting {
 			sb.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), it.llmStatus))
@@ -239,8 +239,8 @@ func (m tuiModel) View() string {
 
 		// Focus area / Reviewer state messages
 		if it.reviewerState != nil {
-			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
+			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167")) // Terracotta / Warm Clay
+			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
 			reviewerStateTitle := stateStyle.Render("[Reviewer state]")
 
 			if len(it.reviewerState.focusArea) > 0 {
@@ -264,7 +264,15 @@ func (m tuiModel) View() string {
 			} else {
 				heading = "  🛠️  Tool Calls:"
 			}
-			sb.WriteString(heading + "\n")
+			toolHeadingStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("136")) // Ancient Bronze
+			sb.WriteString(toolHeadingStyle.Render(heading) + "\n")
+
+			toolNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("216")) // Warm Amber / Peach
+			toolArgsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")) // Muted Stone Grey
+
+			statusQueued := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("queued")
+			statusRunning := lipgloss.NewStyle().Foreground(lipgloss.Color("173")).Render("running...")
+			statusDone := lipgloss.NewStyle().Foreground(lipgloss.Color("108")).Render("done")
 
 			for _, tc := range it.toolCalls {
 				var statusStr string
@@ -272,13 +280,14 @@ func (m tuiModel) View() string {
 
 				switch tc.status {
 				case "queued":
-					statusStr = fmt.Sprintf("    %s(%s): queued", tc.name, argsStr)
+					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusQueued)
 				case "started":
-					statusStr = fmt.Sprintf("    %s %s(%s): running...", m.spinner.View(), tc.name, argsStr)
+					statusStr = fmt.Sprintf("    %s %s(%s): %s", m.spinner.View(), toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusRunning)
 				case "completed":
-					statusStr = fmt.Sprintf("    %s(%s): done", tc.name, argsStr)
+					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusDone)
 				case "failed":
-					statusStr = fmt.Sprintf("    %s(%s): failed: %v ⚠️", tc.name, argsStr, tc.err)
+					statusFailed := lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Render(fmt.Sprintf("failed: %v", tc.err)) // Deep Crimson
+					statusStr = fmt.Sprintf("    %s(%s): %s ⚠️", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusFailed)
 				}
 				sb.WriteString(statusStr + "\n")
 			}
@@ -328,7 +337,7 @@ func NewTuiReporter(stdout, stderr io.Writer, cancel context.CancelFunc) Reporte
 	}
 	m.spinner = spinner.New()
 	m.spinner.Spinner = spinner.Dot
-	m.spinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	m.spinner.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("178"))
 
 	return &tuiReporter{
 		model:  m,
@@ -420,20 +429,20 @@ func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("205")).
+		Foreground(lipgloss.Color("107")).
 		Align(lipgloss.Left).
 		Padding(0, 1)
 
 	keyStyle := lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color("81")).
+		Foreground(lipgloss.Color("179")).
 		Padding(0, 1)
 
 	valueStyle := lipgloss.NewStyle().
 		Padding(0, 1)
 
 	borderStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240"))
+		Foreground(lipgloss.Color("241"))
 
 	t.Border(lipgloss.RoundedBorder()).
 		BorderStyle(borderStyle).
