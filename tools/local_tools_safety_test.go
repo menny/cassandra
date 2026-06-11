@@ -192,7 +192,7 @@ func TestLocalReadFile_SymlinkEscape(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	RegisterLocalTools(r, workspaceRoot, nil, "", false)
+	RegisterLocalTools(r, workspaceRoot, nil, "", false, nil)
 
 	// Create a file OUTSIDE the workspace root
 	secretFile := filepath.Join(tmpDir, "secret.txt")
@@ -228,7 +228,7 @@ func TestLocalGrepFiles_SymlinkEscape(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	RegisterLocalTools(r, workspaceRoot, nil, "", false)
+	RegisterLocalTools(r, workspaceRoot, nil, "", false, nil)
 
 	// Create a file OUTSIDE the workspace root
 	secretDir := filepath.Join(tmpDir, "outside")

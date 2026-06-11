@@ -74,6 +74,7 @@ type Reporter interface {
 	ReportMetricsWritten(file string)
 	ReportWarning(msg string, err error)
 	ReportError(err error)
+	NotifyUser()
 }
 
 // consoleWriter defines how formatted strings are printed.
@@ -174,6 +175,10 @@ func NewMarkdownReporter(stdout, stderr io.Writer) Reporter {
 // NewDefaultReporter creates a raw reporter for backward compatibility.
 func NewDefaultReporter(w io.Writer) Reporter {
 	return NewRawReporter(w, w)
+}
+
+func (r *consoleReporter) NotifyUser() {
+	r.writer.WriteStdout("\a")
 }
 
 func (r *consoleReporter) writeStyledStderr(plain, styled string, color string, bold bool) {

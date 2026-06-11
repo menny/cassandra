@@ -51,7 +51,18 @@ func RegisterToolWithArgs[T any](r *Registry, def llm.ToolDef, handler func(cont
 	})
 }
 
-func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool) {
+type UserNotifier interface {
+	NotifyUser()
+}
+
+type NoOpUserNotifier struct{}
+
+func (NoOpUserNotifier) NotifyUser() {}
+
+func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool, notifier UserNotifier) {
+	if notifier == nil {
+		notifier = NoOpUserNotifier{}
+	}
 	if root != "" {
 		if resolved, err := filepath.EvalSymlinks(root); err == nil {
 			root = resolved
@@ -63,6 +74,6 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 	registerWishlistTool(r, wishlistDir)
 	registerEmitReviewerState(r)
 	if allowAskDeveloper {
-		registerAskDeveloper(r)
+		registerAskDeveloper(r, notifier)
 	}
 }

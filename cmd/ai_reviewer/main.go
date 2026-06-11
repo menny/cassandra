@@ -296,6 +296,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reporter.ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
 
+	reporter.NotifyUser()
 	if err := reporter.ReportReview(result); err != nil {
 		return err
 	}

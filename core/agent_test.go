@@ -125,6 +125,7 @@ type spyReporter struct {
 	mcpStatuses          []mcpStatus
 	toolStatuses         []toolStatus
 	reviewHeaders        []reviewHeaderInfo
+	notifiedUser         int
 }
 
 type mcpStatus struct {
@@ -192,6 +193,7 @@ func (s *spyReporter) ReportStructuredReviewWritten(file string)         {}
 func (s *spyReporter) ReportMetricsWritten(file string)                  {}
 func (s *spyReporter) ReportWarning(msg string, err error)               {}
 func (s *spyReporter) ReportError(err error)                             {}
+func (s *spyReporter) NotifyUser()                                       { s.notifiedUser++ }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

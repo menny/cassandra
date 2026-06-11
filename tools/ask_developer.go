@@ -23,7 +23,7 @@ type askDeveloperArgs struct {
 	Reasoning string `json:"reasoning"`
 }
 
-func registerAskDeveloper(r *Registry) {
+func registerAskDeveloper(r *Registry, notifier UserNotifier) {
 	def := llm.ToolDef{
 		Name:        "ask_developer",
 		Description: "Ask the developer a question when you hit an architectural ambiguity or need context on business logic.",
@@ -44,6 +44,7 @@ func registerAskDeveloper(r *Registry) {
 	}
 
 	RegisterToolWithArgs(r, def, func(ctx context.Context, args askDeveloperArgs) (string, error) {
+		notifier.NotifyUser()
 		var response string
 
 		noteText := fmt.Sprintf("**Question:** %s\n\n**Reasoning:** %s", args.Question, args.Reasoning)

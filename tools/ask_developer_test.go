@@ -12,9 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type mockNotifier struct {
+	notified int
+}
+
+func (m *mockNotifier) NotifyUser() {
+	m.notified++
+}
+
 func TestAskDeveloper_Answered(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r)
+	notifier := mockNotifier{}
+	registerAskDeveloper(r, &notifier)
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -43,11 +52,12 @@ func TestAskDeveloper_Answered(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(res), &payload))
 	require.Equal(t, "answered", payload["status"])
 	require.Equal(t, "My Answer", payload["response"])
+	require.Equal(t, 1, notifier.notified)
 }
 
 func TestAskDeveloper_Skipped(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r)
+	registerAskDeveloper(r, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -80,7 +90,7 @@ func TestAskDeveloper_Skipped(t *testing.T) {
 
 func TestAskDeveloper_Timeout(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r)
+	registerAskDeveloper(r, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -114,7 +124,7 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 
 func TestAskDeveloper_Cancelled(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r)
+	registerAskDeveloper(r, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
