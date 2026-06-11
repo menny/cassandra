@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -54,21 +55,32 @@ type mcpServerState struct {
 }
 
 type toolCallState struct {
-	name   string
-	status string
-	err    error
+	name      string
+	arguments string
+	status    string // "queued", "started", "completed", "failed"
+	err       error
+}
+
+type reviewerState struct {
+	focusArea string
+	message   string
+}
+
+type iterationState struct {
+	iter          int
+	llmStatus     string
+	llmWaiting    bool
+	reviewerState *reviewerState
+	toolCalls     []*toolCallState
 }
 
 type tuiModel struct {
 	mcpServers map[string]*mcpServerState
 	mcpList    []string
-	toolCalls  []*toolCallState
-	llmIter    int
-	llmStatus  string
-	llmWaiting bool
-	spinner    spinner.Model
+	iterations []*iterationState
 	warnings   []string
 	quitting   bool
+	spinner    spinner.Model
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -94,44 +106,80 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case toolCallsMsg:
-		m.toolCalls = nil
-		for _, tc := range msg.tcs {
-			m.toolCalls = append(m.toolCalls, &toolCallState{
-				name:   tc.Name,
-				status: "queued",
-			})
+		if len(m.iterations) > 0 {
+			current := m.iterations[len(m.iterations)-1]
+			current.llmWaiting = false
+
+			var standardCalls []*toolCallState
+			var revState *reviewerState
+
+			for _, tc := range msg.tcs {
+				if tc.Name == "emit_reviewer_state" {
+					var args struct {
+						Message   string `json:"message"`
+						FocusArea string `json:"focus_area"`
+					}
+					_ = json.Unmarshal([]byte(tc.Arguments), &args)
+					revState = &reviewerState{
+						focusArea: args.FocusArea,
+						message:   args.Message,
+					}
+				} else {
+					standardCalls = append(standardCalls, &toolCallState{
+						name:      tc.Name,
+						arguments: tc.Arguments,
+						status:    "queued",
+					})
+				}
+			}
+
+			current.reviewerState = revState
+			current.toolCalls = standardCalls
+
+			if len(standardCalls) > 0 {
+				current.llmStatus = "Executing tool calls..."
+			} else {
+				current.llmStatus = "LLM turn completed."
+			}
 		}
 		return m, nil
 
 	case toolStatusMsg:
-		if msg.status == "started" {
-			for _, tc := range m.toolCalls {
-				if tc.name == msg.name && tc.status == "queued" {
-					tc.status = "started"
-					break
+		if len(m.iterations) > 0 {
+			current := m.iterations[len(m.iterations)-1]
+			if msg.status == "started" {
+				for _, tc := range current.toolCalls {
+					if tc.name == msg.name && tc.status == "queued" {
+						tc.status = "started"
+						break
+					}
 				}
-			}
-		} else if msg.status == "completed" || msg.status == "failed" {
-			for _, tc := range m.toolCalls {
-				if tc.name == msg.name && tc.status == "started" {
-					tc.status = msg.status
-					tc.err = msg.err
-					break
+			} else if msg.status == "completed" || msg.status == "failed" {
+				for _, tc := range current.toolCalls {
+					if tc.name == msg.name && tc.status == "started" {
+						tc.status = msg.status
+						tc.err = msg.err
+						break
+					}
 				}
 			}
 		}
 		return m, nil
 
 	case iterationMsg:
-		m.llmIter = msg.iter
-		m.llmStatus = "Waiting for LLM reply..."
-		m.llmWaiting = true
-		m.toolCalls = nil
+		m.iterations = append(m.iterations, &iterationState{
+			iter:       msg.iter,
+			llmStatus:  "Waiting for LLM reply...",
+			llmWaiting: true,
+		})
 		return m, nil
 
 	case llmStatusMsg:
-		m.llmStatus = msg.status
-		m.llmWaiting = msg.llmWaiting
+		if len(m.iterations) > 0 {
+			current := m.iterations[len(m.iterations)-1]
+			current.llmStatus = msg.status
+			current.llmWaiting = msg.llmWaiting
+		}
 		return m, nil
 
 	case warningMsg:
@@ -177,38 +225,60 @@ func (m tuiModel) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Section 2: LLM Loop Progress
-	if m.llmIter > 0 {
-		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99")).Render(fmt.Sprintf("🔍 [Iteration %d]", m.llmIter)) + "\n")
-		if m.llmWaiting {
-			sb.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), m.llmStatus))
-		} else {
-			sb.WriteString(fmt.Sprintf("  ✅ %s\n", m.llmStatus))
-		}
-		sb.WriteString("\n")
-	}
+	// Section 2: LLM Loop Progress (Iteration Blocks)
+	for _, it := range m.iterations {
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99")).Render(fmt.Sprintf("🔍 [Iteration %d]", it.iter)) + "\n")
 
-	// Section 3: Active Tool Calls
-	if len(m.toolCalls) > 0 {
-		sb.WriteString(lipgloss.NewStyle().Bold(true).Render("🛠️  Active Tool Calls:") + "\n")
-		for _, tc := range m.toolCalls {
-			var statusStr string
-			switch tc.status {
-			case "queued":
-				statusStr = fmt.Sprintf("  ⚪ %s: queued", tc.name)
-			case "started":
-				statusStr = fmt.Sprintf("  %s %s: running...", m.spinner.View(), tc.name)
-			case "completed":
-				statusStr = fmt.Sprintf("  ✅ %s: done", tc.name)
-			case "failed":
-				statusStr = fmt.Sprintf("  ⚠️  %s: failed: %v", tc.name, tc.err)
+		if it.llmWaiting {
+			sb.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), it.llmStatus))
+		} else if it.reviewerState == nil && len(it.toolCalls) == 0 {
+			sb.WriteString(fmt.Sprintf("  ✅ %s\n", it.llmStatus))
+		}
+
+		// Focus area / Reviewer state messages
+		if it.reviewerState != nil {
+			if len(it.reviewerState.focusArea) > 0 {
+				sb.WriteString(fmt.Sprintf("  [Reviewer state] focus area: %s\n", it.reviewerState.focusArea))
+			} else {
+				sb.WriteString("  [Reviewer state]\n")
 			}
-			sb.WriteString(statusStr + "\n")
+			if len(it.reviewerState.message) > 0 {
+				msgStyle := lipgloss.NewStyle().MarginLeft(4).MarginBottom(1)
+				sb.WriteString(msgStyle.Render(it.reviewerState.message) + "\n")
+			}
 		}
-		sb.WriteString("\n")
+
+		// Tool calls within this iteration block
+		if len(it.toolCalls) > 0 {
+			var heading string
+			if it.llmStatus == "Executing tool calls..." {
+				heading = "  🛠️  Executing Tool Calls:"
+			} else {
+				heading = "  🛠️  Tool Calls:"
+			}
+			sb.WriteString(heading + "\n")
+
+			for _, tc := range it.toolCalls {
+				var statusStr string
+				argsStr := compactToolCallArgsString(tc.arguments)
+
+				switch tc.status {
+				case "queued":
+					statusStr = fmt.Sprintf("    ⚪ %s(%s): queued", tc.name, argsStr)
+				case "started":
+					statusStr = fmt.Sprintf("    %s %s(%s): running...", m.spinner.View(), tc.name, argsStr)
+				case "completed":
+					statusStr = fmt.Sprintf("    ✅ %s(%s): done", tc.name, argsStr)
+				case "failed":
+					statusStr = fmt.Sprintf("    ⚠️  %s(%s): failed: %v", tc.name, argsStr, tc.err)
+				}
+				sb.WriteString(statusStr + "\n")
+			}
+			sb.WriteString("\n")
+		}
 	}
 
-	// Section 4: Warnings
+	// Section 3: Warnings
 	if len(m.warnings) > 0 {
 		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render("⚠️  Warnings:") + "\n")
 		for _, w := range m.warnings {
@@ -218,6 +288,18 @@ func (m tuiModel) View() string {
 	}
 
 	return sb.String()
+}
+
+func compactToolCallArgsString(args string) string {
+	if args == "" {
+		return "no args"
+	}
+	s := args
+	const maxLen = 80
+	if len(s) > maxLen {
+		s = s[:maxLen] + "…"
+	}
+	return s
 }
 
 // tuiReporter implements Reporter to drive Bubble Tea UI.
