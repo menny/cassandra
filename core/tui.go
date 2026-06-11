@@ -214,11 +214,11 @@ func (m tuiModel) View() string {
 			case "started":
 				statusStr = fmt.Sprintf("  %s %s: starting...", m.spinner.View(), name)
 			case "loaded":
-				statusStr = fmt.Sprintf("  ✅ %s: loaded", name)
+				statusStr = fmt.Sprintf("  %s: loaded", name)
 			case "failed to load":
-				statusStr = fmt.Sprintf("  ❌ %s: failed to load: %v", name, state.err)
+				statusStr = fmt.Sprintf("  %s: failed to load: %v ⚠️", name, state.err)
 			default:
-				statusStr = fmt.Sprintf("  ⚪ %s: %s", name, state.status)
+				statusStr = fmt.Sprintf("  %s: %s", name, state.status)
 			}
 			sb.WriteString(statusStr + "\n")
 		}
@@ -232,7 +232,7 @@ func (m tuiModel) View() string {
 		if it.llmWaiting {
 			sb.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), it.llmStatus))
 		} else if it.reviewerState == nil && len(it.toolCalls) == 0 {
-			sb.WriteString(fmt.Sprintf("  ✅ %s\n", it.llmStatus))
+			sb.WriteString(fmt.Sprintf("  %s\n", it.llmStatus))
 		}
 
 		// Focus area / Reviewer state messages
@@ -264,13 +264,13 @@ func (m tuiModel) View() string {
 
 				switch tc.status {
 				case "queued":
-					statusStr = fmt.Sprintf("    ⚪ %s(%s): queued", tc.name, argsStr)
+					statusStr = fmt.Sprintf("    %s(%s): queued", tc.name, argsStr)
 				case "started":
 					statusStr = fmt.Sprintf("    %s %s(%s): running...", m.spinner.View(), tc.name, argsStr)
 				case "completed":
-					statusStr = fmt.Sprintf("    ✅ %s(%s): done", tc.name, argsStr)
+					statusStr = fmt.Sprintf("    %s(%s): done", tc.name, argsStr)
 				case "failed":
-					statusStr = fmt.Sprintf("    ⚠️  %s(%s): failed: %v", tc.name, argsStr, tc.err)
+					statusStr = fmt.Sprintf("    %s(%s): failed: %v ⚠️", tc.name, argsStr, tc.err)
 				}
 				sb.WriteString(statusStr + "\n")
 			}
