@@ -1122,7 +1122,7 @@ func TestTuiReporter(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	reporter := NewTuiReporter(&stdout, &stderr)
+	reporter := NewTuiReporter(&stdout, &stderr, func() {})
 
 	cfg := &config.Config{
 		Provider: "google",

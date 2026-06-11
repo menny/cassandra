@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -310,10 +311,11 @@ type tuiReporter struct {
 	stdout  io.Writer
 	stderr  io.Writer
 	done    chan struct{}
+	cancel  context.CancelFunc
 }
 
 // NewTuiReporter constructs a TUI reporter.
-func NewTuiReporter(stdout, stderr io.Writer) Reporter {
+func NewTuiReporter(stdout, stderr io.Writer, cancel context.CancelFunc) Reporter {
 	m := &tuiModel{
 		mcpServers: make(map[string]*mcpServerState),
 	}
@@ -326,6 +328,7 @@ func NewTuiReporter(stdout, stderr io.Writer) Reporter {
 		stdout: stdout,
 		stderr: stderr,
 		done:   make(chan struct{}),
+		cancel: cancel,
 	}
 }
 
@@ -338,6 +341,9 @@ func (r *tuiReporter) startLocked() {
 			fmt.Fprintf(r.stderr, "TUI program error: %v\n", err)
 		}
 		close(r.done)
+		if r.cancel != nil {
+			r.cancel()
+		}
 	}()
 }
 
