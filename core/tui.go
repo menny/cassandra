@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -98,8 +97,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	autoScroll := false
 
-	debugLog("Update received msg: %T", msg)
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		headerHeight := 3
@@ -114,8 +111,6 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if height < 1 {
 			height = 1
 		}
-
-		debugLog("WindowSizeMsg received: msg.Width=%d, msg.Height=%d -> viewport width=%d, height=%d", msg.Width, msg.Height, width, height)
 
 		if !m.ready {
 			m.viewport = viewport.New(width, height)
@@ -238,22 +233,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.ready {
 		m.viewport.SetContent(m.renderContent())
 		if autoScroll {
-			debugLog("Scrolling to bottom")
 			m.viewport.GotoBottom()
 		}
-	} else {
-		debugLog("Model not ready, skipping content render")
 	}
 	return m, cmd
-}
-
-func debugLog(format string, args ...any) {
-	f, err := os.OpenFile("/Users/mennyevendanan/dev/menny/cassandra/tui_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "["+time.Now().Format("15:04:05.000")+"] "+format+"\n", args...)
 }
 
 func (m *tuiModel) View() string {
@@ -457,6 +440,14 @@ func (r *tuiReporter) Close() error {
 	if prog != nil {
 		prog.Send(quitMsg{})
 		<-r.done
+
+		// Print the final complete TUI progress content to stderr, bypassing the viewport
+		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render("🛸 Cassandra AI Reviewer") + "\n\n"
+		fmt.Fprint(r.stderr, title+r.model.renderContent()+"\n")
+
+		r.mu.Lock()
+		r.program = nil
+		r.mu.Unlock()
 	}
 	return nil
 }
