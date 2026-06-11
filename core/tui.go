@@ -64,8 +64,9 @@ type toolCallState struct {
 }
 
 type reviewerState struct {
-	focusArea string
-	message   string
+	focusArea       string
+	message         string
+	renderedMessage string
 }
 
 type iterationState struct {
@@ -123,8 +124,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					_ = json.Unmarshal([]byte(tc.Arguments), &args)
 					revState = &reviewerState{
-						focusArea: args.FocusArea,
-						message:   args.Message,
+						focusArea:       args.FocusArea,
+						message:         args.Message,
+						renderedMessage: renderMarkdown(args.Message, os.Stderr),
 					}
 				} else {
 					standardCalls = append(standardCalls, &toolCallState{
@@ -249,10 +251,9 @@ func (m tuiModel) View() string {
 			} else {
 				sb.WriteString(fmt.Sprintf("  🧠 %s\n", reviewerStateTitle))
 			}
-			if len(it.reviewerState.message) > 0 {
-				renderedMsg := renderMarkdown(it.reviewerState.message, os.Stderr)
+			if len(it.reviewerState.renderedMessage) > 0 {
 				msgStyle := lipgloss.NewStyle().MarginLeft(4).MarginBottom(1)
-				sb.WriteString(msgStyle.Render(renderedMsg) + "\n")
+				sb.WriteString(msgStyle.Render(it.reviewerState.renderedMessage) + "\n")
 			}
 		}
 
