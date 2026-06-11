@@ -239,10 +239,15 @@ func (m tuiModel) View() string {
 
 		// Focus area / Reviewer state messages
 		if it.reviewerState != nil {
+			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
+			reviewerStateTitle := stateStyle.Render("[Reviewer state]")
+
 			if len(it.reviewerState.focusArea) > 0 {
-				sb.WriteString(fmt.Sprintf("  🧠 [Reviewer state] focus area: %s\n", it.reviewerState.focusArea))
+				focusAreaTitle := focusStyle.Render(fmt.Sprintf("focus area: %s", it.reviewerState.focusArea))
+				sb.WriteString(fmt.Sprintf("  🧠 %s %s\n", reviewerStateTitle, focusAreaTitle))
 			} else {
-				sb.WriteString("  🧠 [Reviewer state]\n")
+				sb.WriteString(fmt.Sprintf("  🧠 %s\n", reviewerStateTitle))
 			}
 			if len(it.reviewerState.message) > 0 {
 				renderedMsg := renderMarkdown(it.reviewerState.message, os.Stderr)

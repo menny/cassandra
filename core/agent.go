@@ -191,10 +191,15 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			sb.WriteString("\n")
 		}
 
+		stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+		focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
+		reviewerStateTitle := stateStyle.Render("[Reviewer state]")
+
 		if len(args.FocusArea) > 0 {
-			fmt.Fprintf(&sb, "🧠 [Reviewer state] focus area: %s\n", args.FocusArea)
+			focusAreaTitle := focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+			fmt.Fprintf(&sb, "🧠 %s %s\n", reviewerStateTitle, focusAreaTitle)
 		} else {
-			sb.WriteString("🧠 [Reviewer state]\n")
+			fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
 		}
 		msg := args.Message
 		if r.renderMarkdown {
