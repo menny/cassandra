@@ -42,19 +42,48 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) RegisterServers(ctx context.Context, config Config, report func(name, status string, err error), register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
+func (m *Manager) RegisterServers(
+	ctx context.Context,
+	config Config,
+	report func(name string, status string, err error),
+	reportWarning func(msg string, err error),
+	register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error)),
+) error {
+	var mu sync.Mutex
 	var lastErr error
 	var successCount int
-	for name, server := range config.MCPServers {
-		report(name, "started", nil)
-		if err := m.registerServer(ctx, name, server, report, register); err != nil {
-			report(name, "failed to load", err)
-			lastErr = err
-		} else {
-			report(name, "loaded", nil)
-			successCount++
-		}
+	var wg sync.WaitGroup
+
+	safeReportWarning := func(msg string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		reportWarning(msg, err)
 	}
+
+	for name := range config.MCPServers {
+		report(name, "started", nil)
+	}
+
+	for name, server := range config.MCPServers {
+		wg.Add(1)
+		go func(name string, server ServerConfig) {
+			defer wg.Done()
+
+			if err := m.registerServer(ctx, name, server, safeReportWarning, register); err != nil {
+				mu.Lock()
+				report(name, "failed to load", err)
+				lastErr = err
+				mu.Unlock()
+			} else {
+				mu.Lock()
+				report(name, "loaded", nil)
+				successCount++
+				mu.Unlock()
+			}
+		}(name, server)
+	}
+
+	wg.Wait()
 
 	if len(config.MCPServers) > 0 && successCount == 0 {
 		return fmt.Errorf("none of the %d configured MCP servers could be registered (last error: %w)", len(config.MCPServers), lastErr)
@@ -78,7 +107,13 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return h.base.RoundTrip(out)
 }
 
-func (m *Manager) registerServer(ctx context.Context, serverName string, cfg ServerConfig, report func(name, status string, err error), register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
+func (m *Manager) registerServer(
+	ctx context.Context,
+	serverName string,
+	cfg ServerConfig,
+	reportWarning func(msg string, err error),
+	register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error)),
+) error {
 	var transport mcp.Transport
 
 	if cfg.Command != "" {
@@ -126,10 +161,17 @@ func (m *Manager) registerServer(ctx context.Context, serverName string, cfg Ser
 		return fmt.Errorf("invalid server config: neither command nor url specified")
 	}
 
-	return m.registerServerWithTransport(ctx, serverName, transport, cfg, report, register)
+	return m.registerServerWithTransport(ctx, serverName, transport, cfg, reportWarning, register)
 }
 
-func (m *Manager) registerServerWithTransport(ctx context.Context, serverName string, transport mcp.Transport, cfg ServerConfig, report func(name, status string, err error), register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error))) error {
+func (m *Manager) registerServerWithTransport(
+	ctx context.Context,
+	serverName string,
+	transport mcp.Transport,
+	cfg ServerConfig,
+	reportWarning func(msg string, err error),
+	register func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error)),
+) error {
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "cassandra-reviewer",
 		Version: "0.0.1",
@@ -162,11 +204,11 @@ func (m *Manager) registerServerWithTransport(ctx context.Context, serverName st
 				// Fallback to unmarshaling if it's not a map
 				data, err := json.Marshal(t.InputSchema)
 				if err != nil {
-					report(serverName, fmt.Sprintf("failed to marshal input schema for tool %q", t.Name), err)
+					reportWarning(fmt.Sprintf("[%s] failed to marshal input schema for tool %q", serverName, t.Name), err)
 					continue
 				}
 				if err := json.Unmarshal(data, &parameters); err != nil {
-					report(serverName, fmt.Sprintf("failed to unmarshal input schema for tool %q", t.Name), err)
+					reportWarning(fmt.Sprintf("[%s] failed to unmarshal input schema for tool %q", serverName, t.Name), err)
 					continue
 				}
 			}

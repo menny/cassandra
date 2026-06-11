@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 )
 
@@ -121,10 +123,17 @@ type spyReporter struct {
 	capsReached          []int
 	truncated            []int
 	mcpStatuses          []mcpStatus
+	toolStatuses         []toolStatus
 	reviewHeaders        []reviewHeaderInfo
 }
 
 type mcpStatus struct {
+	name   string
+	status string
+	err    error
+}
+
+type toolStatus struct {
 	name   string
 	status string
 	err    error
@@ -139,7 +148,11 @@ type reviewHeaderInfo struct {
 func (s *spyReporter) ReportIteration(iter int) {
 	s.iterations = append(s.iterations, iter)
 }
-func (s *spyReporter) ReportToolCall(tc llm.ToolCall) { s.toolCalls = append(s.toolCalls, tc) }
+
+func (s *spyReporter) ReportToolCalls(tcs []llm.ToolCall) {
+	s.toolCalls = append(s.toolCalls, tcs...)
+}
+
 func (s *spyReporter) ReportUsage(usage llm.Usage) {
 	s.usage = append(s.usage, usage)
 }
@@ -162,9 +175,23 @@ func (s *spyReporter) ReportMCPStatus(name string, status string, err error) {
 	s.mcpStatuses = append(s.mcpStatuses, mcpStatus{name: name, status: status, err: err})
 }
 
+func (s *spyReporter) ReportToolStatus(name string, status string, err error) {
+	s.toolStatuses = append(s.toolStatuses, toolStatus{name: name, status: status, err: err})
+}
+
 func (s *spyReporter) ReportReviewHeader(files int, guidelines string, model string) {
 	s.reviewHeaders = append(s.reviewHeaders, reviewHeaderInfo{files: files, guidelines: guidelines, model: model})
 }
+func (s *spyReporter) ReportConfig(cfg *config.Config, targetDir string) {}
+func (s *spyReporter) ReportFetchingDiff()                               {}
+func (s *spyReporter) ReportFetchingCommits()                            {}
+func (s *spyReporter) ReportNoChanges()                                  {}
+func (s *spyReporter) ReportReview(result string) error                  { return nil }
+func (s *spyReporter) ReportReviewWritten(file string)                   {}
+func (s *spyReporter) ReportStructuredReviewWritten(file string)         {}
+func (s *spyReporter) ReportMetricsWritten(file string)                  {}
+func (s *spyReporter) ReportWarning(msg string, err error)               {}
+func (s *spyReporter) ReportError(err error)                             {}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -197,6 +224,16 @@ func TestAgent_Reporter(t *testing.T) {
 		}
 		if len(spy.truncated) != 0 {
 			t.Errorf("expected 0 truncations reported, got %v", spy.truncated)
+		}
+		if len(spy.toolStatuses) != 2 {
+			t.Errorf("expected 2 tool status reports, got %d: %+v", len(spy.toolStatuses), spy.toolStatuses)
+		} else {
+			if spy.toolStatuses[0].name != "read_file" || spy.toolStatuses[0].status != "started" {
+				t.Errorf("expected first tool status to be read_file started, got %+v", spy.toolStatuses[0])
+			}
+			if spy.toolStatuses[1].name != "read_file" || spy.toolStatuses[1].status != "completed" {
+				t.Errorf("expected second tool status to be read_file completed, got %+v", spy.toolStatuses[1])
+			}
 		}
 	})
 
@@ -1078,5 +1115,45 @@ func TestRunReview_IterationBudgetNote(t *testing.T) {
 	// Since remaining was 0, it should be exactly the raw output "content of baz.go" with NO [SYSTEM NOTE].
 	if resultContent4 != "content of baz.go" {
 		t.Errorf("expected Turn 4 ToolResult to be exactly raw content, got %q", resultContent4)
+	}
+}
+
+func TestTuiReporter(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	reporter := NewTuiReporter(&stdout, &stderr, func() {})
+
+	cfg := &config.Config{
+		Provider: "google",
+		Model:    "gemini-1.5-flash",
+	}
+	reporter.ReportConfig(cfg, "/tmp")
+
+	reporter.ReportMCPStatus("mcp-server-test", "started", nil)
+	reporter.ReportMCPStatus("mcp-server-test", "loaded", nil)
+
+	reporter.ReportIteration(1)
+	reporter.ReportToolCalls([]llm.ToolCall{
+		{ID: "1", Name: "test_tool", Arguments: "{}"},
+	})
+	reporter.ReportToolStatus("test_tool", "started", nil)
+	reporter.ReportToolStatus("test_tool", "completed", nil)
+
+	reporter.ReportWarning("some warning", nil)
+
+	err := reporter.ReportReview("LGTM!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify that the final review content is written to stdout
+	if !strings.Contains(stdout.String(), "LGTM!") {
+		t.Errorf("expected stdout to contain final review content, got %q", stdout.String())
+	}
+
+	// Verify that the config table was printed to stderr
+	if !strings.Contains(stderr.String(), "gemini-1.5-flash") {
+		t.Errorf("expected stderr to contain config table, got %q", stderr.String())
 	}
 }

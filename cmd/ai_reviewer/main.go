@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -21,9 +24,15 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	stderr := log.New(os.Stderr, "", 0)
 	if err := run(ctx, os.Args[1:], stderr); err != nil {
+		if errors.Is(err, context.Canceled) {
+			stderr.Println("\nAborted.")
+			os.Exit(130)
+		}
 		stderr.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -60,6 +69,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 	fs.StringVar(&cfg.ProviderOptionsFile, "provider-options-file", "", "Path to a JSON file containing provider-specific options")
+	fs.StringVar(&cfg.Render, "render", "raw", "Output render format: 'raw' (default), 'markdown', or 'tui'")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -91,6 +101,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
+	v.SetDefault("render", "raw")
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Changed {
@@ -147,48 +158,29 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("missing required arguments:\n  - %s", strings.Join(missing, "\n  - "))
 	}
 
-	stderr.Println("=== Cassandra Configuration ===")
-	stderr.Printf("  Working Directory: %s\n", targetDir)
-	stderr.Printf("  Base: %s\n", cfg.Base)
-	stderr.Printf("  Head: %s\n", cfg.Head)
-	stderr.Printf("  LLM Provider: %s\n", cfg.Provider)
-	stderr.Printf("  LLM Model: %s\n", cfg.Model)
-	if cfg.ProviderURL != "" {
-		stderr.Printf("  LLM Provider URL: %s\n", cfg.ProviderURL)
+	if cfg.Render != "raw" && cfg.Render != "markdown" && cfg.Render != "tui" {
+		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', or 'tui')", cfg.Render)
 	}
-	stderr.Printf("  Max Tokens: %d\n", cfg.MaxTokens)
-	if len(cfg.ProviderOptions) > 0 {
-		stderr.Printf("  Provider Options: %+v\n", cfg.ProviderOptions)
-	}
-	if cfg.MainGuidelines != "" {
-		stderr.Printf("  Main Guidelines: %s\n", cfg.MainGuidelines)
-	}
-	if cfg.WishlistDir != "" {
-		stderr.Printf("  Wishlist Directory: %s\n", cfg.WishlistDir)
-	}
-	if len(cfg.SupplementalGuidelines) > 0 {
-		stderr.Printf("  Supplemental Guidelines: %s\n", strings.Join(cfg.SupplementalGuidelines, ", "))
-	}
-	if cfg.OutputJSONFile != "" {
-		stderr.Printf("  Structured Output JSON: %s\n", cfg.OutputJSONFile)
-		if cfg.ExtractionModel != "" {
-			stderr.Printf("  Extraction Model: %s\n", cfg.ExtractionModel)
-		}
-	}
-	if cfg.MetricsJSONFile != "" {
-		stderr.Printf("  Session Metrics JSON: %s\n", cfg.MetricsJSONFile)
-	}
-	if cfg.MetadataJSONFile != "" {
-		stderr.Printf("  Metadata JSON: %s\n", cfg.MetadataJSONFile)
-	}
-	if cfg.ApprovalEvaluationPromptFile != "" {
-		stderr.Printf("  Approval Evaluation Prompt File: %s\n", cfg.ApprovalEvaluationPromptFile)
-	}
-	stderr.Println("  API Key: [PROVIDED]")
-	stderr.Println("===============================")
 
-	reporter := core.NewDefaultReporter(stderr.Writer())
-	reviewer, err := core.NewReviewer(ctx, cfg, targetDir, reporter)
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
+
+	var reporter core.Reporter
+	if cfg.Render == "tui" {
+		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancelSession)
+	} else if cfg.Render == "markdown" {
+		reporter = core.NewMarkdownReporter(os.Stdout, stderr.Writer())
+	} else {
+		reporter = core.NewRawReporter(os.Stdout, stderr.Writer())
+	}
+
+	if closer, ok := reporter.(io.Closer); ok {
+		defer closer.Close()
+	}
+
+	reporter.ReportConfig(cfg, targetDir)
+
+	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
 	if err != nil {
 		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
@@ -199,15 +191,15 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			metrics := reviewer.Agent.GetMetrics()
 			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
 			if err != nil {
-				stderr.Printf("⚠️  Failed to marshal metrics: %v\n", err)
+				reporter.ReportWarning("Failed to marshal metrics", err)
 				return
 			}
 
 			if err := util.WriteFileWithDirs(cfg.MetricsJSONFile, jsonBytes); err != nil {
-				stderr.Printf("⚠️  Failed to write metrics to %s: %v\n", cfg.MetricsJSONFile, err)
+				reporter.ReportWarning(fmt.Sprintf("Failed to write metrics to %s", cfg.MetricsJSONFile), err)
 				return
 			}
-			stderr.Printf("📈 Metrics written to %s\n", cfg.MetricsJSONFile)
+			reporter.ReportMetricsWritten(cfg.MetricsJSONFile)
 		}()
 	}
 
@@ -237,7 +229,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			}
 		}
 	} else {
-		stderr.Println("🌿 Fetching git diff...")
+		reporter.ReportFetchingDiff()
 		var err error
 		diffOutput, changedFiles, err = tools.FetchGitDiff(ctx, targetDir, cfg.Base, cfg.Head, cfg.IgnoredLockFiles)
 		if err != nil {
@@ -252,17 +244,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 		commitsOutput = string(commitsBytes)
 	} else {
-		stderr.Println("🌿 Fetching git commits...")
+		reporter.ReportFetchingCommits()
 		commits, err := tools.FetchGitCommits(ctx, targetDir, cfg.Base, cfg.Head)
 		if err != nil {
-			stderr.Printf("⚠️  Failed to fetch git commits: %v\n", err)
+			reporter.ReportWarning("Failed to fetch git commits", err)
 		} else {
 			commitsOutput = commits
 		}
 	}
 
 	if len(changedFiles) == 0 {
-		stderr.Println("⚪ No changes found.")
+		reporter.ReportNoChanges()
 		return nil
 	}
 
@@ -280,31 +272,33 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	if cfg.MetadataJSONFile != "" {
 		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
 		if err != nil {
-			stderr.Printf("⚠️  Failed to read metadata JSON: %v. Proceeding without metadata.\n", err)
+			reporter.ReportWarning("Failed to read metadata JSON. Proceeding without metadata", err)
 		} else {
 			var metadata core.PRMetadata
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				stderr.Printf("⚠️  Failed to parse metadata JSON: %v. Proceeding without metadata.\n", err)
+				reporter.ReportWarning("Failed to parse metadata JSON. Proceeding without metadata", err)
 			} else {
 				requestText = formatMetadata(metadata) + "\n\n" + requestText
 			}
 		}
 	}
 
-	result, err := reviewer.Run(ctx, changedFiles, requestText)
+	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
 		return fmt.Errorf("review failed: %w", err)
 	}
 
-	reviewer.Agent.Reporter().ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
+	reporter.ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
 
-	fmt.Println(result)
+	if err := reporter.ReportReview(result); err != nil {
+		return err
+	}
 
 	if cfg.ReviewOutputFile != "" {
 		if err := util.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
 			return fmt.Errorf("failed to write review to %s: %w", cfg.ReviewOutputFile, err)
 		}
-		stderr.Printf("📝 Review written to %s\n", cfg.ReviewOutputFile)
+		reporter.ReportReviewWritten(cfg.ReviewOutputFile)
 	}
 
 	if cfg.OutputJSONFile != "" {
@@ -327,7 +321,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if err := util.WriteFileWithDirs(cfg.OutputJSONFile, jsonBytes); err != nil {
 			return fmt.Errorf("failed to write structured review to %s: %w", cfg.OutputJSONFile, err)
 		}
-		stderr.Printf("📦 Structured review written to %s\n", cfg.OutputJSONFile)
+		reporter.ReportStructuredReviewWritten(cfg.OutputJSONFile)
 	}
 
 	return nil
