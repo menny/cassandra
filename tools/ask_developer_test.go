@@ -95,11 +95,8 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
 
-	origTimeout := askDeveloperTimeout
-	askDeveloperTimeout = 50 * time.Millisecond
-	defer func() { askDeveloperTimeout = origTimeout }()
-
 	ctx := WithTestStreams(context.Background(), inR, &outBuf)
+	ctx = WithAskDeveloperTimeout(ctx, 50*time.Millisecond)
 
 	argsBytes, err := json.Marshal(askDeveloperArgs{
 		Question:  "Should we use PostgreSQL?",
@@ -117,7 +114,7 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 	var payload map[string]string
 	require.NoError(t, json.Unmarshal([]byte(res), &payload))
 	require.Equal(t, "timeout", payload["status"])
-	require.Contains(t, payload["message"], "The developer did not respond within 2 minutes.")
+	require.Contains(t, payload["message"], "The developer did not respond within")
 
 	inW.Close()
 }

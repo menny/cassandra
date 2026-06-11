@@ -107,6 +107,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		summary.LoadedFiles = append(summary.LoadedFiles, FileSource{Path: relPersonal, Type: "personal"})
 	}
 
+	// Zone 2: semi-static, config-driven
 	if allowAskDeveloper {
 		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. If the tool returns a timeout message, do your best to assume the answer and document your assumption.\n"
 	}

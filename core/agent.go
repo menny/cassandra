@@ -178,7 +178,9 @@ func NewDefaultReporter(w io.Writer) Reporter {
 }
 
 func (r *consoleReporter) NotifyUser() {
-	r.writer.WriteStdout("\a")
+	if r.renderMarkdown {
+		r.writer.WriteStderr("\a")
+	}
 }
 
 func (r *consoleReporter) writeStyledStderr(plain, styled string, color string, bold bool) {

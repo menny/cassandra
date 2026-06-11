@@ -629,5 +629,5 @@ func (r *tuiReporter) ReportError(err error) {
 }
 
 func (r *tuiReporter) NotifyUser() {
-	fmt.Fprint(r.stdout, "\a")
+	fmt.Fprint(r.stderr, "\a")
 }

@@ -29,6 +29,7 @@ go_test(
         "emit_reviewer_state_test.go",
         "local_tools_safety_test.go",
         "local_tools_test.go",
+        "main_test.go",
         "wishlist_test.go",
     ],
     embed = [":tools"],
@@ -36,5 +37,6 @@ go_test(
         "//llm",
         "//util",
         "@com_github_stretchr_testify//require",
+        "@org_uber_go_goleak//:goleak",
     ],
 )

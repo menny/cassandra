@@ -88,7 +88,12 @@ func registerAskDeveloper(r *Registry, notifier UserNotifier) {
 		form.WithInput(input)
 		form.WithOutput(output)
 
-		timeoutCtx, cancel := context.WithTimeout(ctx, askDeveloperTimeout)
+		timeout := askDeveloperTimeout
+		if t, ok := ctx.Value(timeoutKey{}).(time.Duration); ok {
+			timeout = t
+		}
+
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		// Defensive goroutine to unblock any blocking read (e.g. in accessible mode / tests)
@@ -110,7 +115,7 @@ func registerAskDeveloper(r *Registry, notifier UserNotifier) {
 		if timeoutCtx.Err() != nil {
 			res := map[string]string{
 				"status":  "timeout",
-				"message": "The developer did not respond within 2 minutes. Proceed with your best assumption and note it in the review.",
+				"message": fmt.Sprintf("The developer did not respond within %v. Proceed with your best assumption and note it in the review.", timeout),
 			}
 			jsonBytes, _ := json.Marshal(res)
 			return string(jsonBytes), nil
@@ -147,12 +152,18 @@ func registerAskDeveloper(r *Registry, notifier UserNotifier) {
 }
 
 type (
-	stdinKey  struct{}
-	stderrKey struct{}
+	stdinKey   struct{}
+	stderrKey  struct{}
+	timeoutKey struct{}
 )
 
 // WithTestStreams wraps a context to override standard input/output of ask_developer.
 func WithTestStreams(ctx context.Context, in io.Reader, out io.Writer) context.Context {
 	ctx = context.WithValue(ctx, stdinKey{}, in)
 	return context.WithValue(ctx, stderrKey{}, out)
+}
+
+// WithAskDeveloperTimeout wraps a context to override the ask_developer timeout.
+func WithAskDeveloperTimeout(ctx context.Context, d time.Duration) context.Context {
+	return context.WithValue(ctx, timeoutKey{}, d)
 }

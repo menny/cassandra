@@ -40,7 +40,11 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	}
 
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, cfg.AllowAskDeveloper, reporter)
+	var notifier tools.UserNotifier = reporter
+	if cfg.Render != "markdown" && cfg.Render != "tui" {
+		notifier = tools.NoOpUserNotifier{}
+	}
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, cfg.AllowAskDeveloper, notifier)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.
