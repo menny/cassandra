@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -84,6 +85,8 @@ type tuiModel struct {
 	warnings   []string
 	quitting   bool
 	spinner    spinner.Model
+	viewport   viewport.Model
+	ready      bool
 }
 
 func (m *tuiModel) Init() tea.Cmd {
@@ -91,11 +94,34 @@ func (m *tuiModel) Init() tea.Cmd {
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	autoScroll := false
+
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		headerHeight := 3
+		footerHeight := 2
+		verticalMargin := headerHeight + footerHeight
+
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width, msg.Height-verticalMargin)
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height - verticalMargin
+		}
+		autoScroll = true
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+		}
+		m.viewport, cmd = m.viewport.Update(msg)
+
 	case spinner.TickMsg:
-		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
 
 	case mcpStatusMsg:
 		state, exists := m.mcpServers[msg.name]
@@ -106,7 +132,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		state.status = msg.status
 		state.err = msg.err
-		return m, nil
+		autoScroll = true
 
 	case toolCallsMsg:
 		if len(m.iterations) > 0 {
@@ -146,7 +172,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				current.llmStatus = "LLM turn completed."
 			}
 		}
-		return m, nil
+		autoScroll = true
 
 	case toolStatusMsg:
 		if len(m.iterations) > 0 {
@@ -168,7 +194,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		autoScroll = true
 
 	case iterationMsg:
 		m.iterations = append(m.iterations, &iterationState{
@@ -176,7 +202,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			llmStatus:  "Waiting for LLM reply...",
 			llmWaiting: true,
 		})
-		return m, nil
+		autoScroll = true
 
 	case llmStatusMsg:
 		if len(m.iterations) > 0 {
@@ -184,18 +210,24 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			current.llmStatus = msg.status
 			current.llmWaiting = msg.llmWaiting
 		}
-		return m, nil
+		autoScroll = true
 
 	case warningMsg:
 		m.warnings = append(m.warnings, msg.warning)
-		return m, nil
+		autoScroll = true
 
 	case quitMsg:
 		m.quitting = true
 		return m, tea.Quit
 	}
 
-	return m, nil
+	if m.ready {
+		m.viewport.SetContent(m.renderContent())
+		if autoScroll {
+			m.viewport.GotoBottom()
+		}
+	}
+	return m, cmd
 }
 
 func (m *tuiModel) View() string {
@@ -203,10 +235,27 @@ func (m *tuiModel) View() string {
 		return ""
 	}
 
+	if !m.ready {
+		return "Initializing...\n"
+	}
+
 	var sb strings.Builder
 
-	// Header
+	// Static Header
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render("🛸 Cassandra AI Reviewer") + "\n\n")
+
+	// Viewport Content
+	sb.WriteString(m.viewport.View() + "\n")
+
+	// Static Footer
+	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	sb.WriteString("\n" + footerStyle.Render("↑/↓: scroll • PgUp/PgDn: scroll page • Ctrl+C: abort"))
+
+	return sb.String()
+}
+
+func (m *tuiModel) renderContent() string {
+	var sb strings.Builder
 
 	// Section 1: MCP Servers
 	if len(m.mcpList) > 0 {

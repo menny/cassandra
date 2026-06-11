@@ -19,6 +19,7 @@ go_library(
         "//tools",
         "//tools/mcp",
         "@com_github_charmbracelet_bubbles//spinner",
+        "@com_github_charmbracelet_bubbles//viewport",
         "@com_github_charmbracelet_bubbletea//:bubbletea",
         "@com_github_charmbracelet_glamour//:glamour",
         "@com_github_charmbracelet_lipgloss//:lipgloss",
