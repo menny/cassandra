@@ -248,12 +248,9 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 				focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
 			}
 		} else {
-			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("29"))
-			reviewerStateTitle = stateStyle.Render("[Reviewer state]")
-
+			reviewerStateTitle = "[Reviewer state]"
 			if len(args.FocusArea) > 0 {
-				focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+				focusAreaTitle = fmt.Sprintf("focus area: %s", args.FocusArea)
 			}
 		}
 
@@ -265,9 +262,15 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		msg := args.Message
 		if r.renderMarkdown {
 			msg = renderMarkdown(msg, os.Stderr)
+			messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
+			sb.WriteString(messageStyle.Render(msg))
+		} else {
+			lines := strings.Split(msg, "\n")
+			for _, line := range lines {
+				sb.WriteString("  " + line + "\n")
+			}
+			sb.WriteString("\n")
 		}
-		messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
-		sb.WriteString(messageStyle.Render(msg))
 	}
 
 	if sb.Len() > 0 {
