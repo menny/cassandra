@@ -749,12 +749,11 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 
 	for i, tc := range toolCalls {
 		a.toolCalls[tc.Name]++
+		a.reporter.ReportToolStatus(tc.Name, "started", nil)
 
 		wg.Add(1)
 		go func(i int, tc llm.ToolCall) {
 			defer wg.Done()
-
-			a.reporter.ReportToolStatus(tc.Name, "started", nil)
 
 			select {
 			case <-ctx.Done():

@@ -55,11 +55,11 @@ func (m *Manager) RegisterServers(
 	var wg sync.WaitGroup
 
 	for name, server := range config.MCPServers {
+		report(name, "started", nil)
 		wg.Add(1)
 		go func(name string, server ServerConfig) {
 			defer wg.Done()
 
-			report(name, "started", nil)
 			if err := m.registerServer(ctx, name, server, reportWarning, register); err != nil {
 				report(name, "failed to load", err)
 				mu.Lock()
