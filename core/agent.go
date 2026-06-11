@@ -152,24 +152,31 @@ func renderMarkdown(s string, writer io.Writer) string {
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
 type consoleReporter struct {
-	writer         consoleWriter
-	renderMarkdown bool
+	writer              consoleWriter
+	writeStyledStderrFn func(plain, styled string, color string, bold bool)
 }
 
 // NewRawReporter creates a reporter that prints raw text.
 func NewRawReporter(stdout, stderr io.Writer) Reporter {
 	return &consoleReporter{
-		writer:         &rawWriter{stdout: stdout, stderr: stderr},
-		renderMarkdown: false,
+		writer: &rawWriter{stdout: stdout, stderr: stderr},
 	}
+}
+
+// markdownReport renders markdown via glamour and inherits from consoleReporter.
+type markdownReport struct {
+	consoleReporter
 }
 
 // NewMarkdownReporter creates a reporter that renders markdown via glamour.
 func NewMarkdownReporter(stdout, stderr io.Writer) Reporter {
-	return &consoleReporter{
-		writer:         &rawWriter{stdout: stdout, stderr: stderr},
-		renderMarkdown: true,
+	mr := &markdownReport{
+		consoleReporter: consoleReporter{
+			writer: &rawWriter{stdout: stdout, stderr: stderr},
+		},
 	}
+	mr.writeStyledStderrFn = mr.writeStyledStderrMarkdown
+	return mr
 }
 
 // NewDefaultReporter creates a raw reporter for backward compatibility.
@@ -177,22 +184,26 @@ func NewDefaultReporter(w io.Writer) Reporter {
 	return NewRawReporter(w, w)
 }
 
-func (r *consoleReporter) NotifyUser() {
-	if r.renderMarkdown {
-		r.writer.WriteStderr("\a")
-	}
+func (r *consoleReporter) NotifyUser() {}
+
+func (r *markdownReport) NotifyUser() {
+	r.writer.WriteStderr("\a")
 }
 
 func (r *consoleReporter) writeStyledStderr(plain, styled string, color string, bold bool) {
-	if r.renderMarkdown {
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-		if bold {
-			style = style.Bold(true)
-		}
-		r.writer.WriteStderr(style.Render(styled) + "\n")
-	} else {
-		r.writer.WriteStderr(plain + "\n")
+	if r.writeStyledStderrFn != nil {
+		r.writeStyledStderrFn(plain, styled, color, bold)
+		return
 	}
+	r.writer.WriteStderr(plain + "\n")
+}
+
+func (r *markdownReport) writeStyledStderrMarkdown(plain, styled string, color string, bold bool) {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	if bold {
+		style = style.Bold(true)
+	}
+	r.writer.WriteStderr(style.Render(styled) + "\n")
 }
 
 func (r *consoleReporter) ReportIteration(iter int) {
@@ -219,17 +230,8 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	var sb strings.Builder
 
 	if len(standardCalls) > 0 {
-		if r.renderMarkdown {
-			toolNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("216")) // Warm Amber / Peach
-			toolArgsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")) // Muted Stone Grey
-			for _, tc := range standardCalls {
-				argsStr := compactToolCallArgs(tc)
-				fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", toolNameStyle.Render(tc.Name), toolArgsStyle.Render(argsStr))
-			}
-		} else {
-			for _, tc := range standardCalls {
-				fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
-			}
+		for _, tc := range standardCalls {
+			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
 		}
 	}
 
@@ -244,21 +246,10 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			sb.WriteString("\n")
 		}
 
-		var reviewerStateTitle string
+		reviewerStateTitle := "[Reviewer state]"
 		var focusAreaTitle string
-		if r.renderMarkdown {
-			stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167")) // Terracotta / Warm Clay
-			focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
-			reviewerStateTitle = stateStyle.Render("[Reviewer state]")
-
-			if len(args.FocusArea) > 0 {
-				focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
-			}
-		} else {
-			reviewerStateTitle = "[Reviewer state]"
-			if len(args.FocusArea) > 0 {
-				focusAreaTitle = fmt.Sprintf("focus area: %s", args.FocusArea)
-			}
+		if len(args.FocusArea) > 0 {
+			focusAreaTitle = fmt.Sprintf("focus area: %s", args.FocusArea)
 		}
 
 		if len(args.FocusArea) > 0 {
@@ -267,17 +258,70 @@ func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
 		}
 		msg := args.Message
-		if r.renderMarkdown {
-			msg = renderMarkdown(msg, os.Stderr)
-			messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
-			sb.WriteString(messageStyle.Render(msg))
+		lines := strings.Split(msg, "\n")
+		for _, line := range lines {
+			sb.WriteString("  " + line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if sb.Len() > 0 {
+		r.writer.WriteStderr(sb.String())
+	}
+}
+
+func (r *markdownReport) ReportToolCalls(tcs []llm.ToolCall) {
+	var standardCalls []llm.ToolCall
+	var emitReviewerStates []llm.ToolCall
+
+	for _, tc := range tcs {
+		if tc.Name == "emit_reviewer_state" {
+			emitReviewerStates = append(emitReviewerStates, tc)
 		} else {
-			lines := strings.Split(msg, "\n")
-			for _, line := range lines {
-				sb.WriteString("  " + line + "\n")
-			}
+			standardCalls = append(standardCalls, tc)
+		}
+	}
+
+	var sb strings.Builder
+
+	if len(standardCalls) > 0 {
+		toolNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("216")) // Warm Amber / Peach
+		toolArgsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")) // Muted Stone Grey
+		for _, tc := range standardCalls {
+			argsStr := compactToolCallArgs(tc)
+			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", toolNameStyle.Render(tc.Name), toolArgsStyle.Render(argsStr))
+		}
+	}
+
+	for _, tc := range emitReviewerStates {
+		var args struct {
+			Message   string `json:"message"`
+			FocusArea string `json:"focus_area"`
+		}
+		_ = json.Unmarshal([]byte(tc.Arguments), &args)
+
+		if sb.Len() > 0 {
 			sb.WriteString("\n")
 		}
+
+		stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167")) // Terracotta / Warm Clay
+		focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
+		reviewerStateTitle := stateStyle.Render("[Reviewer state]")
+
+		var focusAreaTitle string
+		if len(args.FocusArea) > 0 {
+			focusAreaTitle = focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+		}
+
+		if len(args.FocusArea) > 0 {
+			fmt.Fprintf(&sb, "🧠 %s %s\n", reviewerStateTitle, focusAreaTitle)
+		} else {
+			fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
+		}
+		msg := args.Message
+		msg = renderMarkdown(msg, os.Stderr)
+		messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
+		sb.WriteString(messageStyle.Render(msg))
 	}
 
 	if sb.Len() > 0 {
@@ -360,13 +404,13 @@ func (r *consoleReporter) ReportToolStatus(name string, status string, err error
 }
 
 func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model string) {
-	if r.renderMarkdown {
-		success := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("✅ Review generated successfully.")
-		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render(fmt.Sprintf("# 📝 Review for %d files using %s (%s)", files, guidelines, model))
-		r.writer.WriteStderr(fmt.Sprintf("\n%s\n\n\n%s\n\n", success, title))
-	} else {
-		r.writer.WriteStderr(fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model))
-	}
+	r.writer.WriteStderr(fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model))
+}
+
+func (r *markdownReport) ReportReviewHeader(files int, guidelines string, model string) {
+	success := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("✅ Review generated successfully.")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render(fmt.Sprintf("# 📝 Review for %d files using %s (%s)", files, guidelines, model))
+	r.writer.WriteStderr(fmt.Sprintf("\n%s\n\n\n%s\n\n", success, title))
 }
 
 func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
@@ -416,16 +460,48 @@ func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 func (r *consoleReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	t := buildConfigTable(cfg, targetDir)
 
-	var headerColor, keyColor, borderColor string
-	if r.renderMarkdown {
-		headerColor = "107" // Laurel Green
-		keyColor = "179"    // Warm Ochre
-		borderColor = "241" // Dusty/Stone Grey
-	} else {
-		headerColor = "205"
-		keyColor = "81"
-		borderColor = "240"
-	}
+	headerColor := "205"
+	keyColor := "81"
+	borderColor := "240"
+
+	headerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(headerColor)).
+		Align(lipgloss.Left).
+		Padding(0, 1)
+
+	keyStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(keyColor)).
+		Padding(0, 1)
+
+	valueStyle := lipgloss.NewStyle().
+		Padding(0, 1)
+
+	borderStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(borderColor))
+
+	t.Border(lipgloss.RoundedBorder()).
+		BorderStyle(borderStyle).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return headerStyle
+			}
+			if col == 0 {
+				return keyStyle
+			}
+			return valueStyle
+		})
+
+	r.writer.WriteStderr("\n" + t.Render() + "\n\n")
+}
+
+func (r *markdownReport) ReportConfig(cfg *config.Config, targetDir string) {
+	t := buildConfigTable(cfg, targetDir)
+
+	headerColor := "107" // Laurel Green
+	keyColor := "179"    // Warm Ochre
+	borderColor := "241" // Dusty/Stone Grey
 
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -487,11 +563,12 @@ func (r *consoleReporter) ReportNoChanges() {
 }
 
 func (r *consoleReporter) ReportReview(result string) error {
-	if r.renderMarkdown {
-		r.writer.WriteStdout(renderMarkdown(result, os.Stdout) + "\n")
-	} else {
-		r.writer.WriteStdout(result + "\n")
-	}
+	r.writer.WriteStdout(result + "\n")
+	return nil
+}
+
+func (r *markdownReport) ReportReview(result string) error {
+	r.writer.WriteStdout(renderMarkdown(result, os.Stdout) + "\n")
 	return nil
 }
 
