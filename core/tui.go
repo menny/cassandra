@@ -627,3 +627,7 @@ func (r *tuiReporter) ReportWarning(msg string, err error) {
 func (r *tuiReporter) ReportError(err error) {
 	fmt.Fprintf(r.stderr, "Error: %v\n", err)
 }
+
+func (r *tuiReporter) NotifyUser() {
+	fmt.Fprint(r.stderr, "\a")
+}

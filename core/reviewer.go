@@ -40,7 +40,11 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	}
 
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir)
+	var notifier tools.UserNotifier = reporter
+	if cfg.Render != "markdown" && cfg.Render != "tui" {
+		notifier = tools.NoOpUserNotifier{}
+	}
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, cfg.AllowAskDeveloper, notifier)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.
@@ -113,7 +117,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		approvalEvaluationPrompt = string(content)
 	}
 
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, cfg.AllowAskDeveloper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -140,7 +144,7 @@ func (r *Reviewer) Close() error {
 
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, r.Config.AllowAskDeveloper)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}

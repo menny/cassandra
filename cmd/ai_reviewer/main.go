@@ -60,6 +60,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.CommitsFile, "commits-file", "", "Path to a file containing the commit messages")
 	fs.StringVar(&cfg.MCPConfigFile, "mcp-config", "", "Path to an mcp.json file configuring custom tools for the reviewer")
 	fs.BoolVar(&cfg.AllowURLFetch, "allow-url-fetch", false, "Enable the mcp-server-fetch tool (requires uvx to be installed)")
+	fs.BoolVar(&cfg.AllowAskDeveloper, "allow-ask-developer", false, "Allow the AI reviewer to ask the developer questions")
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 	fs.StringVar(&cfg.WishlistDir, "wishlist-dir", "", "Path to a directory where AI-Reviewer feedback/wishlist will be stored")
@@ -101,6 +102,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
+	v.SetDefault("allow-ask-developer", false)
 	v.SetDefault("render", "raw")
 
 	fs.VisitAll(func(f *flag.Flag) {
@@ -160,6 +162,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if cfg.Render != "raw" && cfg.Render != "markdown" && cfg.Render != "tui" {
 		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', or 'tui')", cfg.Render)
+	}
+
+	if cfg.AllowAskDeveloper && cfg.Render != "markdown" && cfg.Render != "tui" {
+		return fmt.Errorf("--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
 	}
 
 	sessionCtx, cancelSession := context.WithCancel(ctx)
@@ -290,6 +296,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reporter.ReportReviewHeader(len(changedFiles), cfg.MainGuidelines, cfg.Model)
 
+	reporter.NotifyUser()
 	if err := reporter.ReportReview(result); err != nil {
 		return err
 	}
