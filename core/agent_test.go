@@ -194,6 +194,7 @@ func (s *spyReporter) ReportMetricsWritten(file string)                  {}
 func (s *spyReporter) ReportWarning(msg string, err error)               {}
 func (s *spyReporter) ReportError(err error)                             {}
 func (s *spyReporter) NotifyUser()                                       { s.notifiedUser++ }
+func (s *spyReporter) ReportPostReviewReply(message string)              {}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

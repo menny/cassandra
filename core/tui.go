@@ -394,6 +394,7 @@ type tuiReporter struct {
 	stderr  io.Writer
 	done    chan struct{}
 	cancel  context.CancelFunc
+	closed  bool
 }
 
 // NewTuiReporter constructs a TUI reporter.
@@ -433,6 +434,9 @@ func (r *tuiReporter) startLocked() {
 func (r *tuiReporter) send(msg tea.Msg) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
 	if r.program == nil {
 		r.startLocked()
 	}
@@ -441,6 +445,7 @@ func (r *tuiReporter) send(msg tea.Msg) {
 
 func (r *tuiReporter) Close() error {
 	r.mu.Lock()
+	r.closed = true
 	prog := r.program
 	r.mu.Unlock()
 
@@ -457,6 +462,10 @@ func (r *tuiReporter) Close() error {
 		r.mu.Unlock()
 	}
 	return nil
+}
+
+func (r *tuiReporter) ReportPostReviewReply(message string) {
+	fmt.Fprint(r.stdout, renderMarkdown(message, r.stdout)+"\n")
 }
 
 func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {

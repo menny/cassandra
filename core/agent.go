@@ -70,6 +70,7 @@ type Reporter interface {
 	ReportWarning(msg string, err error)
 	ReportError(err error)
 	NotifyUser()
+	ReportPostReviewReply(message string)
 }
 
 // AgentOption configures an Agent.
@@ -102,6 +103,7 @@ type Agent struct {
 	toolCalls  map[string]int
 	iterations int
 	stderr     io.Writer
+	history    []llm.Message
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -205,6 +207,11 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
 			}
 			a.reporter.ReportFinalReview()
+			messages = append(messages, llm.Message{
+				Role: llm.RoleAssistant,
+				Text: resp.Text,
+			})
+			a.history = messages
 			return resp.Text, nil
 		}
 
@@ -419,6 +426,121 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	if resp.Text == "" {
 		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
 	}
+	messages = append(messages, llm.Message{
+		Role: llm.RoleAssistant,
+		Text: resp.Text,
+	})
+	a.history = messages
+	return resp.Text, nil
+}
+
+// RunChatFlight executes the conversational ReAct loop for a single chat turn in the REPL.
+func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIterations, maxTokens int) (string, error) {
+	if maxIterations <= 0 {
+		maxIterations = AbsoluteMaxIter
+	}
+	if maxTokens <= 0 {
+		maxTokens = llm.DefaultMaxTokens
+	}
+
+	a.iterations = 0 // Reset iteration counter at the start of the flight
+	a.history = append(a.history, llm.Message{
+		Role: llm.RoleUser,
+		Text: userText,
+	})
+
+	tools := a.registry.ToTools()
+
+	defer func() {
+		a.reporter.ReportUsageSummary(a.totalUsage)
+	}()
+
+	for iter := range maxIterations {
+		a.iterations = iter + 1
+		a.reporter.ReportIteration(a.iterations)
+
+		resp, err := a.generateContentWithEmptyRetry(ctx, a.history, tools, maxTokens)
+		if err != nil {
+			return "", fmt.Errorf("llm call failed on chat iteration %d: %w", iter+1, err)
+		}
+
+		a.reporter.ReportUsage(resp.Usage)
+		a.totalUsage.Add(resp.Usage)
+
+		if resp.FinishReason == llm.FinishReasonLength {
+			a.reporter.ReportTruncated(maxTokens)
+		}
+
+		// No tool calls → LLM has produced its reply.
+		if len(resp.ToolCalls) == 0 {
+			if resp.Text == "" {
+				return "", fmt.Errorf("llm returned empty content on chat iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
+			}
+			a.reporter.ReportFinalReview()
+			a.history = append(a.history, llm.Message{
+				Role: llm.RoleAssistant,
+				Text: resp.Text,
+			})
+			return resp.Text, nil
+		}
+
+		// Append the assistant's tool-call turn to history.
+		a.history = append(a.history, llm.Message{
+			Role:             llm.RoleAssistant,
+			Text:             resp.Text,
+			ToolCalls:        resp.ToolCalls,
+			Reasoning:        resp.Reasoning,
+			ProviderMetadata: resp.ProviderMetadata,
+		})
+
+		toolMsg := a.executeToolCalls(ctx, resp.ToolCalls)
+		if len(toolMsg.ToolResults) > 0 {
+			remaining := maxIterations - (iter + 1)
+			if remaining > 0 {
+				lastIdx := len(toolMsg.ToolResults) - 1
+				var note string
+				if remaining == 1 {
+					note = fmt.Sprintf(budgetNoteLastTurn, iter+1, maxIterations)
+				} else {
+					note = fmt.Sprintf(budgetNoteGeneral, iter+1, maxIterations, remaining)
+				}
+				toolMsg.ToolResults[lastIdx].Content += note
+			}
+		}
+		a.history = append(a.history, toolMsg)
+	}
+
+	return a.handleChatCapReached(ctx, maxIterations, maxTokens)
+}
+
+func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxTokens int) (string, error) {
+	capMsg := fmt.Sprintf(
+		"[SYSTEM] The maximum number of tool-call iterations (%d) has been reached. "+
+			"You MUST now produce your final response unconditionally, based on everything "+
+			"you have gathered so far. Do not request any additional tools.",
+		maxIterations,
+	)
+	a.reporter.ReportCapReached(maxIterations)
+
+	a.history = append(a.history, llm.Message{Role: llm.RoleUser, Text: capMsg})
+	a.reporter.ReportFinalReview()
+
+	resp, err := a.generateContentWithEmptyRetry(ctx, a.history, nil, maxTokens)
+	if err != nil {
+		return "", fmt.Errorf("llm call failed on forced-final chat response: %w", err)
+	}
+
+	a.reporter.ReportUsage(resp.Usage)
+	a.totalUsage.Add(resp.Usage)
+
+	if resp.Text == "" {
+		return "", fmt.Errorf("llm returned empty content on forced-final chat response after %d attempts", emptyResponseMaxAttempts)
+	}
+
+	a.history = append(a.history, llm.Message{
+		Role: llm.RoleAssistant,
+		Text: resp.Text,
+	})
 	return resp.Text, nil
 }
 

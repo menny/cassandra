@@ -97,6 +97,7 @@ type ConsoleFormatter interface {
 	FormatConfig(cfg *config.Config, targetDir string) string
 	FormatReview(result string) string
 	StyleStderr(plain, styled string, color string, bold bool) string
+	FormatPostReviewReply(message string) string
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
@@ -124,6 +125,10 @@ func NewMarkdownReporter(stdout, stderr io.Writer) Reporter {
 // NewDefaultReporter creates a raw reporter for backward compatibility.
 func NewDefaultReporter(w io.Writer) Reporter {
 	return NewRawReporter(w, w)
+}
+
+func (r *consoleReporter) ReportPostReviewReply(message string) {
+	r.writer.WriteStdout(r.formatter.FormatPostReviewReply(message))
 }
 
 func (r *consoleReporter) NotifyUser() {
@@ -347,6 +352,10 @@ func (rawFormatter) StyleStderr(plain, styled string, color string, bold bool) s
 	return plain + "\n"
 }
 
+func (rawFormatter) FormatPostReviewReply(message string) string {
+	return message + "\n"
+}
+
 func (rawFormatter) FormatReviewHeader(files int, guidelines string, model string) string {
 	return fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model)
 }
@@ -439,6 +448,10 @@ func (markdownFormatter) StyleStderr(plain, styled string, color string, bold bo
 		style = style.Bold(true)
 	}
 	return style.Render(styled) + "\n"
+}
+
+func (markdownFormatter) FormatPostReviewReply(message string) string {
+	return renderMarkdown(message, os.Stdout) + "\n"
 }
 
 func (markdownFormatter) FormatReviewHeader(files int, guidelines string, model string) string {
