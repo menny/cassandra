@@ -186,9 +186,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		reporter = core.NewRawReporter(os.Stdout, stderr.Writer())
 	}
 
-	if closer, ok := reporter.(io.Closer); ok {
-		defer closer.Close()
+	var reporterClosed bool
+	closeReporter := func() {
+		if reporterClosed {
+			return
+		}
+		if closer, ok := reporter.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		reporterClosed = true
 	}
+	defer closeReporter()
 
 	reporter.ReportConfig(cfg, targetDir)
 
@@ -338,6 +346,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	if cfg.InteractivePostReview {
+		closeReporter()
 		if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
 			return fmt.Errorf("interactive post-review failed: %w", err)
 		}

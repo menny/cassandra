@@ -286,8 +286,15 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			return nil
 		}
 
+		width := 80
+		if f, ok := errWriter.(*os.File); ok {
+			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
+				width = w
+			}
+		}
+
 		if r.Config.Render == "tui" || r.Config.Render == "markdown" {
-			divider := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("\n" + strings.Repeat("─", 80) + "\n")
+			divider := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("\n" + strings.Repeat("─", width) + "\n")
 			fmt.Fprint(errWriter, divider)
 		}
 
@@ -298,9 +305,9 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 					Title("Ask Cassandra").
 					Value(&userInput).
 					Lines(8).
-					WithWidth(80),
+					WithWidth(width),
 			),
-		).WithWidth(80)
+		).WithWidth(width)
 
 		theme := huh.ThemeCharm()
 		theme.Focused.Title = theme.Focused.Title.Foreground(lipgloss.Color("216")).Bold(true)
