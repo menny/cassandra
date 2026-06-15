@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The reviewer accurately identified the compilation error caused by calling a non-existent method, satisfying the core rubric requirement. They provided a clear explanation and suggested a specific alternative, demonstrating a good understanding of the expected interface. The review also correctly identified minor cleanup tasks, such as removing placeholder comments.",
+      "findings": [
+        "Correctly identified that ExecuteAsync is not a valid method on the *db.DB type.",
+        "Suggested a valid alternative (Execute) instead of just pointing out the error.",
+        "Correctly identified that development comments/placeholders should be removed.",
+        "Maintained a professional and constructive tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 12794,
+        "output": 312,
+        "thinking": 612,
+        "cached": 0,
+        "total_input": 12794,
+        "total_output": 924
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The review failed to fulfill the primary requirement of the rubric: to fetch the provided URL and identify discrepancies. While the review noted the presence of a BUG comment, it did not perform the requested validation against the documentation to verify if the implementation approach (or the comment itself) was technically accurate or aligned with the specific API documentation provided. It treated the code as a simple placeholder without performing the deep-dive verification requested in the rubric.",
+      "findings": [
+        "Failed to perform the required URL check as per the rubric instructions.",
+        "Did not verify the API endpoint discrepancy mentioned in the code comment.",
+        "The feedback provided was generic and did not leverage the requested external research.",
+        "The review was overly lenient and did not act as an expert technical auditor."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3715,
+        "output": 152,
+        "thinking": 1329,
+        "cached": 0,
+        "total_input": 3715,
+        "total_output": 1481
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]
