@@ -1160,3 +1160,157 @@ func TestTuiReporter(t *testing.T) {
 		t.Errorf("expected stderr to contain config table, got %q", stderr.String())
 	}
 }
+
+func TestRunChatFlight_DirectResponse(t *testing.T) {
+	lm := &mockLLM{responses: []*llm.Response{
+		textResponse("repl reply"),
+	}}
+	agent := newTestAgent(lm, newMockDispatcher())
+	got, err := agent.RunChatFlight(context.Background(), "user prompt", 5, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "repl reply" {
+		t.Errorf("got %q, want %q", got, "repl reply")
+	}
+	if len(lm.calls) != 1 {
+		t.Errorf("expected 1 LLM call, got %d", len(lm.calls))
+	}
+	// Verify history has user prompt and reply
+	if len(agent.history) != 2 {
+		t.Fatalf("expected history length 2, got %d", len(agent.history))
+	}
+	if agent.history[0].Text != "user prompt" || agent.history[0].Role != llm.RoleUser {
+		t.Errorf("unexpected first history message: %+v", agent.history[0])
+	}
+	if agent.history[1].Text != "repl reply" || agent.history[1].Role != llm.RoleAssistant {
+		t.Errorf("unexpected second history message: %+v", agent.history[1])
+	}
+}
+
+func TestRunChatFlight_SingleToolCall(t *testing.T) {
+	const wantResult = "file contents"
+	lm := &mockLLM{responses: []*llm.Response{
+		toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
+		textResponse("repl answer"),
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return wantResult, nil }
+
+	agent := newTestAgent(lm, d)
+	got, err := agent.RunChatFlight(context.Background(), "do work", 5, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "repl answer" {
+		t.Errorf("got %q, want %q", got, "repl answer")
+	}
+	if len(lm.calls) != 2 {
+		t.Fatalf("expected 2 LLM calls, got %d", len(lm.calls))
+	}
+
+	// Verify history elements
+	if len(agent.history) != 4 {
+		t.Fatalf("expected history length 4, got %d", len(agent.history))
+	}
+	// Msg 0: user text
+	if agent.history[0].Text != "do work" {
+		t.Errorf("msg 0 text: got %q, want 'do work'", agent.history[0].Text)
+	}
+	// Msg 1: assistant tool call
+	if len(agent.history[1].ToolCalls) != 1 || agent.history[1].Role != llm.RoleAssistant {
+		t.Errorf("msg 1: expected 1 tool call, role assistant, got %+v", agent.history[1])
+	}
+	// Msg 2: tool result with budget note
+	if agent.history[2].Role != llm.RoleTool {
+		t.Errorf("msg 2 role: got %v, want RoleTool", agent.history[2].Role)
+	}
+	// Msg 3: assistant final response
+	if agent.history[3].Text != "repl answer" || agent.history[3].Role != llm.RoleAssistant {
+		t.Errorf("msg 3: expected repl answer, role assistant, got %+v", agent.history[3])
+	}
+}
+
+func TestRunChatFlight_CapReached(t *testing.T) {
+	alwaysTool := toolCallsResponse(makeToolCall("tc", "read_file", map[string]any{"file_path": "f.go"}))
+	lm := &mockLLM{responses: []*llm.Response{
+		alwaysTool,                  // iteration 1
+		alwaysTool,                  // iteration 2 (cap = 2)
+		textResponse("forced chat"), // forced-final call
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "x", nil }
+
+	agent := newTestAgent(lm, d)
+	got, err := agent.RunChatFlight(context.Background(), "chat query", 2, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "forced chat" {
+		t.Errorf("got %q, want %q", got, "forced chat")
+	}
+
+	// 2 loop iterations + 1 forced-final call = 3 total LLM calls
+	if len(lm.calls) != 3 {
+		t.Errorf("expected 3 LLM calls, got %d", len(lm.calls))
+	}
+
+	// The last message in history before the final assistant response must be the [SYSTEM] cap user turn.
+	if len(agent.history) < 2 {
+		t.Fatalf("expected at least 2 history elements, got %d", len(agent.history))
+	}
+	lastUser := agent.history[len(agent.history)-2]
+	if lastUser.Role != llm.RoleUser {
+		t.Errorf("cap message role: got %v, want RoleUser", lastUser.Role)
+	}
+	if !strings.Contains(lastUser.Text, "The maximum number of tool-call iterations") {
+		t.Errorf("expected cap message text, got %q", lastUser.Text)
+	}
+}
+
+func TestRunChatFlight_EmptyResponseRetry(t *testing.T) {
+	lm := &mockLLM{responses: []*llm.Response{
+		{Text: ""},                // empty — should trigger retry
+		textResponse("got reply"), // succeeds on second attempt
+	}}
+
+	spy := &spyReporter{}
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+
+	got, err := agent.RunChatFlight(context.Background(), "hello", 5, 1024)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "got reply" {
+		t.Errorf("got %q, want %q", got, "got reply")
+	}
+
+	// 2 underlying calls
+	if lm.callIdx != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", lm.callIdx)
+	}
+
+	// The retry should have been reported once
+	if len(spy.emptyResponseRetries) != 1 || spy.emptyResponseRetries[0] != 2 {
+		t.Errorf("expected emptyResponseRetries=[2], got %v", spy.emptyResponseRetries)
+	}
+}
+
+func TestRunChatFlight_EmptyResponseExhausted(t *testing.T) {
+	responses := make([]*llm.Response, emptyResponseMaxAttempts)
+	for i := range responses {
+		responses[i] = &llm.Response{Text: ""}
+	}
+	lm := &mockLLM{responses: responses}
+
+	agent := newTestAgent(lm, newMockDispatcher())
+
+	_, err := agent.RunChatFlight(context.Background(), "hello", 5, 1024)
+	if err == nil {
+		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+	}
+
+	if lm.callIdx < emptyResponseMaxAttempts {
+		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}

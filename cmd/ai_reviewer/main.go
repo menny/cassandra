@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	flag "github.com/spf13/pflag"
@@ -186,15 +187,13 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		reporter = core.NewRawReporter(os.Stdout, stderr.Writer())
 	}
 
-	var reporterClosed bool
+	var closeOnce sync.Once
 	closeReporter := func() {
-		if reporterClosed {
-			return
-		}
-		if closer, ok := reporter.(io.Closer); ok {
-			_ = closer.Close()
-		}
-		reporterClosed = true
+		closeOnce.Do(func() {
+			if closer, ok := reporter.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		})
 	}
 	defer closeReporter()
 

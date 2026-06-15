@@ -203,6 +203,7 @@ func (s *terminalSpinner) Start(message string) {
 	}
 	s.active = true
 	s.stopChan = make(chan struct{})
+	stopChan := s.stopChan
 	s.mu.Unlock()
 
 	go func() {
@@ -214,7 +215,7 @@ func (s *terminalSpinner) Start(message string) {
 		i := 0
 		for {
 			select {
-			case <-s.stopChan:
+			case <-stopChan:
 				return
 			case <-ticker.C:
 				s.mu.Lock()

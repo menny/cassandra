@@ -451,7 +451,7 @@ func (markdownFormatter) StyleStderr(plain, styled string, color string, bold bo
 }
 
 func (markdownFormatter) FormatPostReviewReply(message string) string {
-	return renderMarkdown(message, os.Stdout) + "\n"
+	return renderMarkdown(message, os.Stderr) + "\n"
 }
 
 func (markdownFormatter) FormatReviewHeader(files int, guidelines string, model string) string {
