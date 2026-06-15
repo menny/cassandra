@@ -183,6 +183,7 @@ type terminalSpinner struct {
 	frames   []string
 	delay    time.Duration
 	stopChan chan struct{}
+	doneChan chan struct{}
 	writer   io.Writer
 }
 
@@ -203,7 +204,9 @@ func (s *terminalSpinner) Start(message string) {
 	}
 	s.active = true
 	s.stopChan = make(chan struct{})
+	s.doneChan = make(chan struct{})
 	stopChan := s.stopChan
+	doneChan := s.doneChan
 	s.mu.Unlock()
 
 	go func() {
@@ -211,6 +214,7 @@ func (s *terminalSpinner) Start(message string) {
 		defer ticker.Stop()
 		defer func() {
 			fmt.Fprintf(s.writer, "\r\033[K")
+			close(doneChan)
 		}()
 		i := 0
 		for {
@@ -241,7 +245,10 @@ func (s *terminalSpinner) Stop() {
 	}
 	s.active = false
 	close(s.stopChan)
+	doneChan := s.doneChan
 	s.mu.Unlock()
+
+	<-doneChan
 }
 
 // RunInteractivePostReview starts a continuous chat loop with the developer.
