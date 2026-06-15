@@ -231,3 +231,23 @@ func (tc *ToolCall) UnmarshalArguments(dest any) error { ... }
 **Why:** Redundant comments are "noise" that hinders readability. High-value
 comments capture intent and design rationale that isn't immediately obvious
 from the code itself.
+
+## Idempotent Close/Teardown with sync.Once
+
+Use `sync.Once` to guarantee that cleanup or close logic (e.g., `Close() error`) is performed exactly once, even if called concurrently or from multiple paths.
+
+```go
+type myResource struct {
+	closeOnce sync.Once
+}
+
+func (r *myResource) Close() error {
+	r.closeOnce.Do(func() {
+		_ = r.teardown()
+	})
+	return nil
+}
+```
+
+**Why:** Avoids data races and duplicate teardown side-effects without error-prone manual boolean flags.
+
