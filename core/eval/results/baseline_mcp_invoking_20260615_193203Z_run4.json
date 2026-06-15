@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the compilation error caused by the non-existent 'ExecuteAsync' method, as specified in the rubric. It also provided clear instructions on removing redundant comments, demonstrating both technical accuracy and attention to code quality.",
+      "findings": [
+        "Identified invalid method call 'ExecuteAsync' on type '*db.DB'.",
+        "Verified the issue against the source file 'lib/db/db.go'.",
+        "Suggested cleanup of instructional comments before production merge."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8269,
+        "output": 263,
+        "thinking": 750,
+        "cached": 0,
+        "total_input": 8269,
+        "total_output": 1013
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "grep_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 4,
+      "rationale": "The reviewer correctly identified the issue with the 'hanging' comment and the technical debt it creates. It also accurately addressed the discrepancy mentioned in the code comment regarding the API version. However, the reviewer failed to perform the external action of verifying the documentation at the provided URL as explicitly required by the rubric; they instead relied on the information provided within the code comments themselves.",
+      "findings": [
+        "Identified the lack of actual implementation for the API call.",
+        "Correctly pointed out that 'hanging' comments increase technical debt.",
+        "Actionable and constructive feedback provided.",
+        "Failed to verify the URL via external tool usage as mandated by the rubric."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8592,
+        "output": 244,
+        "thinking": 1080,
+        "cached": 0,
+        "total_input": 8592,
+        "total_output": 1324
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]

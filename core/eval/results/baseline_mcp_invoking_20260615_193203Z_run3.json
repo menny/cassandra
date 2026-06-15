@@ -1,0 +1,68 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The reviewer correctly identified the non-existent method call, verified it against the provided context (the lib/db package), explained why it would fail, provided a valid solution, and included a helpful suggestion to remove the meta-comment.",
+      "findings": [
+        "Identified the invalid method call 'ExecuteAsync' correctly.",
+        "Verified the issue against the lib/db/db.go context.",
+        "Provided a constructive path for remediation.",
+        "Correctly suggested removing unnecessary internal developer comments."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 13497,
+        "output": 356,
+        "thinking": 1748,
+        "cached": 0,
+        "total_input": 13497,
+        "total_output": 2104
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The review correctly identifies the presence of a 'BUG:' comment as a maintenance issue, but it completely ignores the mandatory instruction in the rubric to fetch and verify the URL provided. By failing to perform the external tool call or verify the documentation against the code, the review misses the opportunity to provide concrete technical guidance regarding the API endpoint mismatch, instead focusing only on the code style/process.",
+      "findings": [
+        "Identified the problematic 'BUG:' comment as a code maintenance issue.",
+        "Failed to execute the mandated rubric instruction to visit the documentation URL.",
+        "Provided feedback that lacked technical verification of the API endpoint discrepancy.",
+        "Constructive tone in addressing the PR process."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8519,
+        "output": 225,
+        "thinking": 2139,
+        "cached": 0,
+        "total_input": 8519,
+        "total_output": 2364
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]
