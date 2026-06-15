@@ -44,18 +44,20 @@ type Config struct {
 	ProviderOptionsFile          string         `mapstructure:"provider-options-file"`
 	ProviderOptions              map[string]any `mapstructure:"-"`
 	Render                       string         `mapstructure:"render"`
+	InteractivePostReview        bool           `mapstructure:"interactive-post-review"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.
 func NewDefaultConfig() *Config {
 	return &Config{
-		Base:              "main",
-		Head:              "HEAD",
-		MainGuidelines:    "general",
-		MaxTokens:         llm.DefaultMaxTokens,
-		IgnoredLockFiles:  util.DefaultLockFiles,
-		Render:            "raw",
-		AllowAskDeveloper: false,
+		Base:                  "main",
+		Head:                  "HEAD",
+		MainGuidelines:        "general",
+		MaxTokens:             llm.DefaultMaxTokens,
+		IgnoredLockFiles:      util.DefaultLockFiles,
+		Render:                "raw",
+		AllowAskDeveloper:     false,
+		InteractivePostReview: false,
 	}
 }
 
@@ -71,6 +73,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
 	v.SetDefault("allow-ask-developer", false)
+	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
 
 	if configFile != "" {

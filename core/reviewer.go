@@ -3,16 +3,23 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/tools/mcp"
+	"golang.org/x/term"
 )
 
 // Reviewer encapsulates an initialized Agent and its environment.
@@ -151,4 +158,209 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 
 	maxIterations := CalculateMaxIterations(len(changedFiles))
 	return r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+}
+
+const postReviewSystemInstruction = "You have completed the automated code review. " +
+	"You are now in an interactive post-review chat phase. " +
+	"Transition purely into a conversational assistant. Answer the developer's questions, " +
+	"defend your findings, or admit mistakes based on the user's input. " +
+	"Do NOT attempt to rewrite the code review or output a new structured code review payload."
+
+type (
+	replStdinKey  struct{}
+	replStderrKey struct{}
+)
+
+// WithTestREPLStreams wraps a context to override standard input/stderr of the interactive REPL.
+func WithTestREPLStreams(ctx context.Context, in io.Reader, err io.Writer) context.Context {
+	ctx = context.WithValue(ctx, replStdinKey{}, in)
+	return context.WithValue(ctx, replStderrKey{}, err)
+}
+
+type terminalSpinner struct {
+	mu       sync.Mutex
+	active   bool
+	frames   []string
+	delay    time.Duration
+	stopChan chan struct{}
+	doneChan chan struct{}
+	writer   io.Writer
+}
+
+func newTerminalSpinner(w io.Writer) *terminalSpinner {
+	return &terminalSpinner{
+		frames:   []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		delay:    80 * time.Millisecond,
+		writer:   w,
+		stopChan: make(chan struct{}),
+	}
+}
+
+func (s *terminalSpinner) Start(message string) {
+	s.mu.Lock()
+	if s.active {
+		s.mu.Unlock()
+		return
+	}
+	s.active = true
+	s.stopChan = make(chan struct{})
+	s.doneChan = make(chan struct{})
+	stopChan := s.stopChan
+	doneChan := s.doneChan
+	s.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(s.delay)
+		defer ticker.Stop()
+		defer func() {
+			fmt.Fprintf(s.writer, "\r\033[K")
+			close(doneChan)
+		}()
+		i := 0
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ticker.C:
+				s.mu.Lock()
+				if !s.active {
+					s.mu.Unlock()
+					return
+				}
+				frame := s.frames[i%len(s.frames)]
+				styledFrame := lipgloss.NewStyle().Foreground(lipgloss.Color("178")).Render(frame)
+				fmt.Fprintf(s.writer, "\r%s %s", styledFrame, message)
+				s.mu.Unlock()
+				i++
+			}
+		}
+	}()
+}
+
+func (s *terminalSpinner) Stop() {
+	s.mu.Lock()
+	if !s.active {
+		s.mu.Unlock()
+		return
+	}
+	s.active = false
+	close(s.stopChan)
+	doneChan := s.doneChan
+	s.mu.Unlock()
+
+	<-doneChan
+}
+
+// RunInteractivePostReview starts a continuous chat loop with the developer.
+func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
+	replCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var input io.Reader = os.Stdin
+	if in, ok := ctx.Value(replStdinKey{}).(io.Reader); ok {
+		input = in
+	}
+	var errWriter io.Writer = os.Stderr
+	if err, ok := ctx.Value(replStderrKey{}).(io.Writer); ok {
+		errWriter = err
+	}
+
+	// Defensive goroutine to unblock any blocking read in accessible mode / tests
+	// by closing the input stream if it implements io.Closer and is not os.Stdin.
+	if replCtx.Done() != nil {
+		go func() {
+			<-replCtx.Done()
+			if closer, ok := input.(io.Closer); ok && input != os.Stdin {
+				_ = closer.Close()
+			}
+		}()
+	}
+
+	// Append system instruction indicating conversational post-review phase
+	r.Agent.history = append(r.Agent.history, llm.Message{
+		Role: llm.RoleSystem,
+		Text: postReviewSystemInstruction,
+	})
+
+	maxIterations := CalculateMaxIterations(1)
+
+	accessible := !term.IsTerminal(int(os.Stdin.Fd()))
+	if ctx.Value(replStdinKey{}) != nil {
+		accessible = true
+	}
+
+	for {
+		if replCtx.Err() != nil {
+			return nil
+		}
+
+		width := 80
+		if f, ok := errWriter.(*os.File); ok {
+			if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
+				width = w
+			}
+		}
+
+		if r.Config.Render == "tui" || r.Config.Render == "markdown" {
+			divider := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("\n" + strings.Repeat("─", width) + "\n")
+			fmt.Fprint(errWriter, divider)
+		}
+
+		var userInput string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewText().
+					Title("Ask Cassandra").
+					Value(&userInput).
+					Lines(8).
+					WithWidth(width),
+			),
+		).WithWidth(width)
+
+		theme := huh.ThemeCharm()
+		theme.Focused.Title = theme.Focused.Title.Foreground(lipgloss.Color("216")).Bold(true)
+		theme.Focused.Description = theme.Focused.Description.Foreground(lipgloss.Color("243"))
+		theme.Focused.Base = theme.Focused.Base.BorderLeft(true).BorderForeground(lipgloss.Color("107"))
+		theme.Focused.TextInput.Prompt = theme.Focused.TextInput.Prompt.Foreground(lipgloss.Color("178"))
+		theme.Focused.TextInput.Text = theme.Focused.TextInput.Text.Foreground(lipgloss.Color("223"))
+
+		form.WithTheme(theme).
+			WithInput(input).
+			WithOutput(errWriter).
+			WithAccessible(accessible)
+
+		err := form.RunWithContext(replCtx)
+		if err != nil {
+			if replCtx.Err() != nil || errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return fmt.Errorf("interactive prompt failed: %w", err)
+		}
+
+		cleanInput := strings.TrimSpace(userInput)
+		lowerInput := strings.ToLower(cleanInput)
+		if lowerInput == "exit" || lowerInput == "bye" || lowerInput == "/exit" {
+			return nil
+		}
+
+		if cleanInput == "" {
+			continue
+		}
+
+		var spinner *terminalSpinner
+		if r.Config.Render == "tui" {
+			spinner = newTerminalSpinner(errWriter)
+			spinner.Start("Cassandra is thinking...")
+		}
+
+		reply, err := r.Agent.RunChatFlight(replCtx, cleanInput, maxIterations, r.Config.MaxTokens)
+		if spinner != nil {
+			spinner.Stop()
+		}
+		if err != nil {
+			return fmt.Errorf("chat flight failed: %w", err)
+		}
+
+		r.Agent.reporter.ReportPostReviewReply(reply)
+	}
 }
