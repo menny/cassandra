@@ -476,7 +476,6 @@ func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIteration
 			if resp.Text == "" {
 				return "", fmt.Errorf("llm returned empty content on chat iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
 			}
-			a.reporter.ReportFinalReview()
 			a.history = append(a.history, llm.Message{
 				Role: llm.RoleAssistant,
 				Text: resp.Text,
@@ -523,7 +522,6 @@ func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxToke
 	a.reporter.ReportCapReached(maxIterations)
 
 	a.history = append(a.history, llm.Message{Role: llm.RoleUser, Text: capMsg})
-	a.reporter.ReportFinalReview()
 
 	resp, err := a.generateContentWithEmptyRetry(ctx, a.history, nil, maxTokens)
 	if err != nil {

@@ -465,7 +465,7 @@ func (r *tuiReporter) Close() error {
 }
 
 func (r *tuiReporter) ReportPostReviewReply(message string) {
-	fmt.Fprint(r.stdout, renderMarkdown(message, r.stdout)+"\n")
+	fmt.Fprint(r.stderr, renderMarkdown(message, r.stderr)+"\n")
 }
 
 func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {

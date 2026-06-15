@@ -128,7 +128,7 @@ func NewDefaultReporter(w io.Writer) Reporter {
 }
 
 func (r *consoleReporter) ReportPostReviewReply(message string) {
-	r.writer.WriteStdout(r.formatter.FormatPostReviewReply(message))
+	r.writer.WriteStderr(r.formatter.FormatPostReviewReply(message))
 }
 
 func (r *consoleReporter) NotifyUser() {
