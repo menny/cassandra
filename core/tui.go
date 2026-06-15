@@ -387,14 +387,15 @@ func compactToolCallArgsString(args string) string {
 
 // tuiReporter implements Reporter to drive Bubble Tea UI.
 type tuiReporter struct {
-	mu      sync.Mutex
-	program *tea.Program
-	model   *tuiModel
-	stdout  io.Writer
-	stderr  io.Writer
-	done    chan struct{}
-	cancel  context.CancelFunc
-	closed  bool
+	mu        sync.Mutex
+	program   *tea.Program
+	model     *tuiModel
+	stdout    io.Writer
+	stderr    io.Writer
+	done      chan struct{}
+	cancel    context.CancelFunc
+	closed    bool
+	closeOnce sync.Once
 }
 
 // NewTuiReporter constructs a TUI reporter.
@@ -444,23 +445,25 @@ func (r *tuiReporter) send(msg tea.Msg) {
 }
 
 func (r *tuiReporter) Close() error {
-	r.mu.Lock()
-	r.closed = true
-	prog := r.program
-	r.mu.Unlock()
-
-	if prog != nil {
-		prog.Send(quitMsg{})
-		<-r.done
-
-		// Print the final complete TUI progress content to stderr, bypassing the viewport
-		title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render("🛸 Cassandra AI Reviewer") + "\n\n"
-		fmt.Fprint(r.stderr, title+r.model.renderContent()+"\n")
-
+	r.closeOnce.Do(func() {
 		r.mu.Lock()
-		r.program = nil
+		r.closed = true
+		prog := r.program
 		r.mu.Unlock()
-	}
+
+		if prog != nil {
+			prog.Send(quitMsg{})
+			<-r.done
+
+			// Print the final complete TUI progress content to stderr, bypassing the viewport
+			title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("107")).Render("🛸 Cassandra AI Reviewer") + "\n\n"
+			fmt.Fprint(r.stderr, title+r.model.renderContent()+"\n")
+
+			r.mu.Lock()
+			r.program = nil
+			r.mu.Unlock()
+		}
+	})
 	return nil
 }
 
