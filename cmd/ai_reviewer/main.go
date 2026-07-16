@@ -209,8 +209,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if cfg.MetricsJSONFile != "" {
 		defer func() {
-			metrics := reviewer.Agent.GetMetrics()
-			jsonBytes, err := json.MarshalIndent(map[string]any{"metrics": metrics}, "", "  ")
+			metrics := reviewer.GetMetrics()
+			jsonBytes, err := json.MarshalIndent(metrics, "", "  ")
 			if err != nil {
 				reporter.ReportWarning("Failed to marshal metrics", err)
 				return

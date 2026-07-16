@@ -190,8 +190,20 @@ func TestReviewer_Run_PreReviewSummary(t *testing.T) {
 
 	lm := &mockLLM{
 		responses: []*llm.Response{
-			textResponse("This is the generated pre-review summary report."),
-			textResponse("This is the final AI code review."),
+			{
+				Text: "This is the generated pre-review summary report.",
+				Usage: llm.Usage{
+					PromptTokens: 100,
+					OutputTokens: 200,
+				},
+			},
+			{
+				Text: "This is the final AI code review.",
+				Usage: llm.Usage{
+					PromptTokens: 1000,
+					OutputTokens: 2000,
+				},
+			},
 		},
 	}
 	dispatcher := newMockDispatcher()
@@ -241,6 +253,20 @@ func TestReviewer_Run_PreReviewSummary(t *testing.T) {
 	require.Equal(t, 2, len(spy.stageFinalReviews))
 	require.Equal(t, "Pre-Review Summary", spy.stageFinalReviews[0])
 	require.Equal(t, "AI Code Review", spy.stageFinalReviews[1])
+
+	// Verify that metrics were collected for both phases independently
+	metrics := reviewer.GetMetrics()
+	require.Equal(t, 2, len(metrics.Phases))
+
+	require.Equal(t, "pre_review", metrics.Phases[0].Phase)
+	require.Equal(t, 100, metrics.Phases[0].Metrics.Tokens.Input)
+	require.Equal(t, 200, metrics.Phases[0].Metrics.Tokens.Output)
+	require.Equal(t, 1, metrics.Phases[0].Metrics.Iterations)
+
+	require.Equal(t, "review", metrics.Phases[1].Phase)
+	require.Equal(t, 1000, metrics.Phases[1].Metrics.Tokens.Input)
+	require.Equal(t, 2000, metrics.Phases[1].Metrics.Tokens.Output)
+	require.Equal(t, 1, metrics.Phases[1].Metrics.Iterations)
 }
 
 func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {

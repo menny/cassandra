@@ -33,6 +33,8 @@ type Reviewer struct {
 	ApprovalEvaluationPrompt string
 	mcpManager               *mcp.Manager
 	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
+	PreReviewMetrics         *SessionMetrics
+	CodeReviewMetrics        SessionMetrics
 }
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
@@ -182,11 +184,15 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		}()
 
 		r.Agent.Stage = "Pre-Review Summary"
+		r.Agent.ResetMetrics()
 		maxIterations := CalculateMaxIterations(len(changedFiles))
 		summary, err := r.Agent.RunReview(ctx, preReviewPrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
 		if err != nil {
 			return "", fmt.Errorf("pre-review summary phase failed: %w", err)
 		}
+
+		preMetrics := r.Agent.GetMetrics()
+		r.PreReviewMetrics = &preMetrics
 
 		if err := r.Agent.reporter.ReportStageReview("Pre-Review Summary", summary); err != nil {
 			r.Agent.reporter.ReportWarning("Failed to display pre-review summary", err)
@@ -207,8 +213,14 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	} else {
 		r.Agent.Stage = ""
 	}
+	r.Agent.ResetMetrics()
 	maxIterations := CalculateMaxIterations(len(changedFiles))
-	return r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+	reviewResult, err := r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+	if err != nil {
+		return "", err
+	}
+	r.CodeReviewMetrics = r.Agent.GetMetrics()
+	return reviewResult, nil
 }
 
 const postReviewSystemInstruction = "You have completed the automated code review. " +
@@ -413,5 +425,23 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		}
 
 		r.Agent.reporter.ReportPostReviewReply(reply)
+	}
+}
+
+// GetMetrics returns the captured metrics for both phases.
+func (r *Reviewer) GetMetrics() ReviewMetrics {
+	var phases []PhaseMetrics
+	if r.PreReviewMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "pre_review",
+			Metrics: *r.PreReviewMetrics,
+		})
+	}
+	phases = append(phases, PhaseMetrics{
+		Phase:   "review",
+		Metrics: r.CodeReviewMetrics,
+	})
+	return ReviewMetrics{
+		Phases: phases,
 	}
 }

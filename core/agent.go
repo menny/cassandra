@@ -158,6 +158,13 @@ func (a *Agent) GetMetrics() SessionMetrics {
 	}
 }
 
+// ResetMetrics clears all collected metrics (usage, tool calls, iterations) on the Agent.
+func (a *Agent) ResetMetrics() {
+	a.totalUsage = llm.Usage{}
+	a.toolCalls = make(map[string]int)
+	a.iterations = 0
+}
+
 // RunReview executes the ReAct loop.
 // stableSystem is the stable prompt prefix (Zones 1+2); dynamicSystem is the
 // per-PR dynamic suffix (Zone 3, e.g. AGENTS.md / REVIEWERS.md content).
