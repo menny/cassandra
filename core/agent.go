@@ -45,10 +45,12 @@ type ToolDispatcher interface {
 // Reporter defines how the Agent reports progress and diagnostics.
 type Reporter interface {
 	ReportIteration(iter int)
+	ReportStageIteration(stage string, iter int)
 	ReportToolCalls(tcs []llm.ToolCall)
 	ReportUsage(usage llm.Usage)
 	ReportUsageSummary(usage llm.Usage)
 	ReportFinalReview()
+	ReportStageFinalReview(stage string)
 	ReportExtraction()
 	ReportExtractionRetry(attempt int)
 	ReportEmptyResponseRetry(attempt int)
@@ -64,6 +66,7 @@ type Reporter interface {
 	ReportFetchingCommits()
 	ReportNoChanges()
 	ReportReview(result string) error
+	ReportStageReview(stage, result string) error
 	ReportReviewWritten(file string)
 	ReportStructuredReviewWritten(file string)
 	ReportMetricsWritten(file string)
@@ -104,6 +107,7 @@ type Agent struct {
 	iterations int
 	stderr     io.Writer
 	history    []llm.Message
+	Stage      string
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -187,7 +191,11 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 
 	for iter := range maxIterations {
 		a.iterations = iter + 1
-		a.reporter.ReportIteration(a.iterations)
+		if a.Stage != "" {
+			a.reporter.ReportStageIteration(a.Stage, a.iterations)
+		} else {
+			a.reporter.ReportIteration(a.iterations)
+		}
 
 		resp, err := a.generateContentWithEmptyRetry(ctx, messages, tools, maxTokens)
 		if err != nil {
@@ -206,7 +214,11 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 			if resp.Text == "" {
 				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
 			}
-			a.reporter.ReportFinalReview()
+			if a.Stage != "" {
+				a.reporter.ReportStageFinalReview(a.Stage)
+			} else {
+				a.reporter.ReportFinalReview()
+			}
 			messages = append(messages, llm.Message{
 				Role: llm.RoleAssistant,
 				Text: resp.Text,
@@ -411,7 +423,11 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	a.reporter.ReportCapReached(maxIterations)
 
 	messages = append(messages, llm.Message{Role: llm.RoleUser, Text: capMsg})
-	a.reporter.ReportFinalReview()
+	if a.Stage != "" {
+		a.reporter.ReportStageFinalReview(a.Stage)
+	} else {
+		a.reporter.ReportFinalReview()
+	}
 
 	// Pass nil tools so the provider cannot issue further tool calls even if
 	// it ignores the cap instruction in the prompt.

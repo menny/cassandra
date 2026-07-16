@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -174,4 +176,128 @@ func TestReviewer_RunInteractivePostReview_Cancellation(t *testing.T) {
 	err := reviewer.RunInteractivePostReview(ctx)
 	// Context cancellation should break the loop cleanly returning nil error
 	require.NoError(t, err)
+}
+
+func TestReviewer_Run_PreReviewSummary(t *testing.T) {
+	tmpDir := t.TempDir()
+	preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
+	preReviewPromptContent := "Pre-review prompt content here."
+	err := os.WriteFile(preReviewPromptFile, []byte(preReviewPromptContent), 0o644)
+	require.NoError(t, err)
+
+	cfg := config.NewDefaultConfig()
+	cfg.PreReviewPromptFile = preReviewPromptFile
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			textResponse("This is the generated pre-review summary report."),
+			textResponse("This is the final AI code review."),
+		},
+	}
+	dispatcher := newMockDispatcher()
+	spy := &spyReporter{}
+
+	reviewer := &Reviewer{
+		Agent:                    NewAgent(lm, dispatcher, WithReporter(spy)),
+		Config:                   cfg,
+		StablePrompt:             "stable system review instructions",
+		Guidelines:               "general rules",
+		RootDir:                  tmpDir,
+		ApprovalEvaluationPrompt: "approval rules",
+	}
+
+	result, err := reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+	require.NoError(t, err)
+	require.Equal(t, "This is the final AI code review.", result)
+
+	// Verify that the LLM was called exactly twice
+	require.Equal(t, 2, len(lm.calls))
+
+	// Verify the first call (Pre-Review Summary phase)
+	firstCallMsgs := lm.calls[0]
+	// The first message is the stable pre-review prompt (Zone 1)
+	require.Equal(t, llm.RoleSystem, firstCallMsgs[0].Role)
+	require.Equal(t, preReviewPromptContent, firstCallMsgs[0].Text)
+	// The user request was passed as input to the pre-review phase
+	require.Equal(t, llm.RoleUser, firstCallMsgs[len(firstCallMsgs)-1].Role)
+	require.Equal(t, "original request text", firstCallMsgs[len(firstCallMsgs)-1].Text)
+
+	// Verify the second call (AI Code Review phase)
+	secondCallMsgs := lm.calls[1]
+	// The user request in the second phase should contain the pre-review summary prepended
+	lastMsg := secondCallMsgs[len(secondCallMsgs)-1]
+	require.Equal(t, llm.RoleUser, lastMsg.Role)
+	require.Contains(t, lastMsg.Text, "### Pre-Review Summary")
+	require.Contains(t, lastMsg.Text, "This is the generated pre-review summary report.")
+	require.Contains(t, lastMsg.Text, "original request text")
+
+	// Verify that stage transitions were reported correctly
+	require.Equal(t, 2, len(spy.stageIterations))
+	require.Equal(t, "Pre-Review Summary", spy.stageIterations[0].stage)
+	require.Equal(t, 1, spy.stageIterations[0].iter)
+	require.Equal(t, "AI Code Review", spy.stageIterations[1].stage)
+	require.Equal(t, 1, spy.stageIterations[1].iter)
+
+	require.Equal(t, 2, len(spy.stageFinalReviews))
+	require.Equal(t, "Pre-Review Summary", spy.stageFinalReviews[0])
+	require.Equal(t, "AI Code Review", spy.stageFinalReviews[1])
+}
+
+func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
+	preReviewPromptContent := "Pre-review prompt."
+	err := os.WriteFile(preReviewPromptFile, []byte(preReviewPromptContent), 0o644)
+	require.NoError(t, err)
+
+	cfg := config.NewDefaultConfig()
+	cfg.PreReviewPromptFile = preReviewPromptFile
+	cfg.Model = "main-model"
+	cfg.PreReviewModel = "pre-review-model-override"
+	cfg.Provider = "google"
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			textResponse("This is the final AI code review."),
+		},
+	}
+	preLLM := &mockLLM{
+		responses: []*llm.Response{
+			textResponse("This is the generated pre-review summary report from overridden model."),
+		},
+	}
+
+	dispatcher := newMockDispatcher()
+	spy := &spyReporter{}
+
+	reviewer := &Reviewer{
+		Agent:                    NewAgent(lm, dispatcher, WithReporter(spy)),
+		Config:                   cfg,
+		StablePrompt:             "stable system review instructions",
+		Guidelines:               "general rules",
+		RootDir:                  tmpDir,
+		ApprovalEvaluationPrompt: "approval rules",
+	}
+
+	// Setup custom factory to return preLLM when pre-review-model-override is requested
+	var preReviewModelUsed bool
+	reviewer.llmFactory = func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error) {
+		if modelName == "pre-review-model-override" {
+			preReviewModelUsed = true
+			return preLLM, nil
+		}
+		return lm, nil
+	}
+
+	result, err := reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+	require.NoError(t, err)
+	require.Equal(t, "This is the final AI code review.", result)
+
+	// Verify that the custom model was indeed constructed and used
+	require.True(t, preReviewModelUsed, "The pre-review model override should have been constructed")
+	require.Equal(t, 1, len(preLLM.calls))
+	require.Equal(t, 1, len(lm.calls))
+
+	// Verify the request to the main model contains the pre-review summary from the override model
+	require.Contains(t, lm.calls[0][len(lm.calls[0])-1].Text, "This is the generated pre-review summary report from overridden model.")
 }

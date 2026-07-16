@@ -150,6 +150,15 @@ func (r *consoleReporter) ReportIteration(iter int) {
 	)
 }
 
+func (r *consoleReporter) ReportStageIteration(stage string, iter int) {
+	r.writeStyledStderr(
+		fmt.Sprintf("🔍 [%s - Iter %d] Reviewing...", stage, iter),
+		fmt.Sprintf("🔍 [%s - Iteration %d]", stage, iter),
+		"178",
+		true,
+	)
+}
+
 func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	formatted := r.formatter.FormatToolCalls(tcs)
 	if len(formatted) > 0 {
@@ -184,6 +193,16 @@ func (r *consoleReporter) ReportFinalReview() {
 	r.writeStyledStderr(
 		"📝 Formulating final review...",
 		"📝 Formulating final review...",
+		"178",
+		true,
+	)
+}
+
+func (r *consoleReporter) ReportStageFinalReview(stage string) {
+	msg := fmt.Sprintf("📝 Formulating final %s...", strings.ToLower(stage))
+	r.writeStyledStderr(
+		msg,
+		msg,
 		"178",
 		true,
 	)
@@ -275,6 +294,12 @@ func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 	if cfg.ApprovalEvaluationPromptFile != "" {
 		t.Row("Approval Evaluation Prompt File", cfg.ApprovalEvaluationPromptFile)
 	}
+	if cfg.PreReviewPromptFile != "" {
+		t.Row("Pre-Review Prompt File", cfg.PreReviewPromptFile)
+	}
+	if cfg.PreReviewModel != "" {
+		t.Row("Pre-Review Model", cfg.PreReviewModel)
+	}
 	t.Row("API Key", "[PROVIDED]")
 	return t
 }
@@ -312,6 +337,17 @@ func (r *consoleReporter) ReportNoChanges() {
 
 func (r *consoleReporter) ReportReview(result string) error {
 	r.writer.WriteStdout(r.formatter.FormatReview(result))
+	return nil
+}
+
+func (r *consoleReporter) ReportStageReview(stage, result string) error {
+	var output string
+	if _, ok := r.formatter.(markdownFormatter); ok {
+		output = "\n" + renderMarkdown(fmt.Sprintf("# 📋 %s\n\n%s", stage, result), os.Stderr) + "\n\n"
+	} else {
+		output = fmt.Sprintf("\n# 📋 %s\n\n%s\n", stage, result)
+	}
+	r.writer.WriteStderr(output)
 	return nil
 }
 

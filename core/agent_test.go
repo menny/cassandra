@@ -114,9 +114,11 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 // spyReporter records method calls for verification.
 type spyReporter struct {
 	iterations           []int
+	stageIterations      []stageIterationInfo
 	toolCalls            []llm.ToolCall
 	usage                []llm.Usage
 	finalReviews         int
+	stageFinalReviews    []string
 	extractions          int
 	extractionRetries    []int
 	emptyResponseRetries []int
@@ -126,6 +128,11 @@ type spyReporter struct {
 	toolStatuses         []toolStatus
 	reviewHeaders        []reviewHeaderInfo
 	notifiedUser         int
+}
+
+type stageIterationInfo struct {
+	stage string
+	iter  int
 }
 
 type mcpStatus struct {
@@ -150,6 +157,11 @@ func (s *spyReporter) ReportIteration(iter int) {
 	s.iterations = append(s.iterations, iter)
 }
 
+func (s *spyReporter) ReportStageIteration(stage string, iter int) {
+	s.stageIterations = append(s.stageIterations, stageIterationInfo{stage: stage, iter: iter})
+	s.ReportIteration(iter)
+}
+
 func (s *spyReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	s.toolCalls = append(s.toolCalls, tcs...)
 }
@@ -159,7 +171,11 @@ func (s *spyReporter) ReportUsage(usage llm.Usage) {
 }
 func (s *spyReporter) ReportUsageSummary(_ llm.Usage) {}
 func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
-func (s *spyReporter) ReportExtraction()              { s.extractions++ }
+func (s *spyReporter) ReportStageFinalReview(stage string) {
+	s.stageFinalReviews = append(s.stageFinalReviews, stage)
+	s.ReportFinalReview()
+}
+func (s *spyReporter) ReportExtraction() { s.extractions++ }
 func (s *spyReporter) ReportExtractionRetry(attempt int) {
 	s.extractionRetries = append(s.extractionRetries, attempt)
 }
@@ -188,6 +204,7 @@ func (s *spyReporter) ReportFetchingDiff()                               {}
 func (s *spyReporter) ReportFetchingCommits()                            {}
 func (s *spyReporter) ReportNoChanges()                                  {}
 func (s *spyReporter) ReportReview(result string) error                  { return nil }
+func (s *spyReporter) ReportStageReview(stage, result string) error      { return nil }
 func (s *spyReporter) ReportReviewWritten(file string)                   {}
 func (s *spyReporter) ReportStructuredReviewWritten(file string)         {}
 func (s *spyReporter) ReportMetricsWritten(file string)                  {}

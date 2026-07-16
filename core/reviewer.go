@@ -32,6 +32,7 @@ type Reviewer struct {
 	SupplementalGuidelines   []string
 	ApprovalEvaluationPrompt string
 	mcpManager               *mcp.Manager
+	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
 }
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
@@ -138,6 +139,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		SupplementalGuidelines:   supplementalGuidelines,
 		ApprovalEvaluationPrompt: approvalEvaluationPrompt,
 		mcpManager:               mcpManager,
+		llmFactory:               factory.New,
 	}, nil
 }
 
@@ -156,6 +158,55 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
 
+	if r.Config.PreReviewPromptFile != "" {
+		preReviewPromptBytes, err := os.ReadFile(r.Config.PreReviewPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read pre-review prompt file %q: %w", r.Config.PreReviewPromptFile, err)
+		}
+		preReviewPrompt := string(preReviewPromptBytes)
+
+		originalLLM := r.Agent.llm
+		if r.Config.PreReviewModel != "" && r.Config.PreReviewModel != r.Config.Model {
+			newFactory := r.llmFactory
+			if newFactory == nil {
+				newFactory = factory.New
+			}
+			preLLM, err := newFactory(ctx, r.Config.Provider, r.Config.PreReviewModel, r.Config.ProviderAPIKey, r.Config.ProviderURL, r.Config.ProviderOptions)
+			if err != nil {
+				return "", fmt.Errorf("failed to initialize pre-review LLM: %w", err)
+			}
+			r.Agent.llm = preLLM
+		}
+		defer func() {
+			r.Agent.llm = originalLLM
+		}()
+
+		r.Agent.Stage = "Pre-Review Summary"
+		maxIterations := CalculateMaxIterations(len(changedFiles))
+		summary, err := r.Agent.RunReview(ctx, preReviewPrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+		if err != nil {
+			return "", fmt.Errorf("pre-review summary phase failed: %w", err)
+		}
+
+		if err := r.Agent.reporter.ReportStageReview("Pre-Review Summary", summary); err != nil {
+			r.Agent.reporter.ReportWarning("Failed to display pre-review summary", err)
+		}
+
+		r.Agent.llm = originalLLM
+
+		var sb strings.Builder
+		sb.WriteString("### Pre-Review Summary\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n\n")
+		sb.WriteString(requestText)
+		requestText = sb.String()
+	}
+
+	if r.Config.PreReviewPromptFile != "" {
+		r.Agent.Stage = "AI Code Review"
+	} else {
+		r.Agent.Stage = ""
+	}
 	maxIterations := CalculateMaxIterations(len(changedFiles))
 	return r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
 }
