@@ -84,7 +84,13 @@ func TestReviewer_RunInteractivePostReview_ChatFlight(t *testing.T) {
 
 	lm := &mockLLM{
 		responses: []*llm.Response{
-			textResponse("Cassandra answer to query 1"),
+			{
+				Text: "Cassandra answer to query 1",
+				Usage: llm.Usage{
+					PromptTokens: 300,
+					OutputTokens: 400,
+				},
+			},
 		},
 	}
 	dispatcher := newMockDispatcher()
@@ -145,6 +151,16 @@ func TestReviewer_RunInteractivePostReview_ChatFlight(t *testing.T) {
 	}
 	require.True(t, historyUserSeen, "User query must be appended to history")
 	require.True(t, historyAssistantSeen, "Cassandra answer must be appended to history")
+
+	// Verify that discussion metrics were tracked correctly
+	metrics := reviewer.GetMetrics()
+	require.Equal(t, 2, len(metrics.Phases)) // code review + discussion
+
+	require.Equal(t, "review", metrics.Phases[0].Phase)
+	require.Equal(t, "review_discussion", metrics.Phases[1].Phase)
+	require.Equal(t, 300, metrics.Phases[1].Metrics.Tokens.Input)
+	require.Equal(t, 400, metrics.Phases[1].Metrics.Tokens.Output)
+	require.Equal(t, 1, metrics.Phases[1].Metrics.Iterations)
 }
 
 func TestReviewer_RunInteractivePostReview_Cancellation(t *testing.T) {

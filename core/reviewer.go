@@ -35,6 +35,7 @@ type Reviewer struct {
 	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
 	PreReviewMetrics         *SessionMetrics
 	CodeReviewMetrics        SessionMetrics
+	DiscussionMetrics        *SessionMetrics
 }
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
@@ -339,6 +340,9 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		}()
 	}
 
+	// Reset metrics to isolate the interactive post-review discussion phase
+	r.Agent.ResetMetrics()
+
 	// Append system instruction indicating conversational post-review phase
 	r.Agent.history = append(r.Agent.history, llm.Message{
 		Role: llm.RoleSystem,
@@ -425,6 +429,27 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		}
 
 		r.Agent.reporter.ReportPostReviewReply(reply)
+
+		turnMetrics := r.Agent.GetMetrics()
+		if r.DiscussionMetrics == nil {
+			r.DiscussionMetrics = &turnMetrics
+		} else {
+			r.DiscussionMetrics.Tokens.Input += turnMetrics.Tokens.Input
+			r.DiscussionMetrics.Tokens.Output += turnMetrics.Tokens.Output
+			r.DiscussionMetrics.Tokens.Thinking += turnMetrics.Tokens.Thinking
+			r.DiscussionMetrics.Tokens.Cached += turnMetrics.Tokens.Cached
+			r.DiscussionMetrics.Tokens.TotalInput += turnMetrics.Tokens.TotalInput
+			r.DiscussionMetrics.Tokens.TotalOutput += turnMetrics.Tokens.TotalOutput
+			r.DiscussionMetrics.Iterations += turnMetrics.Iterations
+			r.DiscussionMetrics.ToolCalls.Total += turnMetrics.ToolCalls.Total
+			if r.DiscussionMetrics.ToolCalls.ByTool == nil {
+				r.DiscussionMetrics.ToolCalls.ByTool = make(map[string]int)
+			}
+			for k, v := range turnMetrics.ToolCalls.ByTool {
+				r.DiscussionMetrics.ToolCalls.ByTool[k] += v
+			}
+		}
+		r.Agent.ResetMetrics()
 	}
 }
 
@@ -441,6 +466,12 @@ func (r *Reviewer) GetMetrics() ReviewMetrics {
 		Phase:   "review",
 		Metrics: r.CodeReviewMetrics,
 	})
+	if r.DiscussionMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "review_discussion",
+			Metrics: *r.DiscussionMetrics,
+		})
+	}
 	return ReviewMetrics{
 		Phases: phases,
 	}
