@@ -414,6 +414,8 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			continue
 		}
 
+		r.Agent.reporter.ReportPostReviewUserQuery(cleanInput)
+
 		var spinner *terminalSpinner
 		if r.Config.Render == "tui" {
 			spinner = newTerminalSpinner(errWriter)

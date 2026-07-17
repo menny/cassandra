@@ -98,6 +98,7 @@ type ConsoleFormatter interface {
 	FormatReview(result string) string
 	StyleStderr(plain, styled string, color string, bold bool) string
 	FormatPostReviewReply(message string) string
+	FormatPostReviewUserQuery(query string) string
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
@@ -129,6 +130,10 @@ func NewDefaultReporter(w io.Writer) Reporter {
 
 func (r *consoleReporter) ReportPostReviewReply(message string) {
 	r.writer.WriteStderr(r.formatter.FormatPostReviewReply(message))
+}
+
+func (r *consoleReporter) ReportPostReviewUserQuery(query string) {
+	r.writer.WriteStderr(r.formatter.FormatPostReviewUserQuery(query))
 }
 
 func (r *consoleReporter) NotifyUser() {
@@ -392,6 +397,10 @@ func (rawFormatter) FormatPostReviewReply(message string) string {
 	return message + "\n"
 }
 
+func (rawFormatter) FormatPostReviewUserQuery(query string) string {
+	return fmt.Sprintf("\n💬 User:\n%s\n", query)
+}
+
 func (rawFormatter) FormatReviewHeader(files int, guidelines string, model string) string {
 	return fmt.Sprintf("\n✅ Review generated successfully.\n\n\n# 📝 Review for %d files using %s (%s)\n\n", files, guidelines, model)
 }
@@ -488,6 +497,18 @@ func (markdownFormatter) StyleStderr(plain, styled string, color string, bold bo
 
 func (markdownFormatter) FormatPostReviewReply(message string) string {
 	return renderMarkdown(message, os.Stderr) + "\n"
+}
+
+func (markdownFormatter) FormatPostReviewUserQuery(query string) string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
+	content := strings.TrimSpace(renderMarkdown(query, os.Stderr))
+	boxContent := title + "\n" + content
+	styledBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("108")).
+		Padding(0, 1).
+		Render(boxContent)
+	return "\n" + styledBox + "\n"
 }
 
 func (markdownFormatter) FormatReviewHeader(files int, guidelines string, model string) string {

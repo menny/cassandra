@@ -212,6 +212,7 @@ func (s *spyReporter) ReportWarning(msg string, err error)               {}
 func (s *spyReporter) ReportError(err error)                             {}
 func (s *spyReporter) NotifyUser()                                       { s.notifiedUser++ }
 func (s *spyReporter) ReportPostReviewReply(message string)              {}
+func (s *spyReporter) ReportPostReviewUserQuery(query string)            {}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests

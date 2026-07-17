@@ -499,6 +499,18 @@ func (r *tuiReporter) ReportPostReviewReply(message string) {
 	fmt.Fprint(r.stderr, renderMarkdown(message, r.stderr)+"\n")
 }
 
+func (r *tuiReporter) ReportPostReviewUserQuery(query string) {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
+	content := strings.TrimSpace(renderMarkdown(query, r.stderr))
+	boxContent := title + "\n" + content
+	styledBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("108")).
+		Padding(0, 1).
+		Render(boxContent)
+	fmt.Fprint(r.stderr, "\n"+styledBox+"\n")
+}
+
 func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	t := buildConfigTable(cfg, targetDir)
 

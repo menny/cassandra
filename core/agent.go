@@ -74,6 +74,7 @@ type Reporter interface {
 	ReportError(err error)
 	NotifyUser()
 	ReportPostReviewReply(message string)
+	ReportPostReviewUserQuery(query string)
 }
 
 // AgentOption configures an Agent.
