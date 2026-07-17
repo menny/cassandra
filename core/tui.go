@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"golang.org/x/term"
 )
 
 // TUI message types
@@ -500,8 +502,26 @@ func (r *tuiReporter) ReportPostReviewReply(message string) {
 }
 
 func (r *tuiReporter) ReportPostReviewUserQuery(query string) {
+	width := 80
+	if f, ok := r.stderr.(*os.File); ok {
+		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
+			width = w
+		}
+	}
+	wrapWidth := width - 8
+	if wrapWidth < 40 {
+		wrapWidth = 40
+	}
+	rendered := renderMarkdownWithWidth(query, wrapWidth)
+
+	// Trim trailing spaces from each line to prevent box stretching
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
+	}
+	content := strings.TrimSpace(strings.Join(lines, "\n"))
+
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
-	content := strings.TrimSpace(renderMarkdown(query, r.stderr))
 	boxContent := title + "\n" + content
 	styledBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

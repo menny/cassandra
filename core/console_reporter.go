@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -83,10 +84,39 @@ func (mr *markdownRenderer) Render(s string, writer io.Writer) string {
 	return rendered
 }
 
+func (mr *markdownRenderer) RenderWithWidth(s string, width int) string {
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
+
+	if mr.r == nil || mr.width != width {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(width),
+		)
+		if err != nil {
+			return s
+		}
+		mr.r = r
+		mr.width = width
+	}
+
+	rendered, err := mr.r.Render(s)
+	if err != nil {
+		return s
+	}
+	rendered = strings.TrimPrefix(rendered, "\n")
+	rendered = strings.TrimSuffix(rendered, "\n")
+	return rendered
+}
+
 var mdRenderer = &markdownRenderer{}
 
 func renderMarkdown(s string, writer io.Writer) string {
 	return mdRenderer.Render(s, writer)
+}
+
+func renderMarkdownWithWidth(s string, width int) string {
+	return mdRenderer.RenderWithWidth(s, width)
 }
 
 // ConsoleFormatter abstracts formatting and styling for console output.
@@ -98,7 +128,7 @@ type ConsoleFormatter interface {
 	FormatReview(result string) string
 	StyleStderr(plain, styled string, color string, bold bool) string
 	FormatPostReviewReply(message string) string
-	FormatPostReviewUserQuery(query string) string
+	FormatPostReviewUserQuery(query string, width int) string
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
@@ -133,7 +163,11 @@ func (r *consoleReporter) ReportPostReviewReply(message string) {
 }
 
 func (r *consoleReporter) ReportPostReviewUserQuery(query string) {
-	r.writer.WriteStderr(r.formatter.FormatPostReviewUserQuery(query))
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && w > 0 {
+		width = w
+	}
+	r.writer.WriteStderr(r.formatter.FormatPostReviewUserQuery(query, width))
 }
 
 func (r *consoleReporter) NotifyUser() {
@@ -397,7 +431,7 @@ func (rawFormatter) FormatPostReviewReply(message string) string {
 	return message + "\n"
 }
 
-func (rawFormatter) FormatPostReviewUserQuery(query string) string {
+func (rawFormatter) FormatPostReviewUserQuery(query string, _ int) string {
 	return fmt.Sprintf("\n💬 User:\n%s\n", query)
 }
 
@@ -499,9 +533,21 @@ func (markdownFormatter) FormatPostReviewReply(message string) string {
 	return renderMarkdown(message, os.Stderr) + "\n"
 }
 
-func (markdownFormatter) FormatPostReviewUserQuery(query string) string {
+func (markdownFormatter) FormatPostReviewUserQuery(query string, width int) string {
+	wrapWidth := width - 8
+	if wrapWidth < 40 {
+		wrapWidth = 40
+	}
+	rendered := renderMarkdownWithWidth(query, wrapWidth)
+
+	// Trim trailing spaces from each line to prevent box stretching
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
+	}
+	content := strings.TrimSpace(strings.Join(lines, "\n"))
+
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
-	content := strings.TrimSpace(renderMarkdown(query, os.Stderr))
 	boxContent := title + "\n" + content
 	styledBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
