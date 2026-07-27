@@ -448,7 +448,7 @@ func NewTuiReporter(stdout, stderr io.Writer, cancel context.CancelFunc) Reporte
 
 // startLocked starts the Bubble Tea program loop.
 func (r *tuiReporter) startLocked() {
-	p := tea.NewProgram(r.model, tea.WithOutput(r.stderr))
+	p := tea.NewProgram(r.model, tea.WithOutput(r.stderr), tea.WithInput(strings.NewReader("")))
 	r.program = p
 	go func() {
 		if _, err := p.Run(); err != nil {

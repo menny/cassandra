@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -479,5 +480,107 @@ func TestReviewer_MetricsPreservedOnError(t *testing.T) {
 		require.Equal(t, "review_discussion", metrics.Phases[0].Phase)
 		require.Equal(t, 20, metrics.Phases[0].Metrics.Tokens.Input)
 		require.Equal(t, 30, metrics.Phases[0].Metrics.Tokens.Output)
+	})
+}
+
+func TestReviewer_RunInteractivePostReview_MultiTurnMetrics(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Render = "markdown"
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{
+				Text: "Reply 1",
+				Usage: llm.Usage{
+					PromptTokens: 100,
+					OutputTokens: 50,
+				},
+			},
+			{
+				Text: "Reply 2",
+				Usage: llm.Usage{
+					PromptTokens: 150,
+					OutputTokens: 80,
+				},
+			},
+		},
+	}
+
+	reviewer := &Reviewer{
+		Agent:                    NewAgent(lm, newMockDispatcher(), WithReporter(&spyReporter{})),
+		Config:                   cfg,
+		StablePrompt:             "stable system review instructions",
+		Guidelines:               "general rules",
+		RootDir:                  t.TempDir(),
+		ApprovalEvaluationPrompt: "approval rules",
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write([]byte("query 1\n"))
+		time.Sleep(20 * time.Millisecond)
+		_, _ = pw.Write([]byte("query 2\n"))
+		time.Sleep(20 * time.Millisecond)
+		_, _ = pw.Write([]byte("exit\n"))
+		_ = pw.Close()
+	}()
+
+	ctx := context.WithValue(context.Background(), replStdinKey{}, pr)
+	ctx = context.WithValue(ctx, replStderrKey{}, io.Discard)
+
+	err := reviewer.RunInteractivePostReview(ctx)
+	require.NoError(t, err)
+
+	metrics := reviewer.GetMetrics()
+	require.Equal(t, 1, len(metrics.Phases))
+	require.Equal(t, "review_discussion", metrics.Phases[0].Phase)
+	require.Equal(t, 250, metrics.Phases[0].Metrics.Tokens.Input)
+	require.Equal(t, 130, metrics.Phases[0].Metrics.Tokens.Output)
+	require.Equal(t, 2, metrics.Phases[0].Metrics.Iterations)
+}
+
+func TestReviewer_Run_PreReviewErrors(t *testing.T) {
+	t.Run("PromptFileReadError", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.PreReviewPromptFile = "/nonexistent/path/to/prompt.md"
+
+		reviewer := &Reviewer{
+			Agent:      NewAgent(&mockLLM{}, newMockDispatcher(), WithReporter(&spyReporter{})),
+			Config:     cfg,
+			Guidelines: "general guidelines",
+			RootDir:    t.TempDir(),
+		}
+
+		_, err := reviewer.Run(context.Background(), []string{"file1.go"}, "req")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to read pre-review prompt file")
+	})
+
+	t.Run("PreReviewLLMFactoryError", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		promptFile := filepath.Join(tmpDir, "prompt.md")
+		err := os.WriteFile(promptFile, []byte("Pre-review prompt"), 0o644)
+		require.NoError(t, err)
+
+		cfg := config.NewDefaultConfig()
+		cfg.PreReviewPromptFile = promptFile
+		cfg.PreReviewModel = "model-override"
+		cfg.Model = "model-main"
+
+		originalLM := &mockLLM{}
+		reviewer := &Reviewer{
+			Agent:      NewAgent(originalLM, newMockDispatcher(), WithReporter(&spyReporter{})),
+			Config:     cfg,
+			Guidelines: "general guidelines",
+			RootDir:    tmpDir,
+			llmFactory: func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error) {
+				return nil, errors.New("factory init failure")
+			},
+		}
+
+		_, err = reviewer.Run(context.Background(), []string{"file1.go"}, "req")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to initialize pre-review LLM")
+		require.Equal(t, originalLM, reviewer.Agent.llm)
 	})
 }

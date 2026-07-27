@@ -1144,6 +1144,9 @@ func TestTuiReporter(t *testing.T) {
 	var stderr bytes.Buffer
 
 	reporter := NewTuiReporter(&stdout, &stderr, func() {})
+	defer func() {
+		_ = reporter.(*tuiReporter).Close()
+	}()
 
 	cfg := &config.Config{
 		Provider: "google",
@@ -1330,5 +1333,40 @@ func TestRunChatFlight_EmptyResponseExhausted(t *testing.T) {
 
 	if lm.callIdx < emptyResponseMaxAttempts {
 		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}
+
+func TestAgent_StageReporting(t *testing.T) {
+	spy := &spyReporter{}
+	lm := &mockLLM{responses: []*llm.Response{
+		toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
+		textResponse("stage review done"),
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "ok", nil }
+
+	agent := NewAgent(lm, d, WithReporter(spy))
+	agent.Stage = "Pre-Review Summary"
+
+	got, err := agent.RunReview(context.Background(), "sys", "", "req", 5, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "stage review done" {
+		t.Errorf("got %q, want %q", got, "stage review done")
+	}
+
+	if len(spy.stageIterations) != 2 {
+		t.Fatalf("expected 2 stage iterations reported, got %d", len(spy.stageIterations))
+	}
+	if spy.stageIterations[0].stage != "Pre-Review Summary" || spy.stageIterations[0].iter != 1 {
+		t.Errorf("unexpected stage iteration 0: %+v", spy.stageIterations[0])
+	}
+	if spy.stageIterations[1].stage != "Pre-Review Summary" || spy.stageIterations[1].iter != 2 {
+		t.Errorf("unexpected stage iteration 1: %+v", spy.stageIterations[1])
+	}
+
+	if len(spy.stageFinalReviews) != 1 || spy.stageFinalReviews[0] != "Pre-Review Summary" {
+		t.Errorf("expected stage final review to be Pre-Review Summary, got %v", spy.stageFinalReviews)
 	}
 }
