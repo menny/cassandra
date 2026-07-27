@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,13 +155,12 @@ func TestReviewer_RunInteractivePostReview_ChatFlight(t *testing.T) {
 
 	// Verify that discussion metrics were tracked correctly
 	metrics := reviewer.GetMetrics()
-	require.Equal(t, 2, len(metrics.Phases)) // code review + discussion
+	require.Equal(t, 1, len(metrics.Phases))
 
-	require.Equal(t, "review", metrics.Phases[0].Phase)
-	require.Equal(t, "review_discussion", metrics.Phases[1].Phase)
-	require.Equal(t, 300, metrics.Phases[1].Metrics.Tokens.Input)
-	require.Equal(t, 400, metrics.Phases[1].Metrics.Tokens.Output)
-	require.Equal(t, 1, metrics.Phases[1].Metrics.Iterations)
+	require.Equal(t, "review_discussion", metrics.Phases[0].Phase)
+	require.Equal(t, 300, metrics.Phases[0].Metrics.Tokens.Input)
+	require.Equal(t, 400, metrics.Phases[0].Metrics.Tokens.Output)
+	require.Equal(t, 1, metrics.Phases[0].Metrics.Iterations)
 }
 
 func TestReviewer_RunInteractivePostReview_Cancellation(t *testing.T) {
@@ -342,4 +342,142 @@ func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {
 
 	// Verify the request to the main model contains the pre-review summary from the override model
 	require.Contains(t, lm.calls[0][len(lm.calls[0])-1].Text, "This is the generated pre-review summary report from overridden model.")
+}
+
+func TestReviewer_MetricsPreservedOnError(t *testing.T) {
+	t.Run("PreReviewError", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
+		err := os.WriteFile(preReviewPromptFile, []byte("Pre-review prompt."), 0o644)
+		require.NoError(t, err)
+
+		cfg := config.NewDefaultConfig()
+		cfg.PreReviewPromptFile = preReviewPromptFile
+		cfg.Provider = "google"
+
+		lm := &mockLLM{
+			responses: []*llm.Response{
+				{
+					Text: "Pre-review response requesting tool",
+					ToolCalls: []llm.ToolCall{
+						{
+							ID:        "call1",
+							Name:      "read_file",
+							Arguments: `{"file_path":"file1.go"}`,
+						},
+					},
+					Usage: llm.Usage{
+						PromptTokens: 50,
+						OutputTokens: 100,
+					},
+				},
+			},
+		}
+
+		reviewer := &Reviewer{
+			Agent:                    NewAgent(lm, newMockDispatcher(), WithReporter(&spyReporter{})),
+			Config:                   cfg,
+			StablePrompt:             "stable system review instructions",
+			Guidelines:               "general rules",
+			RootDir:                  tmpDir,
+			ApprovalEvaluationPrompt: "approval rules",
+		}
+
+		// Run with short context / constraints so it fails, or it will fail because the mock has no more responses
+		_, err = reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+		require.Error(t, err)
+
+		metrics := reviewer.GetMetrics()
+		require.Equal(t, 1, len(metrics.Phases))
+		require.Equal(t, "pre_review", metrics.Phases[0].Phase)
+		require.Equal(t, 50, metrics.Phases[0].Metrics.Tokens.Input)
+		require.Equal(t, 100, metrics.Phases[0].Metrics.Tokens.Output)
+	})
+
+	t.Run("CodeReviewError", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Provider = "google"
+
+		lm := &mockLLM{
+			responses: []*llm.Response{
+				{
+					Text: "Review response requesting tool",
+					ToolCalls: []llm.ToolCall{
+						{
+							ID:        "call1",
+							Name:      "read_file",
+							Arguments: `{"file_path":"file1.go"}`,
+						},
+					},
+					Usage: llm.Usage{
+						PromptTokens: 500,
+						OutputTokens: 1000,
+					},
+				},
+			},
+		}
+
+		reviewer := &Reviewer{
+			Agent:                    NewAgent(lm, newMockDispatcher(), WithReporter(&spyReporter{})),
+			Config:                   cfg,
+			StablePrompt:             "stable system review instructions",
+			Guidelines:               "general rules",
+			RootDir:                  t.TempDir(),
+			ApprovalEvaluationPrompt: "approval rules",
+		}
+
+		_, err := reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+		require.Error(t, err)
+
+		metrics := reviewer.GetMetrics()
+		require.Equal(t, 1, len(metrics.Phases))
+		require.Equal(t, "review", metrics.Phases[0].Phase)
+		require.Equal(t, 500, metrics.Phases[0].Metrics.Tokens.Input)
+		require.Equal(t, 1000, metrics.Phases[0].Metrics.Tokens.Output)
+	})
+
+	t.Run("ChatFlightError", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		cfg.Render = "markdown"
+
+		lm := &mockLLM{
+			responses: []*llm.Response{
+				{
+					Text: "Chat response requesting tool",
+					ToolCalls: []llm.ToolCall{
+						{
+							ID:        "call1",
+							Name:      "read_file",
+							Arguments: `{"file_path":"file1.go"}`,
+						},
+					},
+					Usage: llm.Usage{
+						PromptTokens: 20,
+						OutputTokens: 30,
+					},
+				},
+			},
+		}
+
+		reviewer := &Reviewer{
+			Agent:                    NewAgent(lm, newMockDispatcher(), WithReporter(&spyReporter{})),
+			Config:                   cfg,
+			StablePrompt:             "stable system review instructions",
+			Guidelines:               "general rules",
+			RootDir:                  t.TempDir(),
+			ApprovalEvaluationPrompt: "approval rules",
+		}
+
+		ctx := context.WithValue(context.Background(), replStdinKey{}, strings.NewReader("query 1\n"))
+		ctx = context.WithValue(ctx, replStderrKey{}, io.Discard)
+
+		err := reviewer.RunInteractivePostReview(ctx)
+		require.Error(t, err)
+
+		metrics := reviewer.GetMetrics()
+		require.Equal(t, 1, len(metrics.Phases))
+		require.Equal(t, "review_discussion", metrics.Phases[0].Phase)
+		require.Equal(t, 20, metrics.Phases[0].Metrics.Tokens.Input)
+		require.Equal(t, 30, metrics.Phases[0].Metrics.Tokens.Output)
+	})
 }

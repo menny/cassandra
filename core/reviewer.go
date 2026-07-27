@@ -34,7 +34,7 @@ type Reviewer struct {
 	mcpManager               *mcp.Manager
 	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
 	PreReviewMetrics         *SessionMetrics
-	CodeReviewMetrics        SessionMetrics
+	CodeReviewMetrics        *SessionMetrics
 	DiscussionMetrics        *SessionMetrics
 }
 
@@ -188,12 +188,11 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		r.Agent.ResetMetrics()
 		maxIterations := CalculateMaxIterations(len(changedFiles))
 		summary, err := r.Agent.RunReview(ctx, preReviewPrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+		preMetrics := r.Agent.GetMetrics()
+		r.PreReviewMetrics = &preMetrics
 		if err != nil {
 			return "", fmt.Errorf("pre-review summary phase failed: %w", err)
 		}
-
-		preMetrics := r.Agent.GetMetrics()
-		r.PreReviewMetrics = &preMetrics
 
 		if err := r.Agent.reporter.ReportStageReview("Pre-Review Summary", summary); err != nil {
 			r.Agent.reporter.ReportWarning("Failed to display pre-review summary", err)
@@ -217,10 +216,11 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	r.Agent.ResetMetrics()
 	maxIterations := CalculateMaxIterations(len(changedFiles))
 	reviewResult, err := r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+	reviewMetrics := r.Agent.GetMetrics()
+	r.CodeReviewMetrics = &reviewMetrics
 	if err != nil {
 		return "", err
 	}
-	r.CodeReviewMetrics = r.Agent.GetMetrics()
 	return reviewResult, nil
 }
 
@@ -426,11 +426,6 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		if spinner != nil {
 			spinner.Stop()
 		}
-		if err != nil {
-			return fmt.Errorf("chat flight failed: %w", err)
-		}
-
-		r.Agent.reporter.ReportPostReviewReply(reply)
 
 		turnMetrics := r.Agent.GetMetrics()
 		if r.DiscussionMetrics == nil {
@@ -452,6 +447,12 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			}
 		}
 		r.Agent.ResetMetrics()
+
+		if err != nil {
+			return fmt.Errorf("chat flight failed: %w", err)
+		}
+
+		r.Agent.reporter.ReportPostReviewReply(reply)
 	}
 }
 
@@ -464,10 +465,12 @@ func (r *Reviewer) GetMetrics() ReviewMetrics {
 			Metrics: *r.PreReviewMetrics,
 		})
 	}
-	phases = append(phases, PhaseMetrics{
-		Phase:   "review",
-		Metrics: r.CodeReviewMetrics,
-	})
+	if r.CodeReviewMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "review",
+			Metrics: *r.CodeReviewMetrics,
+		})
+	}
 	if r.DiscussionMetrics != nil {
 		phases = append(phases, PhaseMetrics{
 			Phase:   "review_discussion",
