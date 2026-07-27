@@ -114,9 +114,11 @@ func newTestAgent(model llm.Model, d ToolDispatcher) *Agent {
 // spyReporter records method calls for verification.
 type spyReporter struct {
 	iterations           []int
+	stageIterations      []stageIterationInfo
 	toolCalls            []llm.ToolCall
 	usage                []llm.Usage
 	finalReviews         int
+	stageFinalReviews    []string
 	extractions          int
 	extractionRetries    []int
 	emptyResponseRetries []int
@@ -126,6 +128,11 @@ type spyReporter struct {
 	toolStatuses         []toolStatus
 	reviewHeaders        []reviewHeaderInfo
 	notifiedUser         int
+}
+
+type stageIterationInfo struct {
+	stage string
+	iter  int
 }
 
 type mcpStatus struct {
@@ -150,6 +157,11 @@ func (s *spyReporter) ReportIteration(iter int) {
 	s.iterations = append(s.iterations, iter)
 }
 
+func (s *spyReporter) ReportStageIteration(stage string, iter int) {
+	s.stageIterations = append(s.stageIterations, stageIterationInfo{stage: stage, iter: iter})
+	s.ReportIteration(iter)
+}
+
 func (s *spyReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	s.toolCalls = append(s.toolCalls, tcs...)
 }
@@ -159,7 +171,11 @@ func (s *spyReporter) ReportUsage(usage llm.Usage) {
 }
 func (s *spyReporter) ReportUsageSummary(_ llm.Usage) {}
 func (s *spyReporter) ReportFinalReview()             { s.finalReviews++ }
-func (s *spyReporter) ReportExtraction()              { s.extractions++ }
+func (s *spyReporter) ReportStageFinalReview(stage string) {
+	s.stageFinalReviews = append(s.stageFinalReviews, stage)
+	s.ReportFinalReview()
+}
+func (s *spyReporter) ReportExtraction() { s.extractions++ }
 func (s *spyReporter) ReportExtractionRetry(attempt int) {
 	s.extractionRetries = append(s.extractionRetries, attempt)
 }
@@ -188,6 +204,7 @@ func (s *spyReporter) ReportFetchingDiff()                               {}
 func (s *spyReporter) ReportFetchingCommits()                            {}
 func (s *spyReporter) ReportNoChanges()                                  {}
 func (s *spyReporter) ReportReview(result string) error                  { return nil }
+func (s *spyReporter) ReportStageReview(stage, result string) error      { return nil }
 func (s *spyReporter) ReportReviewWritten(file string)                   {}
 func (s *spyReporter) ReportStructuredReviewWritten(file string)         {}
 func (s *spyReporter) ReportMetricsWritten(file string)                  {}
@@ -195,6 +212,7 @@ func (s *spyReporter) ReportWarning(msg string, err error)               {}
 func (s *spyReporter) ReportError(err error)                             {}
 func (s *spyReporter) NotifyUser()                                       { s.notifiedUser++ }
 func (s *spyReporter) ReportPostReviewReply(message string)              {}
+func (s *spyReporter) ReportPostReviewUserQuery(query string)            {}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -1126,6 +1144,9 @@ func TestTuiReporter(t *testing.T) {
 	var stderr bytes.Buffer
 
 	reporter := NewTuiReporter(&stdout, &stderr, func() {})
+	defer func() {
+		_ = reporter.(*tuiReporter).Close()
+	}()
 
 	cfg := &config.Config{
 		Provider: "google",
@@ -1312,5 +1333,40 @@ func TestRunChatFlight_EmptyResponseExhausted(t *testing.T) {
 
 	if lm.callIdx < emptyResponseMaxAttempts {
 		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}
+
+func TestAgent_StageReporting(t *testing.T) {
+	spy := &spyReporter{}
+	lm := &mockLLM{responses: []*llm.Response{
+		toolCallsResponse(makeToolCall("tc1", "read_file", map[string]any{"file_path": "foo.go"})),
+		textResponse("stage review done"),
+	}}
+	d := newMockDispatcher()
+	d.handlers["read_file"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return "ok", nil }
+
+	agent := NewAgent(lm, d, WithReporter(spy))
+	agent.Stage = "Pre-Review Summary"
+
+	got, err := agent.RunReview(context.Background(), "sys", "", "req", 5, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "stage review done" {
+		t.Errorf("got %q, want %q", got, "stage review done")
+	}
+
+	if len(spy.stageIterations) != 2 {
+		t.Fatalf("expected 2 stage iterations reported, got %d", len(spy.stageIterations))
+	}
+	if spy.stageIterations[0].stage != "Pre-Review Summary" || spy.stageIterations[0].iter != 1 {
+		t.Errorf("unexpected stage iteration 0: %+v", spy.stageIterations[0])
+	}
+	if spy.stageIterations[1].stage != "Pre-Review Summary" || spy.stageIterations[1].iter != 2 {
+		t.Errorf("unexpected stage iteration 1: %+v", spy.stageIterations[1])
+	}
+
+	if len(spy.stageFinalReviews) != 1 || spy.stageFinalReviews[0] != "Pre-Review Summary" {
+		t.Errorf("expected stage final review to be Pre-Review Summary, got %v", spy.stageFinalReviews)
 	}
 }

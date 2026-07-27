@@ -64,6 +64,8 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` |
 | `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | |
 | `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | |
+| `--pre-review-prompt` | Path to a file containing the system prompt for the pre-review summary agent | |
+| `--pre-review-model` | Optional model override for the pre-review summary agent | |
 | `--review-output-file` | Path to a file where the final review will be written | |
 | `--output-json` | Path to a file where the structured JSON review will be written | |
 | `--metrics-json` | Path to a file where the session metrics (tokens, tool calls, iterations) will be written | |
@@ -89,6 +91,8 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `supplemental_guidelines` | Additive guidelines to supplement the main guidelines. Multiline string where each line is a path or library prompt name. | | No |
 | `approval_evaluation_prompt_file` | Path to a file containing custom approval evaluation guidelines | | No |
+| `pre_review_prompt` | Path to a file containing the system prompt for the pre-review summary agent | | No |
+| `pre_review_model` | Optional model override for the pre-review summary agent | | No |
 | `metadata_tag` | Tag to identify Cassandra comments (inner text only, will be wrapped in `<!-- ... -->`) | `cassandra-ai-review-${{ github.workflow }}` | No |
 | `reaction_icon` | The reaction icon to add to the PR description while the review is in progress (e.g., `eyes`, `rocket`, `heart`) | `eyes` | No |
 | `reviewer_github_token` | GitHub token for posting comments and reactions | `${{ github.token }}` | No |
@@ -172,6 +176,29 @@ main-guidelines = "security-first"
 supplemental-guidelines = [
   ".cassandra/haiku-praise.md"
 ]
+```
+
+## Pre-Review Stage
+
+Before the main AI code review runs, Cassandra can run an optional **Pre-Review Stage** using a separate LLM Agent. This stage maps and summarizes the code changes (including git diff, commits, and PR metadata) to output a scannable summary report. This report is displayed in the progress logs and is prepended directly to the main reviewer's context, providing high-signal background context about the change.
+
+### Configuration
+
+You can configure the pre-review stage using your `cassandra.toml` file, CLI flags, or GitHub Action inputs:
+
+- **`pre-review-prompt`** (CLI: `--pre-review-prompt`, Action: `pre_review_prompt`): Path to a file containing the system instructions/prompt for the pre-review LLM Agent.
+- **`pre-review-model`** (CLI: `--pre-review-model`, Action: `pre_review_model`): Optional model override to use for the pre-review agent (e.g., using a faster model like `gemini-2.5-flash` for the summary stage, while using `gemini-3.1-pro-preview` for the main review). If not specified, it defaults to the main `model`.
+
+### Example `cassandra.toml` with Pre-Review
+
+```toml
+provider = "google"
+model = "gemini-3.1-pro-preview"
+main-guidelines = "security-first"
+
+# Pre-Review summary stage configuration
+pre-review-prompt = ".cassandra/pre-review-summary.md"
+pre-review-model = "gemini-3.1-flash-lite"  # Optional model override
 ```
 
 ### Supported Models

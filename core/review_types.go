@@ -21,6 +21,17 @@ type SessionMetrics struct {
 	ToolCalls  ToolCallMetrics `json:"tool_calls"`
 }
 
+// PhaseMetrics captures the metrics for a specific review phase.
+type PhaseMetrics struct {
+	Phase   string         `json:"phase"`
+	Metrics SessionMetrics `json:"metrics"`
+}
+
+// ReviewMetrics captures the list of phase-specific metrics.
+type ReviewMetrics struct {
+	Phases []PhaseMetrics `json:"metrics"`
+}
+
 // TokenMetrics breaks down token consumption by category.
 type TokenMetrics struct {
 	Input       int `json:"input"`

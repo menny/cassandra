@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"golang.org/x/term"
 )
 
 // TUI message types
@@ -36,7 +38,8 @@ type toolCallsMsg struct {
 }
 
 type iterationMsg struct {
-	iter int
+	iter  int
+	stage string
 }
 
 type llmStatusMsg struct {
@@ -49,6 +52,10 @@ type warningMsg struct {
 }
 
 type quitMsg struct{}
+
+type preReviewSummaryMsg struct {
+	summary string
+}
 
 // TUI state representation
 type mcpServerState struct {
@@ -72,6 +79,7 @@ type reviewerState struct {
 
 type iterationState struct {
 	iter          int
+	stage         string
 	llmStatus     string
 	llmWaiting    bool
 	reviewerState *reviewerState
@@ -79,16 +87,17 @@ type iterationState struct {
 }
 
 type tuiModel struct {
-	mcpServers  map[string]*mcpServerState
-	mcpList     []string
-	iterations  []*iterationState
-	warnings    []string
-	quitting    bool
-	spinner     spinner.Model
-	viewport    viewport.Model
-	ready       bool
-	configText  string
-	userAborted bool
+	mcpServers       map[string]*mcpServerState
+	mcpList          []string
+	iterations       []*iterationState
+	warnings         []string
+	quitting         bool
+	spinner          spinner.Model
+	viewport         viewport.Model
+	ready            bool
+	configText       string
+	userAborted      bool
+	preReviewSummary string
 }
 
 func (m *tuiModel) Init() tea.Cmd {
@@ -211,6 +220,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case iterationMsg:
 		m.iterations = append(m.iterations, &iterationState{
 			iter:       msg.iter,
+			stage:      msg.stage,
 			llmStatus:  "Waiting for LLM reply...",
 			llmWaiting: true,
 		})
@@ -226,6 +236,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case warningMsg:
 		m.warnings = append(m.warnings, msg.warning)
+		autoScroll = true
+
+	case preReviewSummaryMsg:
+		m.preReviewSummary = msg.summary
 		autoScroll = true
 
 	case quitMsg:
@@ -295,8 +309,19 @@ func (m *tuiModel) renderContent() string {
 	}
 
 	// Section 2: LLM Loop Progress (Iteration Blocks)
+	var renderedSummary bool
 	for _, it := range m.iterations {
-		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render(fmt.Sprintf("🔍 [Iteration %d]", it.iter)) + "\n")
+		if it.stage == "AI Code Review" && !renderedSummary && m.preReviewSummary != "" {
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("📋 Pre-Review Summary:") + "\n")
+			sb.WriteString(indentText(renderMarkdown(m.preReviewSummary, os.Stderr), 2) + "\n\n")
+			renderedSummary = true
+		}
+
+		label := fmt.Sprintf("🔍 [Iteration %d]", it.iter)
+		if it.stage != "" {
+			label = fmt.Sprintf("🔍 [%s - Iteration %d]", it.stage, it.iter)
+		}
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render(label) + "\n")
 
 		if it.llmWaiting {
 			sb.WriteString(fmt.Sprintf("  %s %s\n", m.spinner.View(), it.llmStatus))
@@ -361,6 +386,11 @@ func (m *tuiModel) renderContent() string {
 		}
 	}
 
+	if !renderedSummary && m.preReviewSummary != "" {
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("📋 Pre-Review Summary:") + "\n")
+		sb.WriteString(indentText(renderMarkdown(m.preReviewSummary, os.Stderr), 2) + "\n\n")
+	}
+
 	// Section 3: Warnings
 	if len(m.warnings) > 0 {
 		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("208")).Render("⚠️  Warnings:") + "\n")
@@ -418,7 +448,7 @@ func NewTuiReporter(stdout, stderr io.Writer, cancel context.CancelFunc) Reporte
 
 // startLocked starts the Bubble Tea program loop.
 func (r *tuiReporter) startLocked() {
-	p := tea.NewProgram(r.model, tea.WithOutput(r.stderr))
+	p := tea.NewProgram(r.model, tea.WithOutput(r.stderr), tea.WithInput(strings.NewReader("")))
 	r.program = p
 	go func() {
 		if _, err := p.Run(); err != nil {
@@ -469,6 +499,36 @@ func (r *tuiReporter) Close() error {
 
 func (r *tuiReporter) ReportPostReviewReply(message string) {
 	fmt.Fprint(r.stderr, renderMarkdown(message, r.stderr)+"\n")
+}
+
+func (r *tuiReporter) ReportPostReviewUserQuery(query string) {
+	width := 80
+	if f, ok := r.stderr.(*os.File); ok {
+		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
+			width = w
+		}
+	}
+	wrapWidth := width - 8
+	if wrapWidth < 40 {
+		wrapWidth = 40
+	}
+	rendered := renderMarkdownWithWidth(query, wrapWidth)
+
+	// Trim trailing spaces from each line to prevent box stretching
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
+	}
+	content := strings.TrimSpace(strings.Join(lines, "\n"))
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
+	boxContent := title + "\n" + content
+	styledBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("108")).
+		Padding(0, 1).
+		Render(boxContent)
+	fmt.Fprint(r.stderr, "\n"+styledBox+"\n")
 }
 
 func (r *tuiReporter) ReportConfig(cfg *config.Config, targetDir string) {
@@ -543,6 +603,10 @@ func (r *tuiReporter) ReportIteration(iter int) {
 	r.send(iterationMsg{iter: iter})
 }
 
+func (r *tuiReporter) ReportStageIteration(stage string, iter int) {
+	r.send(iterationMsg{iter: iter, stage: stage})
+}
+
 func (r *tuiReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	r.send(toolCallsMsg{tcs: tcs})
 	r.send(llmStatusMsg{status: "Executing tool calls...", llmWaiting: false})
@@ -560,6 +624,10 @@ func (r *tuiReporter) ReportUsageSummary(total llm.Usage) {
 
 func (r *tuiReporter) ReportFinalReview() {
 	r.send(llmStatusMsg{status: "Formulating final review...", llmWaiting: true})
+}
+
+func (r *tuiReporter) ReportStageFinalReview(stage string) {
+	r.send(llmStatusMsg{status: fmt.Sprintf("Formulating final %s...", strings.ToLower(stage)), llmWaiting: true})
 }
 
 func (r *tuiReporter) ReportExtraction() {
@@ -605,6 +673,11 @@ func (r *tuiReporter) ReportReview(result string) error {
 	return nil
 }
 
+func (r *tuiReporter) ReportStageReview(stage, result string) error {
+	r.send(preReviewSummaryMsg{summary: result})
+	return nil
+}
+
 func (r *tuiReporter) ReportReviewWritten(file string) {
 	fmt.Fprintf(r.stderr, "📝 Review written to %s\n", file)
 }
@@ -642,4 +715,15 @@ func (r *tuiReporter) ReportError(err error) {
 
 func (r *tuiReporter) NotifyUser() {
 	fmt.Fprint(r.stderr, "\a")
+}
+
+func indentText(text string, indent int) string {
+	prefix := strings.Repeat(" ", indent)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }

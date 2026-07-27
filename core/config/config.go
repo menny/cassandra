@@ -32,6 +32,8 @@ type Config struct {
 	ExtractionModel              string         `mapstructure:"extraction-model"`
 	MetadataJSONFile             string         `mapstructure:"metadata-json"`
 	ApprovalEvaluationPromptFile string         `mapstructure:"approval-evaluation-prompt-file"`
+	PreReviewPromptFile          string         `mapstructure:"pre-review-prompt"`
+	PreReviewModel               string         `mapstructure:"pre-review-model"`
 	DiffFile                     string         `mapstructure:"diff-file"`
 	FilesListFile                string         `mapstructure:"files-list-file"`
 	CommitsFile                  string         `mapstructure:"commits-file"`

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
@@ -83,10 +84,39 @@ func (mr *markdownRenderer) Render(s string, writer io.Writer) string {
 	return rendered
 }
 
+func (mr *markdownRenderer) RenderWithWidth(s string, width int) string {
+	mr.mu.Lock()
+	defer mr.mu.Unlock()
+
+	if mr.r == nil || mr.width != width {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(width),
+		)
+		if err != nil {
+			return s
+		}
+		mr.r = r
+		mr.width = width
+	}
+
+	rendered, err := mr.r.Render(s)
+	if err != nil {
+		return s
+	}
+	rendered = strings.TrimPrefix(rendered, "\n")
+	rendered = strings.TrimSuffix(rendered, "\n")
+	return rendered
+}
+
 var mdRenderer = &markdownRenderer{}
 
 func renderMarkdown(s string, writer io.Writer) string {
 	return mdRenderer.Render(s, writer)
+}
+
+func renderMarkdownWithWidth(s string, width int) string {
+	return mdRenderer.RenderWithWidth(s, width)
 }
 
 // ConsoleFormatter abstracts formatting and styling for console output.
@@ -98,6 +128,7 @@ type ConsoleFormatter interface {
 	FormatReview(result string) string
 	StyleStderr(plain, styled string, color string, bold bool) string
 	FormatPostReviewReply(message string) string
+	FormatPostReviewUserQuery(query string, width int) string
 }
 
 // consoleReporter formats semantic messages and delegates rendering to a consoleWriter.
@@ -131,6 +162,14 @@ func (r *consoleReporter) ReportPostReviewReply(message string) {
 	r.writer.WriteStderr(r.formatter.FormatPostReviewReply(message))
 }
 
+func (r *consoleReporter) ReportPostReviewUserQuery(query string) {
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stderr.Fd())); err == nil && w > 0 {
+		width = w
+	}
+	r.writer.WriteStderr(r.formatter.FormatPostReviewUserQuery(query, width))
+}
+
 func (r *consoleReporter) NotifyUser() {
 	if bell := r.formatter.NotifyUser(); bell != "" {
 		r.writer.WriteStderr(bell)
@@ -145,6 +184,15 @@ func (r *consoleReporter) ReportIteration(iter int) {
 	r.writeStyledStderr(
 		fmt.Sprintf("🔍 [Iter %d] Reviewing...", iter),
 		fmt.Sprintf("🔍 [Iteration %d]", iter),
+		"178",
+		true,
+	)
+}
+
+func (r *consoleReporter) ReportStageIteration(stage string, iter int) {
+	r.writeStyledStderr(
+		fmt.Sprintf("🔍 [%s - Iter %d] Reviewing...", stage, iter),
+		fmt.Sprintf("🔍 [%s - Iteration %d]", stage, iter),
 		"178",
 		true,
 	)
@@ -184,6 +232,16 @@ func (r *consoleReporter) ReportFinalReview() {
 	r.writeStyledStderr(
 		"📝 Formulating final review...",
 		"📝 Formulating final review...",
+		"178",
+		true,
+	)
+}
+
+func (r *consoleReporter) ReportStageFinalReview(stage string) {
+	msg := fmt.Sprintf("📝 Formulating final %s...", strings.ToLower(stage))
+	r.writeStyledStderr(
+		msg,
+		msg,
 		"178",
 		true,
 	)
@@ -275,6 +333,12 @@ func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 	if cfg.ApprovalEvaluationPromptFile != "" {
 		t.Row("Approval Evaluation Prompt File", cfg.ApprovalEvaluationPromptFile)
 	}
+	if cfg.PreReviewPromptFile != "" {
+		t.Row("Pre-Review Prompt File", cfg.PreReviewPromptFile)
+	}
+	if cfg.PreReviewModel != "" {
+		t.Row("Pre-Review Model", cfg.PreReviewModel)
+	}
 	t.Row("API Key", "[PROVIDED]")
 	return t
 }
@@ -312,6 +376,17 @@ func (r *consoleReporter) ReportNoChanges() {
 
 func (r *consoleReporter) ReportReview(result string) error {
 	r.writer.WriteStdout(r.formatter.FormatReview(result))
+	return nil
+}
+
+func (r *consoleReporter) ReportStageReview(stage, result string) error {
+	var output string
+	if _, ok := r.formatter.(markdownFormatter); ok {
+		output = "\n" + renderMarkdown(fmt.Sprintf("# 📋 %s\n\n%s", stage, result), os.Stderr) + "\n\n"
+	} else {
+		output = fmt.Sprintf("\n# 📋 %s\n\n%s\n", stage, result)
+	}
+	r.writer.WriteStderr(output)
 	return nil
 }
 
@@ -354,6 +429,10 @@ func (rawFormatter) StyleStderr(plain, styled string, color string, bold bool) s
 
 func (rawFormatter) FormatPostReviewReply(message string) string {
 	return message + "\n"
+}
+
+func (rawFormatter) FormatPostReviewUserQuery(query string, _ int) string {
+	return fmt.Sprintf("\n💬 User:\n%s\n", query)
 }
 
 func (rawFormatter) FormatReviewHeader(files int, guidelines string, model string) string {
@@ -452,6 +531,30 @@ func (markdownFormatter) StyleStderr(plain, styled string, color string, bold bo
 
 func (markdownFormatter) FormatPostReviewReply(message string) string {
 	return renderMarkdown(message, os.Stderr) + "\n"
+}
+
+func (markdownFormatter) FormatPostReviewUserQuery(query string, width int) string {
+	wrapWidth := width - 8
+	if wrapWidth < 40 {
+		wrapWidth = 40
+	}
+	rendered := renderMarkdownWithWidth(query, wrapWidth)
+
+	// Trim trailing spaces from each line to prevent box stretching
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
+	}
+	content := strings.TrimSpace(strings.Join(lines, "\n"))
+
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("💬 User:")
+	boxContent := title + "\n" + content
+	styledBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("108")).
+		Padding(0, 1).
+		Render(boxContent)
+	return "\n" + styledBox + "\n"
 }
 
 func (markdownFormatter) FormatReviewHeader(files int, guidelines string, model string) string {

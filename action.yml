@@ -41,6 +41,14 @@ inputs:
     description: 'Optional path to a file containing custom approval evaluation guidelines'
     required: false
     default: ''
+  pre_review_prompt:
+    description: 'Optional path to a file containing a prompt to an LLM Agent for pre-review summary'
+    required: false
+    default: ''
+  pre_review_model:
+    description: 'Optional model override for the pre-review summary phase (defaults to main model)'
+    required: false
+    default: ''
   metadata_tag:
     description: 'Tag to identify Cassandra comments (inner text only, will be wrapped in <!-- ... -->)'
     required: false
@@ -281,6 +289,8 @@ runs:
         MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
         SUPPLEMENTAL_GUIDELINES: ${{ inputs.supplemental_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
+        PRE_REVIEW_PROMPT: ${{ inputs.pre_review_prompt }}
+        PRE_REVIEW_MODEL: ${{ inputs.pre_review_model }}
         MCP_CONFIG: ${{ inputs.mcp_config }}
         ALLOW_URL_FETCH: ${{ inputs.allow_url_fetch }}
         IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
@@ -399,6 +409,20 @@ runs:
             # Try it as a relative path or literal if not found in the workspace
             ARGS+=(--approval-evaluation-prompt-file "$APPROVAL_EVALUATION_PROMPT_FILE")
           fi
+        fi
+
+        if [[ -n "$PRE_REVIEW_PROMPT" ]]; then
+          PRE_PROMPT="${{ github.workspace }}/$WORKING_DIRECTORY/$PRE_REVIEW_PROMPT"
+          if [[ -f "$PRE_PROMPT" ]]; then
+            ARGS+=(--pre-review-prompt "$PRE_PROMPT")
+          else
+            # Try it as a relative path or literal if not found in the workspace
+            ARGS+=(--pre-review-prompt "$PRE_REVIEW_PROMPT")
+          fi
+        fi
+
+        if [[ -n "$PRE_REVIEW_MODEL" ]]; then
+          ARGS+=(--pre-review-model "$PRE_REVIEW_MODEL")
         fi
 
         if [[ -n "$MAIN_GUIDELINES" ]]; then

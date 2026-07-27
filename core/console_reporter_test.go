@@ -74,6 +74,50 @@ func TestConsoleReporter_Raw(t *testing.T) {
 		require.Contains(t, stderr.String(), "[Reviewer state] focus area: security")
 		require.Contains(t, stderr.String(), "Analyzing files")
 	})
+
+	t.Run("ReportStageIteration prints stage name", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportStageIteration("Pre-Review Summary", 2)
+		require.Equal(t, "🔍 [Pre-Review Summary - Iter 2] Reviewing...\n", stderr.String())
+	})
+
+	t.Run("ReportStageFinalReview prints stage name", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportStageFinalReview("Pre-Review Summary")
+		require.Equal(t, "📝 Formulating final pre-review summary...\n", stderr.String())
+	})
+
+	t.Run("ReportStageReview prints header and result", func(t *testing.T) {
+		stderr.Reset()
+		err := r.ReportStageReview("Pre-Review Summary", "Summary content")
+		require.NoError(t, err)
+		require.Contains(t, stderr.String(), "# 📋 Pre-Review Summary")
+		require.Contains(t, stderr.String(), "Summary content")
+	})
+
+	t.Run("ReportPostReviewUserQuery prints user query", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportPostReviewUserQuery("How does auth work?")
+		require.Contains(t, stderr.String(), "💬 User:\nHow does auth work?")
+	})
+
+	t.Run("ReportPostReviewReply prints reply", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportPostReviewReply("Auth uses JWT tokens.")
+		require.Equal(t, "Auth uses JWT tokens.\n", stderr.String())
+	})
+
+	t.Run("ReportConfig prints pre-review prompt and model", func(t *testing.T) {
+		stderr.Reset()
+		cfg := config.NewDefaultConfig()
+		cfg.PreReviewPromptFile = ".cassandra/pre-review-summary.md"
+		cfg.PreReviewModel = "gemini-2.0-flash"
+		r.ReportConfig(cfg, "/workspace")
+		require.Contains(t, stderr.String(), "Pre-Review Prompt File")
+		require.Contains(t, stderr.String(), ".cassandra/pre-review-summary.md")
+		require.Contains(t, stderr.String(), "Pre-Review Model")
+		require.Contains(t, stderr.String(), "gemini-2.0-flash")
+	})
 }
 
 func TestConsoleReporter_Markdown(t *testing.T) {
@@ -131,5 +175,37 @@ func TestConsoleReporter_Markdown(t *testing.T) {
 		})
 		require.Contains(t, stderr.String(), "Reviewer state")
 		require.Contains(t, stderr.String(), "security")
+	})
+
+	t.Run("ReportStageIteration prints styled stage text", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportStageIteration("Pre-Review Summary", 2)
+		require.Contains(t, stderr.String(), "[Pre-Review Summary - Iteration 2]")
+	})
+
+	t.Run("ReportStageFinalReview prints styled stage final review text", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportStageFinalReview("Pre-Review Summary")
+		require.Contains(t, stderr.String(), "Formulating final pre-review summary...")
+	})
+
+	t.Run("ReportStageReview prints styled stage review markdown", func(t *testing.T) {
+		stderr.Reset()
+		err := r.ReportStageReview("Pre-Review Summary", "Summary content")
+		require.NoError(t, err)
+		require.Contains(t, stderr.String(), "Pre-Review Summary")
+	})
+
+	t.Run("ReportPostReviewUserQuery prints styled user query box", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportPostReviewUserQuery("How does auth work?")
+		require.Contains(t, stderr.String(), "User:")
+		require.Contains(t, stderr.String(), "How does auth work?")
+	})
+
+	t.Run("ReportPostReviewReply prints styled reply markdown", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportPostReviewReply("Auth uses JWT tokens.")
+		require.Contains(t, stderr.String(), "Auth uses JWT tokens.")
 	})
 }

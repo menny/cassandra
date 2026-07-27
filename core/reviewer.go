@@ -32,6 +32,10 @@ type Reviewer struct {
 	SupplementalGuidelines   []string
 	ApprovalEvaluationPrompt string
 	mcpManager               *mcp.Manager
+	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
+	PreReviewMetrics         *SessionMetrics
+	CodeReviewMetrics        *SessionMetrics
+	DiscussionMetrics        *SessionMetrics
 }
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
@@ -138,6 +142,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		SupplementalGuidelines:   supplementalGuidelines,
 		ApprovalEvaluationPrompt: approvalEvaluationPrompt,
 		mcpManager:               mcpManager,
+		llmFactory:               factory.New,
 	}, nil
 }
 
@@ -156,8 +161,67 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
 
+	if r.Config.PreReviewPromptFile != "" {
+		preReviewPromptBytes, err := os.ReadFile(r.Config.PreReviewPromptFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read pre-review prompt file %q: %w", r.Config.PreReviewPromptFile, err)
+		}
+		preReviewPrompt := string(preReviewPromptBytes)
+
+		originalLLM := r.Agent.llm
+		if r.Config.PreReviewModel != "" && r.Config.PreReviewModel != r.Config.Model {
+			newFactory := r.llmFactory
+			if newFactory == nil {
+				newFactory = factory.New
+			}
+			preLLM, err := newFactory(ctx, r.Config.Provider, r.Config.PreReviewModel, r.Config.ProviderAPIKey, r.Config.ProviderURL, r.Config.ProviderOptions)
+			if err != nil {
+				return "", fmt.Errorf("failed to initialize pre-review LLM: %w", err)
+			}
+			r.Agent.llm = preLLM
+		}
+		defer func() {
+			r.Agent.llm = originalLLM
+		}()
+
+		r.Agent.Stage = "Pre-Review Summary"
+		r.Agent.ResetMetrics()
+		maxIterations := CalculateMaxIterations(len(changedFiles))
+		summary, err := r.Agent.RunReview(ctx, preReviewPrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+		preMetrics := r.Agent.GetMetrics()
+		r.PreReviewMetrics = &preMetrics
+		if err != nil {
+			return "", fmt.Errorf("pre-review summary phase failed: %w", err)
+		}
+
+		if err := r.Agent.reporter.ReportStageReview("Pre-Review Summary", summary); err != nil {
+			r.Agent.reporter.ReportWarning("Failed to display pre-review summary", err)
+		}
+
+		r.Agent.llm = originalLLM
+
+		var sb strings.Builder
+		sb.WriteString("### Pre-Review Summary\n")
+		sb.WriteString(summary)
+		sb.WriteString("\n\n")
+		sb.WriteString(requestText)
+		requestText = sb.String()
+	}
+
+	if r.Config.PreReviewPromptFile != "" {
+		r.Agent.Stage = "AI Code Review"
+	} else {
+		r.Agent.Stage = ""
+	}
+	r.Agent.ResetMetrics()
 	maxIterations := CalculateMaxIterations(len(changedFiles))
-	return r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+	reviewResult, err := r.Agent.RunReview(ctx, r.StablePrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
+	reviewMetrics := r.Agent.GetMetrics()
+	r.CodeReviewMetrics = &reviewMetrics
+	if err != nil {
+		return "", err
+	}
+	return reviewResult, nil
 }
 
 const postReviewSystemInstruction = "You have completed the automated code review. " +
@@ -276,6 +340,9 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		}()
 	}
 
+	// Reset metrics to isolate the interactive post-review discussion phase
+	r.Agent.ResetMetrics()
+
 	// Append system instruction indicating conversational post-review phase
 	r.Agent.history = append(r.Agent.history, llm.Message{
 		Role: llm.RoleSystem,
@@ -347,6 +414,8 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			continue
 		}
 
+		r.Agent.reporter.ReportPostReviewUserQuery(cleanInput)
+
 		var spinner *terminalSpinner
 		if r.Config.Render == "tui" {
 			spinner = newTerminalSpinner(errWriter)
@@ -357,10 +426,58 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 		if spinner != nil {
 			spinner.Stop()
 		}
+
+		turnMetrics := r.Agent.GetMetrics()
+		if r.DiscussionMetrics == nil {
+			r.DiscussionMetrics = &turnMetrics
+		} else {
+			r.DiscussionMetrics.Tokens.Input += turnMetrics.Tokens.Input
+			r.DiscussionMetrics.Tokens.Output += turnMetrics.Tokens.Output
+			r.DiscussionMetrics.Tokens.Thinking += turnMetrics.Tokens.Thinking
+			r.DiscussionMetrics.Tokens.Cached += turnMetrics.Tokens.Cached
+			r.DiscussionMetrics.Tokens.TotalInput += turnMetrics.Tokens.TotalInput
+			r.DiscussionMetrics.Tokens.TotalOutput += turnMetrics.Tokens.TotalOutput
+			r.DiscussionMetrics.Iterations += turnMetrics.Iterations
+			r.DiscussionMetrics.ToolCalls.Total += turnMetrics.ToolCalls.Total
+			if r.DiscussionMetrics.ToolCalls.ByTool == nil {
+				r.DiscussionMetrics.ToolCalls.ByTool = make(map[string]int)
+			}
+			for k, v := range turnMetrics.ToolCalls.ByTool {
+				r.DiscussionMetrics.ToolCalls.ByTool[k] += v
+			}
+		}
+		r.Agent.ResetMetrics()
+
 		if err != nil {
 			return fmt.Errorf("chat flight failed: %w", err)
 		}
 
 		r.Agent.reporter.ReportPostReviewReply(reply)
+	}
+}
+
+// GetMetrics returns the captured metrics for both phases.
+func (r *Reviewer) GetMetrics() ReviewMetrics {
+	var phases []PhaseMetrics
+	if r.PreReviewMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "pre_review",
+			Metrics: *r.PreReviewMetrics,
+		})
+	}
+	if r.CodeReviewMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "review",
+			Metrics: *r.CodeReviewMetrics,
+		})
+	}
+	if r.DiscussionMetrics != nil {
+		phases = append(phases, PhaseMetrics{
+			Phase:   "review_discussion",
+			Metrics: *r.DiscussionMetrics,
+		})
+	}
+	return ReviewMetrics{
+		Phases: phases,
 	}
 }
