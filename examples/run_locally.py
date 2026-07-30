@@ -36,7 +36,9 @@ def serialize_flat_toml(data: dict) -> str:
     """Serializes a flat dictionary back into TOML format."""
     lines = []
     for k, v in data.items():
-        if isinstance(v, list):
+        if isinstance(v, dict):
+            raise ValueError(f"Nested TOML tables are not supported for configuration key '{k}'")
+        elif isinstance(v, list):
             lines.append(f"{k} = [")
             for item in v:
                 lines.append(f'    "{item}",')
@@ -115,8 +117,8 @@ def _get_default_base_ref(target_dir):
 
 def resolve_api_key(provider: str, remaining_args: list[str]) -> str | None:
     """Resolves the API key for the given provider from environment variables."""
-    # Check if --provider-api-key was passed directly in remaining args
-    if "--provider-api-key" in remaining_args:
+    # Check if --provider-api-key was passed directly in remaining args (e.g. --provider-api-key KEY or --provider-api-key=KEY)
+    if any(arg.startswith("--provider-api-key") for arg in remaining_args):
         return None
 
     env_vars = PROVIDER_ENV_VARS.get(provider.lower(), [])
@@ -203,8 +205,8 @@ def main():
                 prefix=f"cassandra.{target_dir.name}.",
                 delete=False,
             ) as f:
-                f.write(serialize_flat_toml(merged_data))
                 temp_file_path = Path(f.name)
+                f.write(serialize_flat_toml(merged_data))
             config_file = temp_file_path
         else:
             with config_file.open("rb") as f:
