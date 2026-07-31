@@ -1,0 +1,120 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical vulnerability (division by zero) introduced by the change in the diff. It provided a clear explanation of the impact and suggested a idiomatic Go solution (returning an error) that adheres to the rubric's requirement.",
+      "findings": [
+        "Correctly identified the missing division by zero check.",
+        "Proposed an idiomatic Go fix involving changing the function signature.",
+        "Maintained a professional and constructive tone.",
+        "Properly context-aware of the language-specific implications of the code change."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3583,
+        "output": 124,
+        "thinking": 786,
+        "cached": 0,
+        "total_input": 3583,
+        "total_output": 910
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the nil pointer dereference issue in service.go, highlighted the potential for a system crash, and suggested a constructive path forward by recommending early error handling.",
+      "findings": [
+        "Correctly identified the risk of passing a nil pointer to SaveUser.",
+        "Provided a clear explanation of why this is a problem.",
+        "Suggested a specific, actionable solution (returning an error early).",
+        "Addressed the exact issue outlined in the rubric."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3696,
+        "output": 113,
+        "thinking": 1289,
+        "cached": 0,
+        "total_input": 3696,
+        "total_output": 1402
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the path traversal vulnerability, provided a correct technical explanation of why filepath.Join is insufficient, and suggested appropriate remediation strategies. It also exceeded the rubric requirements by identifying additional critical issues (unhandled error for ReadFile and ListenAndServe), providing comprehensive and constructive feedback.",
+      "findings": [
+        "Identified critical path traversal vulnerability.",
+        "Suggested correct remediation (prefix check or filepath.Base).",
+        "Pointed out dangerous error suppression for file reading.",
+        "Correctly identified an issue with unhandled server startup errors."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8685,
+        "output": 391,
+        "thinking": 1540,
+        "cached": 0,
+        "total_input": 8685,
+        "total_output": 1931
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 0,
+      "rationale": "",
+      "findings": null,
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "thinking": 0,
+        "cached": 0,
+        "total_input": 0,
+        "total_output": 0
+      },
+      "iterations": 0,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": null
+      }
+    },
+    "error": "subject failed: llm call failed on iteration 1: google: Error 503, Message: This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later., Status: UNAVAILABLE, Details: []"
+  }
+]

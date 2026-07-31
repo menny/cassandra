@@ -1,0 +1,123 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical issue of division by zero, which was specified in the rubric. The reviewer provided a clear explanation of why the change is problematic (runtime panic) and suggested appropriate architectural solutions (returning an error).",
+      "findings": [
+        "Correctly identified the division by zero vulnerability.",
+        "Provided a constructive suggestion to change the function signature to return an error.",
+        "Maintained a professional and helpful tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6522,
+        "output": 177,
+        "thinking": 433,
+        "cached": 0,
+        "total_input": 6522,
+        "total_output": 610
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the nil pointer issue highlighted in the rubric. It clearly explained the potential for a panic and suggested a constructive resolution path (early return/validation error). It was concise and accurate.",
+      "findings": [
+        "Identified the null pointer risk in service.go",
+        "Correctly linked the variable state to a potential runtime panic",
+        "Provided a constructive suggestion for remediation"
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3696,
+        "output": 114,
+        "thinking": 1034,
+        "cached": 0,
+        "total_input": 3696,
+        "total_output": 1148
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability as required by the rubric. It also provided a high-quality explanation of the flaw and suggested the correct mitigation (validating the prefix). Furthermore, the reviewer identified additional serious issues regarding error handling and production-readiness, providing comprehensive feedback beyond the scope of the rubric.",
+      "findings": [
+        "Correctly identified path traversal vulnerability in /file handler.",
+        "Provided a clear explanation of why filepath.Join is insufficient.",
+        "Correctly identified unsafe error suppression on os.ReadFile.",
+        "Provided helpful recommendations for production configuration of http.Server."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 340,
+        "thinking": 2929,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 3269
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review is excellent. It correctly identifies the primary violation requested in the rubric (the use of raw db.Query instead of SafeQuery) and goes further by identifying a functional bug where the query results were never scanned, rendering the function logic incorrect.",
+      "findings": [
+        "Identified the mandatory use of SafeQuery as per internal/db/AGENTS.md.",
+        "Correctly flagged the functional logic error where the query result was ignored.",
+        "Provided clear, actionable feedback for the contributor."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9787,
+        "output": 265,
+        "thinking": 1541,
+        "cached": 0,
+        "total_input": 9787,
+        "total_output": 1806
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]

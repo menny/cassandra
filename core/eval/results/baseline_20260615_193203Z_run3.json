@@ -1,0 +1,125 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical missing edge-case (division by zero) required by the rubric. The suggested solution (updating the function signature to return an error) is the idiomatic way to handle this in Go. The feedback is professional, constructive, and provides a clear path for remediation.",
+      "findings": [
+        "Correctly flagged the lack of division by zero protection.",
+        "Proposed an idiomatic Go solution (returning an error).",
+        "Suggested a best practice improvement (Go doc comments) for maintainability.",
+        "Maintained a professional and helpful tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6575,
+        "output": 264,
+        "thinking": 1269,
+        "cached": 0,
+        "total_input": 6575,
+        "total_output": 1533
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the specific bug requested by the rubric. It correctly pointed out that 'u' remains nil when the name is empty and correctly identified that passing a nil value to 'SaveUser' violates the function's requirements, potentially causing a panic. The suggestion to handle the empty name case early is constructive and appropriate for the context.",
+      "findings": [
+        "Correctly identified the nil pointer dereference risk in service.go",
+        "Properly linked the issue to the requirements of the SaveUser function",
+        "Provided a constructive suggestion for remediation (early input validation)",
+        "Professional tone throughout the review"
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3696,
+        "output": 124,
+        "thinking": 557,
+        "cached": 0,
+        "total_input": 3696,
+        "total_output": 681
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability as required by the rubric. It also provided additional, highly relevant observations regarding error handling (os.ReadFile and http.ListenAndServe) which demonstrates high-quality code review standards. The tone is professional, constructive, and the feedback is actionable.",
+      "findings": [
+        "Correctly identified the path traversal vulnerability.",
+        "Provided a clear example of how the exploit could be executed.",
+        "Correctly identified the dangerous practice of ignoring errors on file operations.",
+        "Suggested a best practice for handling server startup failures.",
+        "Professional and actionable feedback structure."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 291,
+        "thinking": 2268,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 2559
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the mandated 'SafeQuery' usage as specified in the rubric. Additionally, the reviewer caught two significant functional bugs: the failure to scan the SQL result set and the incorrect return value (hardcoded 0). The feedback was professional, actionable, and exhaustive.",
+      "findings": [
+        "Identified violation of internal database conventions regarding SafeQuery usage.",
+        "Correctly spotted the functional bug where the result set was not being scanned.",
+        "Correctly identified that the return value was hardcoded to 0.",
+        "Provided a constructive suggestion to clean up the temporary comment."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3783,
+        "output": 227,
+        "thinking": 1923,
+        "cached": 0,
+        "total_input": 3783,
+        "total_output": 2150
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]

@@ -1,0 +1,67 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the compilation error caused by calling the non-existent 'ExecuteAsync' method. It went beyond simply stating the error by providing the correct method name ('Execute') and proactively suggesting the cleanup of the developer's inline comments. The review is accurate, professional, and directly addresses the primary requirement of the rubric.",
+      "findings": [
+        "Correctly identified that ExecuteAsync is not a valid method on *db.DB.",
+        "Provided a clear and correct recommendation for the fix (changing to .Execute).",
+        "Suggested cleanup of redundant inline comments.",
+        "The feedback was actionable and professional."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 12858,
+        "output": 352,
+        "thinking": 1273,
+        "cached": 0,
+        "total_input": 12858,
+        "total_output": 1625
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review failed to meet the primary requirement of the rubric. The rubric explicitly tasked the agent with fetching the provided URL to verify the API usage and identify discrepancies. The review did not perform this task, nor did it attempt to verify the endpoint configuration against the official documentation. Instead, it merely commented on the existence of a bug comment written in the code. Because the agent ignored the instruction to perform external verification, the review is incomplete and fails to provide technical guidance.",
+      "findings": [
+        "Failed to fetch and verify the provided API documentation URL.",
+        "Did not confirm whether the API usage in the code matches the specification at the provided URL.",
+        "Correctly identified that leaving known bugs in the code as comments is bad practice, but this is a secondary observation that did not address the core task."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8633,
+        "output": 202,
+        "thinking": 924,
+        "cached": 0,
+        "total_input": 8633,
+        "total_output": 1126
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]
