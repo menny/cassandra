@@ -82,7 +82,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		}
 		mcpConfig.MCPServers["mcp-server-fetch"] = mcp.ServerConfig{
 			Command: "uvx",
-			Args:    []string{"mcp-server-fetch"},
+			Args:    []string{"--with", "mcp<1.3.0", "mcp-server-fetch"},
 		}
 	}
 
