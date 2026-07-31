@@ -7,7 +7,10 @@ jobs:
     name: AI Code Review
     runs-on: ubuntu-24.04
     # Skip the job if it is a cross-repository PR (secrets are not available for external PRs)
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # or if the PR has labels indicating AI review should be skipped.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
     permissions:
       contents: read
       pull-requests: write

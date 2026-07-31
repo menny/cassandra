@@ -59,6 +59,7 @@ jobs:
           title: "Evaluation Results: ${{ github.event.inputs.id }}"
           body: "Automated evaluation results for configuration `${{ github.event.inputs.config }}` using ID `${{ github.event.inputs.id }}`."
           branch: "eval-results/${{ github.event.inputs.id }}"
+          labels: "skip-ai-review"
           base: main
           delete-branch: true
           add-paths: |
