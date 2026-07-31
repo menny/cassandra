@@ -1,0 +1,16 @@
+# Cassandra Local Configuration Example
+
+provider = "google"
+model = "gemini-3.6-flash"
+main-guidelines = "general"
+
+pre-review-model = "gemini-3.5-flash-lite"
+pre-review-prompt = ".cassandra/pre-review-summary.md"
+
+supplemental-guidelines = [
+    ".cassandra/drive-by-fixes.md",
+    ".cassandra/codify-patterns.md",
+]
+allow-url-fetch = true
+
+provider-options-file = ".cassandra.google.provider.settings.json"
