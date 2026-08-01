@@ -35,17 +35,22 @@ func init() {
 		foundGoBin = candidate
 	}
 
-	// Read top-level runfiles entries (O(1) loop over top-level dirs) to locate the SDK binary and GOROOT
-	entries, err := os.ReadDir(runfilesDir)
-	if err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() && strings.Contains(entry.Name(), "go_sdk") {
-				sdkPath := filepath.Join(runfilesDir, entry.Name())
-				goExecutable := filepath.Join(sdkPath, "bin", "go")
-				if info, err := os.Stat(goExecutable); err == nil && !info.IsDir() {
-					foundGoBin = goExecutable
-					goroot = sdkPath
-					break
+	// Only scan top-level runfiles entries if foundGoBin or GOROOT is not yet resolved
+	if foundGoBin == "" || goroot == "" {
+		entries, err := os.ReadDir(runfilesDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() && strings.Contains(entry.Name(), "go_sdk") {
+					sdkPath := filepath.Join(runfilesDir, entry.Name())
+					goExecutable := filepath.Join(sdkPath, "bin", "go")
+					if info, err := os.Stat(goExecutable); err == nil && !info.IsDir() {
+						foundGoBin = goExecutable
+						goroot = sdkPath
+						break
+					}
+					if goroot == "" {
+						goroot = sdkPath
+					}
 				}
 			}
 		}
