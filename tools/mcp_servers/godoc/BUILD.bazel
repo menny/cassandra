@@ -18,8 +18,5 @@ go_test(
     env = {
         "GO_BIN_RLOCATION": "$(rlocationpath @rules_go//go)",
     },
-    deps = [
-        "@com_github_stretchr_testify//assert",
-        "@rules_go//go/runfiles",
-    ],
+    deps = ["@com_github_stretchr_testify//assert"],
 )

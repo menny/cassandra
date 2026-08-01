@@ -2,37 +2,64 @@ package godoc
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/bazelbuild/rules_go/go/runfiles"
 	"github.com/stretchr/testify/assert"
 )
 
 func init() {
-	if rpath := os.Getenv("GO_BIN_RLOCATION"); rpath != "" {
-		if absPath, err := runfiles.Rlocation(rpath); err == nil && absPath != "" {
-			idx := strings.Index(absPath, ".runfiles/")
-			if idx != -1 {
-				runfilesRoot := absPath[:idx+len(".runfiles")]
-				var foundGoBin string
-				_ = filepath.Walk(runfilesRoot, func(path string, info os.FileInfo, err error) error {
-					if err == nil && !info.IsDir() && info.Name() == "go" && strings.Contains(path, "go_sdk") {
-						foundGoBin = path
-						return filepath.SkipAll
-					}
-					return nil
-				})
-				if foundGoBin != "" {
-					absPath = foundGoBin
-				}
-			}
-			_ = os.Setenv("GO_BIN", absPath)
-			goroot := filepath.Dir(filepath.Dir(absPath))
-			_ = os.Setenv("GOROOT", goroot)
+	rpath := os.Getenv("GO_BIN_RLOCATION")
+	if rpath == "" {
+		return
+	}
+
+	runfilesDir := os.Getenv("RUNFILES_DIR")
+	if runfilesDir == "" {
+		runfilesDir = os.Getenv("TEST_SRCDIR")
+	}
+
+	if runfilesDir == "" {
+		panic(fmt.Sprintf("GO_BIN_RLOCATION is set to %q, but neither RUNFILES_DIR nor TEST_SRCDIR is set", rpath))
+	}
+
+	var foundGoBin string
+	err := filepath.WalkDir(runfilesDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if !d.IsDir() && d.Name() == "go" && strings.Contains(path, "go_sdk") {
+			foundGoBin = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		panic(fmt.Sprintf("failed to walk runfiles directory %q: %v", runfilesDir, err))
+	}
+
+	if foundGoBin == "" {
+		candidate := filepath.Join(runfilesDir, rpath)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			foundGoBin = candidate
+		}
+	}
+
+	if foundGoBin == "" {
+		panic(fmt.Sprintf("GO_BIN_RLOCATION is set to %q, but failed to locate hermetic Go SDK binary under %q", rpath, runfilesDir))
+	}
+
+	if err := os.Setenv("GO_BIN", foundGoBin); err != nil {
+		panic(fmt.Sprintf("failed to set GO_BIN environment variable: %v", err))
+	}
+
+	goroot := filepath.Dir(filepath.Dir(foundGoBin))
+	if err := os.Setenv("GOROOT", goroot); err != nil {
+		panic(fmt.Sprintf("failed to set GOROOT environment variable: %v", err))
 	}
 }
 
