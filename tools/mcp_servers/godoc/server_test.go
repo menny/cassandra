@@ -26,48 +26,39 @@ func init() {
 		panic(fmt.Sprintf("GO_BIN_RLOCATION is set to %q, but neither RUNFILES_DIR nor TEST_SRCDIR is set", rpath))
 	}
 
-	var foundGoBin string
-	var goroot string
-
-	// Check candidate path derived directly from rpath first (O(1))
 	candidate := filepath.Join(runfilesDir, rpath)
-	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-		foundGoBin = candidate
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() {
+		panic(fmt.Sprintf("GO_BIN_RLOCATION is set to %q, but candidate %q cannot be found: %v", rpath, candidate, err))
 	}
 
-	// Only scan top-level runfiles entries if foundGoBin or GOROOT is not yet resolved
-	if foundGoBin == "" || goroot == "" {
-		entries, err := os.ReadDir(runfilesDir)
-		if err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() && strings.Contains(entry.Name(), "go_sdk") {
-					sdkPath := filepath.Join(runfilesDir, entry.Name())
-					goExecutable := filepath.Join(sdkPath, "bin", "go")
-					if info, err := os.Stat(goExecutable); err == nil && !info.IsDir() {
-						foundGoBin = goExecutable
-						goroot = sdkPath
-						break
-					}
-					if goroot == "" {
-						goroot = sdkPath
-					}
-				}
-			}
+	var goroot string
+	entries, err := os.ReadDir(runfilesDir)
+	if err != nil {
+		panic(fmt.Sprintf("failed to read runfiles directory %q: %v", runfilesDir, err))
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.Contains(entry.Name(), "go_sdk") {
+			goroot = filepath.Join(runfilesDir, entry.Name())
+			break
 		}
 	}
 
-	if foundGoBin == "" {
-		panic(fmt.Sprintf("GO_BIN_RLOCATION is set to %q, but failed to locate Go SDK binary under %q", rpath, runfilesDir))
+	if goroot == "" {
+		panic(fmt.Sprintf("failed to locate Go SDK GOROOT directory under %q", runfilesDir))
 	}
 
-	if err := os.Setenv("GO_BIN", foundGoBin); err != nil {
+	goBin := filepath.Join(goroot, "bin", "go")
+	if _, err := os.Stat(goBin); err != nil {
+		goBin = candidate
+	}
+
+	if err := os.Setenv("GO_BIN", goBin); err != nil {
 		panic(fmt.Sprintf("failed to set GO_BIN environment variable: %v", err))
 	}
 
-	if goroot != "" {
-		if err := os.Setenv("GOROOT", goroot); err != nil {
-			panic(fmt.Sprintf("failed to set GOROOT environment variable: %v", err))
-		}
+	if err := os.Setenv("GOROOT", goroot); err != nil {
+		panic(fmt.Sprintf("failed to set GOROOT environment variable: %v", err))
 	}
 }
 
