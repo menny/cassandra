@@ -13,6 +13,10 @@ go_library(
 go_test(
     name = "godoc_test",
     srcs = ["server_test.go"],
+    data = ["@rules_go//go"],
     embed = [":godoc"],
+    env = {
+        "GO_BIN_RLOCATION": "$(rlocationpath @rules_go//go)",
+    },
     deps = ["@com_github_stretchr_testify//assert"],
 )

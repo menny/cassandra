@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -117,8 +118,12 @@ func godocSymbolHandler(ctx context.Context, req *mcp.CallToolRequest, input str
 }
 
 func runGoDoc(ctx context.Context, arg string) (string, error) {
+	goBin := os.Getenv("GO_BIN")
+	if goBin == "" {
+		goBin = "go"
+	}
 	// We invoke 'go doc' directly.
-	cmd := exec.CommandContext(ctx, "go", "doc", arg)
+	cmd := exec.CommandContext(ctx, goBin, "doc", arg)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
