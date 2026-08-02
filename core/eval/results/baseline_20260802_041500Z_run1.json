@@ -1,0 +1,122 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately and clearly identified the division-by-zero vulnerability introduced in the change. It pointed out that passing 0 as the second argument (`b`) will cause a runtime panic in Go and provided a constructive suggestion to handle the error by updating the function signature.",
+      "findings": [
+        "Accurately identified that division by zero will cause a runtime panic.",
+        "Provided a constructive and standard Go solution (returning an error)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6508,
+        "output": 190,
+        "thinking": 661,
+        "cached": 0,
+        "total_input": 6508,
+        "total_output": 851
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly and clearly identified the bug where CreateAndSave passes a potentially nil user pointer to SaveUser when the name string is empty, fulfilling the rubric requirements perfectly. It also provided a constructive solution (returning an error early when name is empty).",
+      "findings": [
+        "Accurately identified that passing a potentially nil user pointer to SaveUser can cause a runtime panic or error.",
+        "Suggested a clean, standard Go error handling pattern (returning an error early for empty name inputs)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3696,
+        "output": 126,
+        "thinking": 516,
+        "cached": 0,
+        "total_input": 3696,
+        "total_output": 642
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified the path traversal vulnerability in the `/file` handler as required by the rubric. It specifically explained why `filepath.Join` is insufficient and recommended using `filepath.Clean` along with a boundary check (`strings.HasPrefix`). Additionally, it provided valuable secondary feedback regarding unhandled errors for `os.ReadFile` and `http.ListenAndServe`.",
+      "findings": [
+        "Accurately identified the severe path traversal vulnerability in `/file`.",
+        "Recommended appropriate fixes including `filepath.Clean` and boundary checks.",
+        "Identified missing error handling for `os.ReadFile` and `http.ListenAndServe`.",
+        "Tone was professional, constructive, and actionable."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 323,
+        "thinking": 2446,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 2769
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review caught the mandatory issue specified in the rubric (direct use of `db.Query` instead of `SafeQuery`). Additionally, it identified valid secondary issues present in the diff, such as the missing `rows.Scan` logic causing the function to always return `0`, and the missing `context.Context` parameter.",
+      "findings": [
+        "Correctly identified that `db.Query` violates database conventions requiring `SafeQuery` as per the rubric.",
+        "Identified an unhandled query result bug where `rows.Next()` and `rows.Scan()` were missing.",
+        "Identified missing `context.Context` parameter for proper timeout and cancellation handling."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 18735,
+        "output": 440,
+        "thinking": 2969,
+        "cached": 0,
+        "total_input": 18735,
+        "total_output": 3409
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "grep_files": 2
+        }
+      }
+    }
+  }
+]

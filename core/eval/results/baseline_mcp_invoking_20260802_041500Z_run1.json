@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified that `ExecuteAsync` is not a valid method on `db.DB`, pointing out that `db.DB` only has `Execute`. This completely satisfies the requirement in the rubric.",
+      "findings": [
+        "Accurately identified that ExecuteAsync does not exist on db.DB.",
+        "Suggested valid alternatives (using Execute or implementing ExecuteAsync)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 14064,
+        "output": 277,
+        "thinking": 524,
+        "cached": 0,
+        "total_input": 14064,
+        "total_output": 801
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "grep_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The review failed to meet the rubric's key requirement: fetching the specified URL (https://ai.google.dev/api/rest/v1beta/models/generateContent) and verifying/confirming API usage against the documentation. Instead, the reviewer only made a surface-level observation about a '// BUG:' comment in the stub code without performing any verification against the actual documentation.",
+      "findings": [
+        "Failed to fetch the URL specified in the rubric to verify API documentation.",
+        "Made only a superficial comment regarding tracking issues for the bug comment rather than validating API usage.",
+        "Approved the PR without fulfilling the mandatory documentation check."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 14899,
+        "output": 185,
+        "thinking": 3549,
+        "cached": 0,
+        "total_input": 14899,
+        "total_output": 3734
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "grep_files": 1
+        }
+      }
+    }
+  }
+]

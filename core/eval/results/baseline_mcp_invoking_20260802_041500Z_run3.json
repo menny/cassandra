@@ -1,0 +1,64 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric requirement. It correctly identified that `ExecuteAsync` is not a valid method on `*db.DB` by checking the `lib/db` package, pointed out that it will cause a compilation error, and suggested constructive alternatives.",
+      "findings": [
+        "Accurately identified that `ExecuteAsync` does not exist on `*db.DB`.",
+        "Correctly noted that this will cause a compilation error.",
+        "Suggested appropriate fixes and cleanups in a professional tone."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 16916,
+        "output": 261,
+        "thinking": 1215,
+        "cached": 0,
+        "total_input": 16916,
+        "total_output": 1476
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review completely failed to meet the rubric requirements. The rubric required the agent to fetch https://ai.google.dev/api/rest/v1beta/models/generateContent and identify discrepancies or confirm API usage based on the official documentation. The reviewer ignored this instruction entirely, provided superficial comments, and approved the pull request without performing the required verification.",
+      "findings": [
+        "Failed to fetch or check the required API documentation URL as specified in the rubric.",
+        "Did not evaluate the API usage or endpoint correctness against the documentation.",
+        "Gave unhelpful fluff feedback and approved the pull request prematurely."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3715,
+        "output": 97,
+        "thinking": 937,
+        "cached": 0,
+        "total_input": 3715,
+        "total_output": 1034
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]

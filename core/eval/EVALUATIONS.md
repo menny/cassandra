@@ -8,15 +8,15 @@ This configuration uses the standard Cassandra settings without any supplemental
 
 <!-- EVAL_RESULTS_START:baseline -->
 **Config**: `cassandra.toml`
-**Commit**: [`df0c1fb`](https://github.com/menny/cassandra/commit/df0c1fb1af0bfb083cd422a46e6ca9b56f79a587)
+**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `simple-bug` | Simple Bug Fix | The agent should identify that the `Divide` function does not check for division by zero. | 5 | 5 | 5.00 |
 | `interface-contract` | Interface Contract Violation | The agent MUST identify that `CreateAndSave` in `service.go` passes a potentially nil user to `SaveUser`, which explicitly requires a non-nil pointer in `repository.go`. | 5 | 5 | 5.00 |
 | `security-path-traversal` | Security: Path Traversal | The agent MUST identify the path traversal vulnerability in the `/file` handler and recommend using `filepath.Clean` or a boundary check. | 5 | 5 | 5.00 |
-| `local-agents-convention` | Local Agents Convention | The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`. | 0 | 5 | 3.00 |
-| **OVERALL** | | | **3.75** | **5.00** | **4.50** |
+| `local-agents-convention` | Local Agents Convention | The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`. | 5 | 5 | 5.00 |
+| **OVERALL** | | | **5.00** | **5.00** | **5.00** |
 
 <!-- EVAL_RESULTS_END:baseline -->
 
@@ -26,13 +26,13 @@ This suite evaluates the agent's ability to discover, understand, and correctly 
 
 <!-- EVAL_RESULTS_START:baseline_mcp_invoking -->
 **Config**: `cassandra.toml`
-**Commit**: [`df0c1fb`](https://github.com/menny/cassandra/commit/df0c1fb1af0bfb083cd422a46e6ca9b56f79a587)
+**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
-| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 4 | 2.00 |
-| **OVERALL** | | | **3.00** | **4.50** | **3.50** |
+| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 2 | 1.20 |
+| **OVERALL** | | | **3.00** | **3.50** | **3.10** |
 
 <!-- EVAL_RESULTS_END:baseline_mcp_invoking -->
 

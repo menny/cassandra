@@ -1,0 +1,122 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the missing division by zero check, which was the key requirement in the rubric. Furthermore, it provided a constructiveness and idiomatic suggestion for Go (returning an error tuple) and acknowledged the positive change in the diff.",
+      "findings": [
+        "Accurately identified division by zero risk when `b == 0`.",
+        "Provided a constructive, idiomatic Go solution returning `(int, error)`.",
+        "No false positives."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6584,
+        "output": 221,
+        "thinking": 1206,
+        "cached": 0,
+        "total_input": 6584,
+        "total_output": 1427
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the exact issue required by the rubric: passing a potentially nil `User` pointer to `SaveUser` when `name` is empty. It explained the risk clearly and suggested an appropriate fix (validating `name` early).",
+      "findings": [
+        "Accurately identified that `u` can be nil when passed to `SaveUser`.",
+        "Constructively suggested validating `name` early to prevent the nil pointer dereference."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8079,
+        "output": 194,
+        "thinking": 427,
+        "cached": 0,
+        "total_input": 8079,
+        "total_output": 621
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review fully met the rubric requirements. It clearly identified the path traversal vulnerability in the `/file` endpoint and provided a concrete remediation strategy using `filepath.Clean` along with a boundary check (`strings.HasPrefix`). Furthermore, it correctly called out the ignored error in `os.ReadFile` and provided professional, constructive feedback.",
+      "findings": [
+        "Successfully identified the path traversal vulnerability in the `/file` handler.",
+        "Recommended using `filepath.Clean` and a boundary check (`strings.HasPrefix`) to prevent directory traversal attacks.",
+        "Correctly flagged the ignored error in `os.ReadFile`."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 315,
+        "thinking": 2154,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 2469
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review successfully identified the mandatory SafeQuery wrapper requirement specified in the rubric. In addition, it correctly pointed out a critical bug where the query results were not scanned and a dummy value was returned. The feedback is accurate, constructive, and complete.",
+      "findings": [
+        "Correctly identified the violation of using raw db.Query instead of SafeQuery wrapper as required by AGENTS.md.",
+        "Identified an additional logical bug where rows are not scanned and the function returns hardcoded 0."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8577,
+        "output": 245,
+        "thinking": 768,
+        "cached": 0,
+        "total_input": 8577,
+        "total_output": 1013
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]

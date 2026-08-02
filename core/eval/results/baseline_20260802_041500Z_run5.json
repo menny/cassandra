@@ -1,0 +1,116 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified the issue specified in the rubric: the `Divide` function does not check for division by zero, which causes a runtime panic in Go. Furthermore, the feedback provided is constructive and offers an idiomatic Go solution (returning an error alongside the result).",
+      "findings": [
+        "Correctly identified that division by zero is not handled and causes a runtime panic.",
+        "Provided a clear, constructive, and idiomatic Go solution to address the issue."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3583,
+        "output": 127,
+        "thinking": 1049,
+        "cached": 0,
+        "total_input": 3583,
+        "total_output": 1176
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately and clearly identifies the exact bug specified in the rubric: passing a potentially nil pointer `u` to `SaveUser` when `name` is empty. It explains the risk (runtime panic or unhandled error) and offers constructive advice on how to address it.",
+      "findings": [
+        "Accurately identified that a nil `User` pointer is passed to `SaveUser` when `name` is empty.",
+        "Provided clear and constructive feedback with actionable steps to resolve the issue."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3696,
+        "output": 106,
+        "thinking": 525,
+        "cached": 0,
+        "total_input": 3696,
+        "total_output": 631
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the critical path traversal vulnerability in the `/file` endpoint, accurately explained how `filepath.Join` fails to prevent directory traversal when `..` relative paths are supplied, and specifically recommended boundary checks/`filepath.Clean`. Furthermore, the review identified other legitimate issues such as unhandled errors from `os.ReadFile` and `http.ListenAndServe`.",
+      "findings": [
+        "Accurately identified path traversal vulnerability in `/file` endpoint.",
+        "Recommended appropriate fixes (`filepath.Clean` and prefix/boundary checks).",
+        "Provided additional valid feedback regarding error handling and server timeout configuration."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 375,
+        "thinking": 2055,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 2430
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review fully met the rubric requirement by clearly identifying that raw `db.Query` was used instead of the mandatory `SafeQuery` wrapper required in `internal/db`. Additionally, the review correctly identified a critical logic bug where the function returned 0 without scanning the query results into a variable. The feedback was constructive, accurate, and professional.",
+      "findings": [
+        "Correctly identified the violation of using raw `db.Query` instead of `SafeQuery` as required by the rubric.",
+        "Correctly identified a logic bug where `rows.Scan` was missing and `0` was unconditionally returned.",
+        "Feedback was clear, polite, and actionable."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3783,
+        "output": 215,
+        "thinking": 1642,
+        "cached": 0,
+        "total_input": 3783,
+        "total_output": 1857
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]

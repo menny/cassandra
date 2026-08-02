@@ -1,0 +1,64 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The code review accurately identifies that `ExecuteAsync` does not exist on `db.DB`, specifically mentioning verification against `lib/db/db.go`. It provides clear, constructive guidance on how to resolve the issue (either using `Execute` or implementing `ExecuteAsync`) and correctly rejects the pull request.",
+      "findings": [
+        "Successfully identified that `ExecuteAsync` is not a valid method on `db.DB`.",
+        "Mentioned verification in `lib/db/db.go`.",
+        "Suggested constructive alternatives (`Execute` or implementing `ExecuteAsync`)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 17100,
+        "output": 254,
+        "thinking": 576,
+        "cached": 0,
+        "total_input": 17100,
+        "total_output": 830
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review failed to meet the explicit rubric requirement. The rubric mandated that the reviewer fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and confirm API usage/discrepancies against the documentation. The reviewer did not perform this check or verify the API endpoint and parameter usage.",
+      "findings": [
+        "Failed to fetch the required documentation URL https://ai.google.dev/api/rest/v1beta/models/generateContent.",
+        "Failed to confirm API parameter usage or endpoints against the official Google Gemini documentation.",
+        "Only made a superficial comment about the 'BUG' code comment without verifying the underlying technical facts."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3715,
+        "output": 104,
+        "thinking": 1619,
+        "cached": 0,
+        "total_input": 3715,
+        "total_output": 1723
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]

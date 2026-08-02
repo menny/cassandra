@@ -1,0 +1,63 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified that `ExecuteAsync` is not a valid method on `db.DB` and pointed out that this will cause a compilation error. It also helpfully suggested using `Execute` instead or implementing `ExecuteAsync`. This fully meets the rubric requirements.",
+      "findings": [
+        "Accurately identified that ExecuteAsync does not exist on db.DB.",
+        "Provided constructive suggestions for fixing the issue (using Execute or implementing ExecuteAsync)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 13050,
+        "output": 276,
+        "thinking": 2203,
+        "cached": 0,
+        "total_input": 13050,
+        "total_output": 2479
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review failed to satisfy the explicit rubric requirement: it did not fetch the documentation URL (https://ai.google.dev/api/rest/v1beta/models/generateContent) nor did it verify or confirm the API usage against the documentation. Instead, it provided a brief observation about the comment in the code and included a poem, completely missing the core evaluation task.",
+      "findings": [
+        "Failed to fetch the required URL (https://ai.google.dev/api/rest/v1beta/models/generateContent).",
+        "Did not verify or confirm API usage details against official documentation as required by the rubric.",
+        "Provided superficial feedback focusing only on the comment instead of performing the requested verification."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3715,
+        "output": 85,
+        "thinking": 1098,
+        "cached": 0,
+        "total_input": 3715,
+        "total_output": 1183
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]
