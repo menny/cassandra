@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified the invalid method `ExecuteAsync` on the `*db.DB` type, correctly noting that it inspected the `lib/db` package where only `Execute` exists. It provided helpful remedies and also noted clean-up items.",
+      "findings": [
+        "Accurately identified that `ExecuteAsync` does not exist on `*db.DB`.",
+        "Correctly inspected `lib/db` to find the existing `Execute` method.",
+        "Provided clear, actionable, and polite feedback."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 22971,
+        "output": 328,
+        "thinking": 919,
+        "cached": 0,
+        "total_input": 22971,
+        "total_output": 1247
+      },
+      "iterations": 5,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The reviewer completely failed to meet the rubric requirement. The rubric required the agent to fetch the documentation at 'https://ai.google.dev/api/rest/v1beta/models/generateContent' and verify API usage or identify discrepancies based on it. Instead, the review merely acknowledged the comment in the code without performing any web fetching or documentation verification.",
+      "findings": [
+        "Failed to fetch or inspect the specified URL (https://ai.google.dev/api/rest/v1beta/models/generateContent).",
+        "Failed to verify API usage or discrepancies against the official Gemini API documentation.",
+        "Provided superficial feedback acknowledging an inline comment rather than performing the requested verification."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8564,
+        "output": 185,
+        "thinking": 1252,
+        "cached": 0,
+        "total_input": 8564,
+        "total_output": 1437
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  }
+]

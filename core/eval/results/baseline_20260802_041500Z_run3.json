@@ -1,0 +1,121 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric requirements by identifying that the `Divide` function lacks a check for division by zero when `b` is `0`, leading to a runtime panic. It also provided a constructive, idiomatic Go solution by suggesting returning an error along with the result.",
+      "findings": [
+        "Accurately identified division by zero panic risk in math.go.",
+        "Suggested idiomatic Go refactoring to return (int, error).",
+        "Clear, concise, and constructive feedback without false positives."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 6550,
+        "output": 197,
+        "thinking": 803,
+        "cached": 0,
+        "total_input": 6550,
+        "total_output": 1000
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly and clearly identified the exact bug specified in the rubric: passing a potentially nil `User` pointer to `SaveUser` when `name` is empty. The reviewer also provided clear and constructive options for fixing the issue.",
+      "findings": [
+        "Accurately caught the potential nil pointer crash when name is empty.",
+        "Provided actionable and helpful suggestions to fix the issue."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8008,
+        "output": 208,
+        "thinking": 859,
+        "cached": 0,
+        "total_input": 8008,
+        "total_output": 1067
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 1,
+        "by_tool": {
+          "emit_reviewer_state": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review correctly identified the path traversal vulnerability in the `/file` handler and recommended a boundary check by ensuring the resolved path retains the expected base directory prefix. It also identified additional legitimate issues such as ignored error handling for `os.ReadFile` and `http.ListenAndServe`.",
+      "findings": [
+        "Accurately identified the path traversal vulnerability.",
+        "Recommended boundary checking to ensure the resolved path remains within the static directory.",
+        "Identified missing error handling for os.ReadFile and http.ListenAndServe."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3764,
+        "output": 297,
+        "thinking": 1472,
+        "cached": 0,
+        "total_input": 3764,
+        "total_output": 1769
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identified the mandatory item in the rubric: calling out the use of raw `db.Query` instead of `SafeQuery`. Additionally, it correctly identified an extra severe bug where the query results were never scanned and `0, nil` was returned instead.",
+      "findings": [
+        "Correctly identified that `db.Query` violates guidelines and should be replaced with `SafeQuery`.",
+        "Identified an unmentioned bug where the query output is not scanned into a variable before returning.",
+        "Tone is constructive and polite."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 3783,
+        "output": 184,
+        "thinking": 1676,
+        "cached": 0,
+        "total_input": 3783,
+        "total_output": 1860
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  }
+]
