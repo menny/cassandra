@@ -74,6 +74,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--ignored-lock-files` | Comma-separated list of lock files to ignore in diffs (overrides default) | (many) |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | |
 | `--max-tokens` | Max tokens for the LLM response | `8192` |
+| `--max-diff-bytes` | Maximum diff size in bytes before omitting full diff from prompt (0 to disable) | `10240` |
 
 ## GitHub Action Inputs
 
@@ -87,6 +88,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
 | `max_tokens` | Max tokens for the LLM response | `8192` | No |
+| `max_diff_bytes` | Maximum diff size in bytes before omitting full diff from the prompt (0 to disable) | `10240` | No |
 | `working_directory` | Working directory to review | `.` | No |
 | `main_guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` | No |
 | `supplemental_guidelines` | Additive guidelines to supplement the main guidelines. Multiline string where each line is a path or library prompt name. | | No |

@@ -19,6 +19,7 @@ go_library(
         "//llm/factory",
         "//tools",
         "//tools/mcp",
+        "//util",
         "@com_github_charmbracelet_bubbles//spinner",
         "@com_github_charmbracelet_bubbles//viewport",
         "@com_github_charmbracelet_bubbletea//:bubbletea",

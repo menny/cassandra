@@ -538,8 +538,42 @@ func TestPostComment_Pagination(t *testing.T) {
 		),
 	)
 	client := github.NewClient(mockedHTTPClient)
-
 	err = postComment(context.Background(), client, "owner", "repo", 1, bodyFile, "tag")
 	assert.NoError(t, err)
 	assert.Equal(t, 2, callCount)
+}
+
+func TestGetDiff_Success(t *testing.T) {
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.GetReposPullsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("diff --git a/foo.go b/foo.go\n+new line\ndiff --git a/go.sum b/go.sum\n+lock\n"))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, []string{"go.sum"})
+	assert.NoError(t, err)
+	assert.Contains(t, diff, "foo.go")
+	assert.NotContains(t, diff, "go.sum")
+}
+
+func TestGetDiff_406Fallback(t *testing.T) {
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.GetReposPullsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotAcceptable)
+				_, _ = w.Write([]byte(`{"message": "Sorry, the diff exceeded the maximum number of files (300).", "errors": [{"resource": "PullRequest", "field": "diff", "code": "too_large"}]}`))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, "", diff)
 }

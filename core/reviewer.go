@@ -19,6 +19,7 @@ import (
 	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/tools/mcp"
+	"github.com/menny/cassandra/util"
 	"golang.org/x/term"
 )
 
@@ -36,6 +37,7 @@ type Reviewer struct {
 	PreReviewMetrics         *SessionMetrics
 	CodeReviewMetrics        *SessionMetrics
 	DiscussionMetrics        *SessionMetrics
+	diffMap                  map[string]string
 }
 
 // NewReviewer instantiates a Reviewer based on the provided configuration.
@@ -55,7 +57,23 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	if cfg.Render != "markdown" && cfg.Render != "tui" {
 		notifier = tools.NoOpUserNotifier{}
 	}
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, cfg.AllowAskDeveloper, notifier)
+	var rReviewer *Reviewer
+	tools.RegisterLocalTools(
+		registry,
+		targetDir,
+		cfg.Base,
+		cfg.Head,
+		cfg.IgnoredLockFiles,
+		cfg.WishlistDir,
+		cfg.AllowAskDeveloper,
+		notifier,
+		func() map[string]string {
+			if rReviewer != nil {
+				return rReviewer.diffMap
+			}
+			return nil
+		},
+	)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.
@@ -133,7 +151,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
 
-	return &Reviewer{
+	rReviewer = &Reviewer{
 		Agent:                    NewAgent(client, registry, WithReporter(reporter)),
 		Config:                   cfg,
 		RootDir:                  targetDir,
@@ -143,7 +161,18 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		ApprovalEvaluationPrompt: approvalEvaluationPrompt,
 		mcpManager:               mcpManager,
 		llmFactory:               factory.New,
-	}, nil
+	}
+	return rReviewer, nil
+}
+
+// SetDiffMap sets the pre-parsed in-memory file diff map for on-demand diff retrieval.
+func (r *Reviewer) SetDiffMap(diffMap map[string]string) {
+	r.diffMap = diffMap
+}
+
+// SetDiff parses the unified diff and sets the in-memory file diff map.
+func (r *Reviewer) SetDiff(diffText string) {
+	r.diffMap = util.SplitUnifiedDiff(diffText)
 }
 
 // Close releases resources (like MCP server connections).
