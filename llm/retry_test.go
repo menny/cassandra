@@ -33,9 +33,9 @@ func (s *stubModel) GenerateStructuredContent(ctx context.Context, messages []Me
 	return s.GenerateContent(ctx, messages, nil, 0)
 }
 
-// immediateRetryModel makes retries instant by using a zero base delay.
+// immediateRetryModel makes retries instant by using a microsecond base delay.
 func newInstantRetryModel(inner Model, maxAttempts int) *RetryingModel {
-	return NewRetryingModel(inner, maxAttempts, 0)
+	return NewRetryingModelWithMaxDelay(inner, maxAttempts, time.Microsecond, time.Microsecond)
 }
 
 func TestRetryingModel_SuccessOnFirstAttempt(t *testing.T) {
@@ -139,4 +139,82 @@ func TestNewRetryingModel_Defaults(t *testing.T) {
 	m := NewRetryingModel(stub, 0, 0)
 	assert.Equal(t, DefaultRetryAttempts, m.maxAttempts)
 	assert.Equal(t, DefaultRetryBaseDelay, m.baseDelay)
+	assert.Equal(t, DefaultRetryMaxDelay, m.maxDelay)
+
+	// Explicit baseDelay larger than DefaultRetryMaxDelay should dynamically raise maxDelay.
+	mLarge := NewRetryingModel(stub, 0, 30*time.Second)
+	assert.Equal(t, 30*time.Second, mLarge.baseDelay)
+	assert.Equal(t, 30*time.Second, mLarge.maxDelay)
+}
+
+func TestNewRetryingModelWithMaxDelay_DefaultsAndCustom(t *testing.T) {
+	stub := &stubModel{responses: []*Response{{Text: "ok"}}}
+	m := NewRetryingModelWithMaxDelay(stub, 0, 0, 0)
+	assert.Equal(t, DefaultRetryAttempts, m.maxAttempts)
+	assert.Equal(t, DefaultRetryBaseDelay, m.baseDelay)
+	assert.Equal(t, DefaultRetryMaxDelay, m.maxDelay)
+
+	mCustom := NewRetryingModelWithMaxDelay(stub, 5, 2*time.Second, 10*time.Second)
+	assert.Equal(t, 5, mCustom.maxAttempts)
+	assert.Equal(t, 2*time.Second, mCustom.baseDelay)
+	assert.Equal(t, 10*time.Second, mCustom.maxDelay)
+
+	// Zero maxDelay with baseDelay > DefaultRetryMaxDelay.
+	mLarge := NewRetryingModelWithMaxDelay(stub, 0, 30*time.Second, 0)
+	assert.Equal(t, 30*time.Second, mLarge.baseDelay)
+	assert.Equal(t, 30*time.Second, mLarge.maxDelay)
+}
+
+func TestRetryingModel_BackoffCap(t *testing.T) {
+	stub := &stubModel{
+		errs: []error{
+			errors.New("err1"),
+			errors.New("err2"),
+			errors.New("err3"),
+			nil,
+		},
+		responses: []*Response{nil, nil, nil, {Text: "ok"}},
+	}
+	// baseDelay 50ms, maxDelay 60ms.
+	// attempt 0: t0
+	// attempt 1: wait 50ms -> delay becomes min(100ms, 60ms) = 60ms
+	// attempt 2: wait 60ms -> delay remains 60ms
+	// attempt 3: wait 60ms -> success
+	// Capped total wait: 50ms + 60ms + 60ms = 170ms.
+	// (Uncapped would be: 50ms + 100ms + 200ms = 350ms).
+	m := NewRetryingModelWithMaxDelay(stub, 5, 50*time.Millisecond, 60*time.Millisecond)
+
+	start := time.Now()
+	_, err := m.GenerateContent(context.Background(), nil, nil, 0)
+	require.NoError(t, err)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, 4, stub.callCount)
+	assert.GreaterOrEqual(t, elapsed, 150*time.Millisecond)
+	assert.Less(t, elapsed, 260*time.Millisecond)
+}
+
+func TestRetryingModel_GenerateStructuredContent_BackoffCap(t *testing.T) {
+	stub := &stubModel{
+		errs: []error{
+			errors.New("err1"),
+			errors.New("err2"),
+			errors.New("err3"),
+			nil,
+		},
+		responses: []*Response{nil, nil, nil, {Text: `{"ok":true}`}},
+	}
+	// baseDelay 50ms, maxDelay 60ms.
+	// Capped total wait: 50ms + 60ms + 60ms = 170ms (vs uncapped 350ms).
+	m := NewRetryingModelWithMaxDelay(stub, 5, 50*time.Millisecond, 60*time.Millisecond)
+
+	start := time.Now()
+	got, err := m.GenerateStructuredContent(context.Background(), nil, nil, StructuredConfig{})
+	require.NoError(t, err)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, &Response{Text: `{"ok":true}`}, got)
+	assert.Equal(t, 4, stub.callCount)
+	assert.GreaterOrEqual(t, elapsed, 150*time.Millisecond)
+	assert.Less(t, elapsed, 260*time.Millisecond)
 }
