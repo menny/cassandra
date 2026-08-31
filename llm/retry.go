@@ -26,12 +26,17 @@ type RetryingModel struct {
 
 // NewRetryingModel returns a Model that retries failed calls up to maxAttempts
 // times total (i.e. 1 initial attempt + maxAttempts-1 retries), doubling the
-// delay after each failure starting from baseDelay up to DefaultRetryMaxDelay.
+// delay after each failure starting from baseDelay up to DefaultRetryMaxDelay
+// (or baseDelay if baseDelay is larger than DefaultRetryMaxDelay).
 //
 // The wrapper respects context cancellation: if ctx is cancelled between
 // attempts, the last error is returned immediately without further retries.
 func NewRetryingModel(inner Model, maxAttempts int, baseDelay time.Duration) *RetryingModel {
-	return NewRetryingModelWithMaxDelay(inner, maxAttempts, baseDelay, DefaultRetryMaxDelay)
+	maxDelay := DefaultRetryMaxDelay
+	if baseDelay > maxDelay {
+		maxDelay = baseDelay
+	}
+	return NewRetryingModelWithMaxDelay(inner, maxAttempts, baseDelay, maxDelay)
 }
 
 // NewRetryingModelWithMaxDelay returns a Model that retries failed calls up to
@@ -45,6 +50,9 @@ func NewRetryingModelWithMaxDelay(inner Model, maxAttempts int, baseDelay, maxDe
 	}
 	if maxDelay <= 0 {
 		maxDelay = DefaultRetryMaxDelay
+		if baseDelay > maxDelay {
+			maxDelay = baseDelay
+		}
 	}
 	return &RetryingModel{inner: inner, maxAttempts: maxAttempts, baseDelay: baseDelay, maxDelay: maxDelay}
 }
