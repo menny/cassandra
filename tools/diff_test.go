@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/util"
 )
 
@@ -235,6 +236,84 @@ func TestFetchGitCommits(t *testing.T) {
 		}
 		if !strings.Contains(commits, "- extra commit") {
 			t.Errorf("expected commit message 'extra commit', got:\n%s", commits)
+		}
+	})
+}
+
+func TestLocalGetFileDiff(t *testing.T) {
+	tmpDir := t.TempDir()
+	setupGitRepo(t, tmpDir)
+
+	t.Run("git diff fallback for changed file", func(t *testing.T) {
+		r := NewRegistry()
+		RegisterLocalTools(r, tmpDir, "main", "feature", util.DefaultLockFiles, "", false, nil, nil)
+
+		args := `{"file_path":"feature.txt"}`
+		res, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(res, "+feature content") {
+			t.Errorf("expected diff to contain '+feature content', got: %s", res)
+		}
+	})
+
+	t.Run("in-memory diffMap provider", func(t *testing.T) {
+		r := NewRegistry()
+		diffMap := map[string]string{
+			"custom.go": "diff --git a/custom.go b/custom.go\n+in-memory diff content",
+		}
+		RegisterLocalTools(r, tmpDir, "main", "HEAD", util.DefaultLockFiles, "", false, nil, func() map[string]string {
+			return diffMap
+		})
+
+		args := `{"file_path":"custom.go"}`
+		res, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(res, "+in-memory diff content") {
+			t.Errorf("expected in-memory diff content, got: %s", res)
+		}
+	})
+
+	t.Run("ignored lockfile", func(t *testing.T) {
+		r := NewRegistry()
+		RegisterLocalTools(r, tmpDir, "main", "HEAD", util.DefaultLockFiles, "", false, nil, nil)
+
+		args := `{"file_path":"go.sum"}`
+		res, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(res, "Lockfile diffs are ignored by default") {
+			t.Errorf("expected lockfile ignored message, got: %s", res)
+		}
+	})
+
+	t.Run("unchanged file", func(t *testing.T) {
+		r := NewRegistry()
+		RegisterLocalTools(r, tmpDir, "main", "feature", util.DefaultLockFiles, "", false, nil, nil)
+
+		args := `{"file_path":"initial.txt"}`
+		res, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: args,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(res, "No diff found for initial.txt") {
+			t.Errorf("expected no diff found message, got: %s", res)
 		}
 	})
 }

@@ -43,6 +43,7 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Implementation**: `tools.Registry` (in `tools/registry.go`) implements this interface. It stores a list of `llm.ToolDef` and a map of `ToolHandler` functions.
 - **Local Tools**: High-level tools implemented under `tools/` and registered via `tools.RegisterLocalTools`:
   - `read_file`: Reads file content from the local disk.
+  - `get_file_diff`: Retrieves the git diff for a specific file between base and head branches.
   - `glob_files`: Finds files matching a pattern or extension.
   - `grep_files`: Searches for patterns in the repository using `git grep`.
   - `wishlist_tool`: Records a capability gap the LLM encountered during a review into a configurable directory for future tool development.

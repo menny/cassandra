@@ -192,7 +192,7 @@ func TestLocalReadFile_SymlinkEscape(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	RegisterLocalTools(r, workspaceRoot, nil, "", false, nil)
+	RegisterLocalTools(r, workspaceRoot, "main", "HEAD", nil, "", false, nil, nil)
 
 	// Create a file OUTSIDE the workspace root
 	secretFile := filepath.Join(tmpDir, "secret.txt")
@@ -228,7 +228,7 @@ func TestLocalGrepFiles_SymlinkEscape(t *testing.T) {
 	}
 
 	r := NewRegistry()
-	RegisterLocalTools(r, workspaceRoot, nil, "", false, nil)
+	RegisterLocalTools(r, workspaceRoot, "main", "HEAD", nil, "", false, nil, nil)
 
 	// Create a file OUTSIDE the workspace root
 	secretDir := filepath.Join(tmpDir, "outside")
@@ -288,6 +288,39 @@ func TestLocalGrepFiles_SymlinkEscape(t *testing.T) {
 		})
 		if err == nil {
 			t.Error("expected error when querying through circular trampoline symlink base directory, got nil")
+		}
+	})
+}
+
+func TestLocalGetFileDiff_Safety(t *testing.T) {
+	tmpDir := t.TempDir()
+	workspaceRoot := filepath.Join(tmpDir, "workspace")
+	if err := os.Mkdir(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRegistry()
+	RegisterLocalTools(r, workspaceRoot, "main", "HEAD", nil, "", false, nil, nil)
+
+	t.Run("empty path should error", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": ""})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error for empty file_path, got nil")
+		}
+	})
+
+	t.Run("path traversal outside root should error", func(t *testing.T) {
+		args, _ := json.Marshal(map[string]any{"file_path": "../../secret.txt"})
+		_, err := r.HandleCall(context.Background(), llm.ToolCall{
+			Name:      "get_file_diff",
+			Arguments: string(args),
+		})
+		if err == nil {
+			t.Error("expected error for path traversal outside root, got nil")
 		}
 	})
 }

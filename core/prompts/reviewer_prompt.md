@@ -12,6 +12,8 @@ If the input includes <personal_review_guidelines>, treat them as the reviewer's
 
 Use the `read_file` tool when you need context outside the diff — for example, to check a function signature, an import, or a related test. For large files, use the `line_start`, `line_end`, or `tail_lines` parameters to read only the relevant sections and save token context.
 
+Use the `get_file_diff` tool when the full diff was omitted due to size limits or when you need to inspect the exact diff for a specific file.
+
 Lockfile diffs (e.g. `yarn.lock`, `package-lock.json`, `Cargo.lock`, `go.sum`) are stripped from the input. If a lockfile change is relevant to your review (should be rarely), use read_file to inspect it directly.
 
 Use the glob_files tool when you need to discover what files exist in a directory or match a pattern — for example, to find all tests for a module, check whether a related file exists, or explore the structure of an unfamiliar area.

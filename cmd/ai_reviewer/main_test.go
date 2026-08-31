@@ -266,3 +266,19 @@ func TestRun_AllowAskDeveloperValidation(t *testing.T) {
 		require.Contains(t, err.Error(), "failed to read diff file")
 	})
 }
+
+func TestRun_MaxDiffBytes(t *testing.T) {
+	tmpDir := t.TempDir()
+	tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+	tomlContent := `
+max-diff-bytes = 5000
+`
+	require.NoError(t, os.WriteFile(tomlPath, []byte(tomlContent), 0o644))
+
+	cfg, err := config.Load(tomlPath)
+	require.NoError(t, err)
+	require.Equal(t, 5000, cfg.MaxDiffBytes)
+
+	defaultCfg := config.NewDefaultConfig()
+	require.Equal(t, config.DefaultMaxDiffBytes, defaultCfg.MaxDiffBytes)
+}

@@ -2,9 +2,12 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/util"
 )
 
@@ -63,4 +66,81 @@ func FetchGitCommits(ctx context.Context, workingDir, base, head string) (string
 	}
 
 	return string(out), nil
+}
+
+func registerLocalGetFileDiff(r *Registry, root, base, head string, ignoredLockFiles []string, diffMapProvider func() map[string]string) {
+	def := llm.ToolDef{
+		Name:        "get_file_diff",
+		Description: "Get the git diff for a specific file between base and head branches. Useful when the full diff is omitted due to size or for targeted inspection.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"file_path": map[string]any{
+					"type":        "string",
+					"description": "Relative path to the file to get the diff for.",
+				},
+			},
+			"required": []string{"file_path"},
+		},
+	}
+
+	type args struct {
+		FilePath string `json:"file_path"`
+	}
+
+	RegisterToolWithArgs(r, def, func(ctx context.Context, args args) (string, error) {
+		if strings.TrimSpace(args.FilePath) == "" {
+			return "", errors.New("get_file_diff failed: file_path cannot be empty")
+		}
+
+		relPath := args.FilePath
+		if root != "" {
+			var err error
+			relPath, err = util.ValidateAndRel(root, args.FilePath)
+			if err != nil {
+				return "", fmt.Errorf("get_file_diff failed: %w", err)
+			}
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		if util.IsLockFile(relPath, ignoredLockFiles) {
+			return "Lockfile diffs are ignored by default. Use read_file to inspect lockfile contents directly if needed.", nil
+		}
+
+		const maxReturnBytes = 40000
+
+		if diffMapProvider != nil {
+			if dm := diffMapProvider(); dm != nil {
+				if content, ok := dm[relPath]; ok {
+					if len(content) <= maxReturnBytes {
+						return content, nil
+					}
+					return content[:maxReturnBytes] + "\n... (truncated to 40k bytes)", nil
+				}
+			}
+		}
+
+		var diffRange string
+		if head == "" || head == "HEAD" {
+			diffRange = base
+		} else {
+			diffRange = fmt.Sprintf("%s...%s", base, head)
+		}
+
+		cmdArgs := []string{"diff", diffRange, "--", relPath}
+		out, truncated, err := util.RunGitWithLimit(ctx, root, maxReturnBytes, cmdArgs...)
+		if err != nil {
+			return "", fmt.Errorf("get_file_diff failed: %w\nOutput: %s", err, string(out))
+		}
+
+		if len(out) == 0 {
+			return fmt.Sprintf("No diff found for %s.", relPath), nil
+		}
+
+		res := strings.TrimSpace(string(out))
+		if truncated {
+			res += "\n... (truncated to 40k bytes)"
+		}
+		return res, nil
+	})
 }
