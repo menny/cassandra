@@ -73,7 +73,7 @@ type NoOpUserNotifier struct{}
 
 func (NoOpUserNotifier) NotifyUser() {}
 
-func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool, allowPRComment bool, notifier UserNotifier, metadataJSONFile ...string) {
+func RegisterLocalTools(r *Registry, root, base, head string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool, allowPRComment bool, notifier UserNotifier, diffMapProvider func() map[string]string, metadataJSONFile ...string) {
 	if notifier == nil {
 		notifier = NoOpUserNotifier{}
 	}
@@ -89,6 +89,7 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 	registerLocalReadFile(r, root)
 	registerLocalGlobFiles(r, root)
 	registerLocalGrepFiles(r, root, ignoredLockFiles)
+	registerLocalGetFileDiff(r, root, base, head, ignoredLockFiles, diffMapProvider)
 	registerWishlistTool(r, wishlistDir)
 	registerEmitReviewerState(r)
 	registerUpdateReviewVerdict(r)

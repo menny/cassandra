@@ -26,6 +26,7 @@ type Config struct {
 	MainGuidelines               string         `mapstructure:"main-guidelines"`
 	SupplementalGuidelines       []string       `mapstructure:"supplemental-guidelines"`
 	MaxTokens                    int            `mapstructure:"max-tokens"`
+	MaxDiffBytes                 int            `mapstructure:"max-diff-bytes"`
 	ReviewOutputFile             string         `mapstructure:"review-output-file"`
 	OutputJSONFile               string         `mapstructure:"output-json"`
 	MetricsJSONFile              string         `mapstructure:"metrics-json"`
@@ -51,6 +52,9 @@ type Config struct {
 	CassandraConfigFolder        string         `mapstructure:"cassandra-config-folder"`
 }
 
+// DefaultMaxDiffBytes is the default maximum diff size (10 KB) allowed in the prompt before omitting the diff.
+const DefaultMaxDiffBytes = 10240
+
 // NewDefaultConfig returns a Config with default values populated.
 func NewDefaultConfig() *Config {
 	return &Config{
@@ -58,6 +62,7 @@ func NewDefaultConfig() *Config {
 		Head:                  "HEAD",
 		MainGuidelines:        "general",
 		MaxTokens:             llm.DefaultMaxTokens,
+		MaxDiffBytes:          DefaultMaxDiffBytes,
 		IgnoredLockFiles:      util.DefaultLockFiles,
 		Render:                "raw",
 		AllowAskDeveloper:     false,
@@ -75,6 +80,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("base", "main")
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
+	v.SetDefault("max-diff-bytes", DefaultMaxDiffBytes)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
 	v.SetDefault("allow-ask-developer", false)
