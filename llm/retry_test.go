@@ -33,9 +33,9 @@ func (s *stubModel) GenerateStructuredContent(ctx context.Context, messages []Me
 	return s.GenerateContent(ctx, messages, nil, 0)
 }
 
-// immediateRetryModel makes retries instant by using a zero base delay.
+// immediateRetryModel makes retries instant by using a microsecond base delay.
 func newInstantRetryModel(inner Model, maxAttempts int) *RetryingModel {
-	return NewRetryingModel(inner, maxAttempts, 0)
+	return NewRetryingModelWithMaxDelay(inner, maxAttempts, time.Microsecond, time.Microsecond)
 }
 
 func TestRetryingModel_SuccessOnFirstAttempt(t *testing.T) {
@@ -139,4 +139,47 @@ func TestNewRetryingModel_Defaults(t *testing.T) {
 	m := NewRetryingModel(stub, 0, 0)
 	assert.Equal(t, DefaultRetryAttempts, m.maxAttempts)
 	assert.Equal(t, DefaultRetryBaseDelay, m.baseDelay)
+	assert.Equal(t, DefaultRetryMaxDelay, m.maxDelay)
+}
+
+func TestNewRetryingModelWithMaxDelay_DefaultsAndCustom(t *testing.T) {
+	stub := &stubModel{responses: []*Response{{Text: "ok"}}}
+	m := NewRetryingModelWithMaxDelay(stub, 0, 0, 0)
+	assert.Equal(t, DefaultRetryAttempts, m.maxAttempts)
+	assert.Equal(t, DefaultRetryBaseDelay, m.baseDelay)
+	assert.Equal(t, DefaultRetryMaxDelay, m.maxDelay)
+
+	mCustom := NewRetryingModelWithMaxDelay(stub, 5, 2*time.Second, 10*time.Second)
+	assert.Equal(t, 5, mCustom.maxAttempts)
+	assert.Equal(t, 2*time.Second, mCustom.baseDelay)
+	assert.Equal(t, 10*time.Second, mCustom.maxDelay)
+}
+
+func TestRetryingModel_BackoffCap(t *testing.T) {
+	var callTimes []time.Time
+	stub := &stubModel{
+		errs: []error{
+			errors.New("err1"),
+			errors.New("err2"),
+			errors.New("err3"),
+			nil,
+		},
+		responses: []*Response{nil, nil, nil, {Text: "ok"}},
+	}
+	// baseDelay 10ms, maxDelay 15ms.
+	// attempt 0: t0
+	// attempt 1: wait 10ms -> delay becomes min(20ms, 15ms) = 15ms
+	// attempt 2: wait 15ms -> delay remains 15ms
+	// attempt 3: wait 15ms -> success
+	m := NewRetryingModelWithMaxDelay(stub, 5, 10*time.Millisecond, 15*time.Millisecond)
+
+	start := time.Now()
+	_, err := m.GenerateContent(context.Background(), nil, nil, 0)
+	require.NoError(t, err)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, 4, stub.callCount)
+	// Expected total sleep: ~10ms + ~15ms + ~15ms = 40ms. Should definitely be < 200ms and >= 35ms.
+	assert.GreaterOrEqual(t, elapsed, 35*time.Millisecond)
+	_ = callTimes
 }
