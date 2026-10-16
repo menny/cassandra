@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/menny/cassandra/core/config"
@@ -130,6 +131,9 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, defaultACPSessionID, newSessResp.SessionId)
+	require.NotNil(t, newSessResp.Modes)
+	require.Equal(t, acpModeReview, newSessResp.Modes.CurrentModeId)
+	require.Len(t, newSessResp.Modes.AvailableModes, 2)
 
 	// 2. Simulate initial review streaming through core.Reporter methods
 	cfg := config.NewDefaultConfig()
@@ -137,6 +141,8 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	cfg.Model = "gemini-test"
 	cfg.Render = "acp"
 	cfg.InteractivePostReview = true
+	cfg.Base = "main"
+	cfg.Head = "HEAD"
 
 	reporter.ReportConfig(cfg, "/workspace")
 	reporter.ReportFetchingDiff()
@@ -169,6 +175,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.NoError(t, reporter.ReportStageReview("Pre-Review Summary", "Summary text"))
 	reporter.ReportFinalReview()
 	require.NoError(t, reporter.ReportReview("Initial automated review findings."))
+	reporter.ReportReviewHeader(1, "general", "gemini-test")
 	reporter.ReportWarning("minor warning", errors.New("disk slow"))
 	reporter.ReportError(errors.New("non-fatal error"))
 
@@ -226,8 +233,10 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, acp.StopReasonEndTurn, promptResp2.StopReason)
 
-	// Close session via ACP CloseSession RPC
-	_, err = clientConn.CloseSession(sessionCtx, acp.CloseSessionRequest{
+	// Close session via ACP CloseSession RPC using a distinct request context
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer closeCancel()
+	_, err = clientConn.CloseSession(closeCtx, acp.CloseSessionRequest{
 		SessionId: newSessResp.SessionId,
 	})
 	require.NoError(t, err)
@@ -249,6 +258,10 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 		toolStarts    []*acp.SessionUpdateToolCall
 		toolCompleted int
 		toolFailed    int
+		sessionInfos  []*acp.SessionSessionInfoUpdate
+		modeUpdates   []*acp.SessionCurrentModeUpdate
+		plans         []*acp.SessionUpdatePlan
+		usageUpdates  []*acp.SessionUsageUpdate
 	)
 	for _, n := range updates {
 		require.Equal(t, newSessResp.SessionId, n.SessionId)
@@ -270,6 +283,18 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 				toolFailed++
 			}
 		}
+		if u.SessionInfoUpdate != nil {
+			sessionInfos = append(sessionInfos, u.SessionInfoUpdate)
+		}
+		if u.CurrentModeUpdate != nil {
+			modeUpdates = append(modeUpdates, u.CurrentModeUpdate)
+		}
+		if u.Plan != nil {
+			plans = append(plans, u.Plan)
+		}
+		if u.UsageUpdate != nil {
+			usageUpdates = append(usageUpdates, u.UsageUpdate)
+		}
 	}
 
 	require.Contains(t, thoughts, "[security] Checking auth middleware\n")
@@ -281,6 +306,32 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.Equal(t, acp.ToolKindSearch, toolStarts[1].Kind)
 	require.Equal(t, 1, toolCompleted)
 	require.Equal(t, 1, toolFailed)
+
+	// Verify SessionInfoUpdate (title, metadata)
+	require.NotEmpty(t, sessionInfos)
+	require.NotNil(t, sessionInfos[0].Title)
+	require.Contains(t, *sessionInfos[0].Title, "Code Review")
+	require.Equal(t, "google", sessionInfos[0].Meta["provider"])
+
+	// Verify mode transition from review to chat
+	require.NotEmpty(t, modeUpdates)
+	require.Equal(t, acpModeChat, modeUpdates[0].CurrentModeId)
+
+	// Verify plan updates
+	require.NotEmpty(t, plans)
+	latestPlan := plans[len(plans)-1]
+	require.NotEmpty(t, latestPlan.Entries)
+	var foundChatPlan bool
+	for _, entry := range latestPlan.Entries {
+		if entry.Content == planStepChat && entry.Status == acp.PlanEntryStatusInProgress {
+			foundChatPlan = true
+		}
+	}
+	require.True(t, foundChatPlan, "expected plan to have chat step in progress")
+
+	// Verify token usage updates during chat turns
+	require.NotEmpty(t, usageUpdates)
+	require.Equal(t, 150, usageUpdates[0].Used)
 
 	// Verify diagnostics went to stderr, not stdout
 	stderrText := stderrBuf.String()

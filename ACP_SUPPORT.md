@@ -8,6 +8,9 @@ Key specification resources:
 - **Official Specification & Overview**: [https://agentclientprotocol.com/protocol/overview](https://agentclientprotocol.com/protocol/overview)
 - **Initialization & Session Setup**: [https://agentclientprotocol.com/protocol/initialization](https://agentclientprotocol.com/protocol/initialization) and [https://agentclientprotocol.com/protocol/session-setup](https://agentclientprotocol.com/protocol/session-setup)
 - **Prompt Turn & Streaming Updates**: [https://agentclientprotocol.com/protocol/prompt-turn](https://agentclientprotocol.com/protocol/prompt-turn)
+- **Session Modes**: [https://agentclientprotocol.com/protocol/session-modes](https://agentclientprotocol.com/protocol/session-modes)
+- **Agent Plan**: [https://agentclientprotocol.com/protocol/agent-plan](https://agentclientprotocol.com/protocol/agent-plan)
+- **Extensibility**: [https://agentclientprotocol.com/protocol/extensibility](https://agentclientprotocol.com/protocol/extensibility)
 - **Go SDK**: [`github.com/coder/acp-go-sdk`](https://github.com/coder/acp-go-sdk)
 
 ---
@@ -17,11 +20,28 @@ Key specification resources:
 When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` while preserving its full automated code review pipeline:
 
 1. **Immediate ACP Handshake**: Cassandra accepts the client's `initialize` and `session/new` requests as soon as it starts.
-2. **Real-Time Initial Review Streaming**: Immediately after `session/new` completes, Cassandra executes its normal context gathering (git diff, commit messages, PR metadata, MCP servers) and multi-stage ReAct review loop, streaming every step to the ACP client via `session/update` notifications:
-   - **Thoughts & Reasoning** (`agent_thought_chunk`): Initialization status, ReAct iteration markers, and `emit_reviewer_state` focus areas/hypotheses.
-   - **Tool Executions** (`tool_call` & `tool_call_update`): Live status (`in_progress` $\to$ `completed` / `failed`), tool kind (`read`, `search`, `other`), and file locations for local and MCP tools.
-   - **Review Output** (`agent_message_chunk`): Optional pre-review summary and the final Markdown code review report.
-3. **Interactive Post-Review Chat (`session/prompt`)**: Once the initial review finishes, Cassandra transitions into its post-review conversational phase (`RunChatFlight`), retaining the full review conversation history and toolset. The ACP client can send any number of `session/prompt` turns to ask follow-up questions, challenge findings, or request deeper code inspection, and can cancel in-flight turns via `session/cancel`.
+2. **Session Modes (`session_mode`)**:
+   - `NewSessionResponse` advertises available session modes:
+     - `review` (*Automated Code Review* — analyzing git diff, commit history, and repository context)
+     - `chat` (*Interactive Post-Review Q&A* — discussing review findings and answering follow-up questions)
+   - When initial review finishes and Cassandra enters interactive discussion, it automatically emits a `current_mode_update` notification so the harness status bar or UI mode reflects the transition.
+3. **Session Metadata & Dynamic Title (`session_info_update`)**:
+   - Cassandra dynamically pushes `session_info_update` notifications setting a human-readable title (e.g., `Code Review: main..HEAD (5 files, gemini-2.5-pro)`) and rich `_meta` attributes (`provider`, `model`, `base`, `head`, `targetDir`, `changedFiles`, `guidelines`).
+4. **Execution Plan Checklist (`plan`)**:
+   - Cassandra publishes and live-updates an ACP Execution Plan (`entries` with `content`, `priority`, and `status`: `pending` $\to$ `in_progress` $\to$ `completed`):
+     - `Gather git diff and commit context`
+     - `Generate pre-review summary` (when `--pre-review-prompt-file` is configured)
+     - `Inspect code and formulate review`
+     - `Interactive post-review discussion`
+5. **Context Window & Token Usage (`usage_update`)**:
+   - On each interaction (during review iterations and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`).
+6. **Real-Time Initial Review Streaming**:
+   - Immediately after `session/new` completes, Cassandra executes its context gathering and multi-stage ReAct review loop, streaming progress via `session/update`:
+     - **Thoughts & Reasoning** (`agent_thought_chunk`): Status updates, ReAct iteration markers, and `emit_reviewer_state` hypotheses.
+     - **Tool Executions** (`tool_call` & `tool_call_update`): Live status (`in_progress` $\to$ `completed` / `failed`), tool kind (`read`, `search`, `other`), and file locations.
+     - **Review Output** (`agent_message_chunk`): Optional pre-review summary and final Markdown code review report.
+7. **Interactive Post-Review Chat (`session/prompt`)**:
+   - Cassandra transitions into its post-review conversational phase (`RunChatFlight`), retaining full review conversation history and tools. The ACP client can send any number of `session/prompt` turns to ask follow-up questions, challenge findings, or request deeper inspection, and can cancel in-flight turns via `session/cancel`.
 
 ### Enabling ACP Mode
 
@@ -81,14 +101,19 @@ flowchart LR
 1. **Handshake & Ordering Gate (`sessionGateWriter`)**:
    - `NewACPReporter` starts `acp.NewAgentSideConnection` on a background goroutine.
    - Any `core.Reporter` calls invoked while Cassandra boots wait on `sessionReady` before emitting `session/update` notifications.
-   - When the client sends `session/new`, `NewSession` arms `sessionGateWriter` so `sessionReady` is closed immediately *after* the `NewSessionResponse` JSON-RPC frame is flushed to `stdout`. This guarantees deterministic wire ordering where `session/update` notifications never precede the `session/new` response.
+   - When the client sends `session/new`, `NewSession` advertises available session modes (`review`, `chat`) and arms `sessionGateWriter` so `sessionReady` is closed immediately *after* the `NewSessionResponse` JSON-RPC frame is flushed to `stdout`. This guarantees deterministic wire ordering where `session/update` notifications never precede the `session/new` response.
 2. **Initial Review Phase**:
    - `Reviewer.Run` executes the pre-review and main review ReAct loops (`Agent.RunReview`).
-   - Progress callbacks (`ReportConfig`, `ReportFetchingDiff`, `ReportIteration`, `ReportToolCalls`, `ReportToolStatus`, `ReportStageReview`, `ReportReview`) translate directly into ACP `session/update` notifications (`UpdateAgentThoughtText`, `StartToolCall`, `UpdateToolCall`, `UpdateAgentMessageText`).
+   - Progress callbacks (`ReportConfig`, `ReportFetchingDiff`, `ReportIteration`, `ReportToolCalls`, `ReportToolStatus`, `ReportStageReview`, `ReportReview`, `ReportUsage`) translate directly into ACP `session/update` notifications:
+     - `session_info_update`: sets title and metadata (`provider`, `model`, `base`, `head`, `changedFiles`)
+     - `plan`: updates review stages (`in_progress` $\to$ `completed`)
+     - `agent_thought_chunk` & `tool_call`: real-time tool execution & thoughts
+     - `usage_update`: context token consumption
+     - `agent_message_chunk`: final review report
 3. **Post-Review Chat Phase (`ServePostReview`)**:
    - `Reviewer.RunInteractivePostReview` appends the post-review system instruction to `Agent.history` and calls `acpReporter.ServePostReview`.
-   - `ServePostReview` registers the turn callback (`Reviewer.executePostReviewTurn`) and closes `reviewReady`, unblocking any queued or subsequent `session/prompt` RPCs.
-   - Each `Prompt` call runs `Agent.RunChatFlight` with a per-turn cancellable context, streams any tool calls/thoughts plus the assistant's reply via `ReportPostReviewReply`, accumulates token/tool metrics into `Reviewer.DiscussionMetrics`, and returns `StopReasonEndTurn` (or `StopReasonCancelled` if interrupted via `session/cancel`).
+   - `ServePostReview` transitions the session mode to `chat` (`current_mode_update`), marks the `plan` chat step as `in_progress`, registers the turn callback (`Reviewer.executePostReviewTurn`), and closes `reviewReady`.
+   - Each `Prompt` call runs `Agent.RunChatFlight` with a per-turn cancellable context, streams tool calls/thoughts plus the assistant's reply via `ReportPostReviewReply`, reports turn token usage via `usage_update`, accumulates token/tool metrics into `Reviewer.DiscussionMetrics`, and returns `StopReasonEndTurn` (or `StopReasonCancelled` if interrupted via `session/cancel`).
 
 ```mermaid
 sequenceDiagram
@@ -100,10 +125,12 @@ sequenceDiagram
     ACP-->>Client: InitializeResponse (protocolVersion, capabilities)
 
     Client->>ACP: session/new (cwd, mcpServers)
-    ACP-->>Client: NewSessionResponse (sessionId: "sess_1")
+    ACP-->>Client: NewSessionResponse (sessionId, modes: [review, chat])
     Note over ACP,Reviewer: sessionGateWriter unblocks sessionReady after response flush
 
-    Reviewer->>ACP: ReportConfig / ReportFetchingDiff / ReportIteration
+    Reviewer->>ACP: ReportConfig / ReportFetchingDiff
+    ACP--)Client: session/update (session_info_update: title & _meta)
+    ACP--)Client: session/update (plan: context gathering in_progress)
     ACP--)Client: session/update (agent_thought_chunk)
 
     Reviewer->>ACP: ReportToolCalls (emit_reviewer_state, read_file, ...)
@@ -112,17 +139,23 @@ sequenceDiagram
     Reviewer->>ACP: ReportToolStatus (completed / failed)
     ACP--)Client: session/update (tool_call_update [completed / failed])
 
+    Reviewer->>ACP: ReportUsage
+    ACP--)Client: session/update (usage_update: context tokens & meta)
+
     Reviewer->>ACP: ReportReview (final Markdown review)
     ACP--)Client: session/update (agent_message_chunk)
+    ACP--)Client: session/update (plan: review step completed)
 
     Reviewer->>ACP: RunInteractivePostReview -> ServePostReview()
+    ACP--)Client: session/update (current_mode_update: mode="chat")
+    ACP--)Client: session/update (plan: chat step in_progress)
     Note over ACP: reviewReady closed; ready for session/prompt turns
 
     loop Interactive Post-Review Chat
         Client->>ACP: session/prompt (ContentBlocks)
         ACP->>Reviewer: executePostReviewTurn -> Agent.RunChatFlight
-        Reviewer->>ACP: ReportToolCalls / ReportPostReviewReply
-        ACP--)Client: session/update (tool_call / agent_message_chunk)
+        Reviewer->>ACP: ReportToolCalls / ReportPostReviewReply / ReportUsage
+        ACP--)Client: session/update (tool_call / agent_message_chunk / usage_update)
         ACP-->>Client: PromptResponse (stopReason: "end_turn")
     end
 
