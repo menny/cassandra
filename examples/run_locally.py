@@ -178,6 +178,11 @@ def main():
         type=Path,
         help="Path to base TOML configuration file (defaults to examples/cassandra.toml).",
     )
+    parser.add_argument(
+        "--acp",
+        action="store_true",
+        help="Enable Agent Client Protocol (ACP) mode over stdio.",
+    )
     args, remaining_args = parser.parse_known_args()
 
     # Determine base configuration file
@@ -219,20 +224,33 @@ def main():
         # 6. Build and run Cassandra via Bazel.
         print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
 
-        run_args = [
-            "--render",
-            "markdown",
-            "--config",
-            str(config_file),
-            "--cwd",
-            str(target_dir),
-            "--base",
-            merge_base_sha,
-            "--head",
-            "HEAD",
-            "--allow-ask-developer",
-            "--interactive-post-review",
-        ]
+        if args.acp:
+            run_args = [
+                "--acp",
+                "--config",
+                str(config_file),
+                "--cwd",
+                str(target_dir),
+                "--base",
+                merge_base_sha,
+                "--head",
+                "HEAD",
+            ]
+        else:
+            run_args = [
+                "--render",
+                "markdown",
+                "--config",
+                str(config_file),
+                "--cwd",
+                str(target_dir),
+                "--base",
+                merge_base_sha,
+                "--head",
+                "HEAD",
+                "--allow-ask-developer",
+                "--interactive-post-review",
+            ]
 
         if api_key:
             run_args.extend(["--provider-api-key", api_key])
