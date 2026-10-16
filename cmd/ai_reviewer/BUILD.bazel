@@ -17,15 +17,6 @@ go_library(
     ],
 )
 
-go_binary(
-    name = "ai_reviewer",
-    basename = "cassandra",
-    embed = [":ai_reviewer_lib"],
-    pure = "on",
-    static = "on",
-    visibility = ["//visibility:public"],
-)
-
 go_test(
     name = "ai_reviewer_test",
     srcs = ["main_test.go"],
@@ -37,4 +28,10 @@ go_test(
         "@com_github_spf13_viper//:viper",
         "@com_github_stretchr_testify//require",
     ],
+)
+
+go_binary(
+    name = "ai_reviewer",
+    embed = [":ai_reviewer_lib"],
+    visibility = ["//visibility:public"],
 )

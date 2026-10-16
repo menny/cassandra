@@ -266,3 +266,80 @@ func TestRun_AllowAskDeveloperValidation(t *testing.T) {
 		require.Contains(t, err.Error(), "failed to read diff file")
 	})
 }
+
+func TestRun_ACPValidation(t *testing.T) {
+	ctx := context.Background()
+	stderr := log.New(os.Stderr, "", 0)
+
+	t.Run("errors when --acp is combined with conflicting --render", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+			"--render", "tui",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp cannot be combined with --render=\"tui\"")
+	})
+
+	t.Run("errors when --acp is combined with --interactive-post-review=false", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+			"--interactive-post-review=false",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp requires --interactive-post-review to be enabled")
+	})
+
+	t.Run("errors when --acp is combined with --allow-ask-developer", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+			"--allow-ask-developer",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+	})
+
+	t.Run("errors when --render=acp is passed without --acp", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--render", "acp",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "ACP mode can only be enabled via the --acp CLI flag")
+	})
+
+	t.Run("errors when acp is set in cassandra.toml", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("acp = true\n"), 0o644))
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+		}
+		err = run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp is a CLI-only flag and is not supported in configuration files")
+	})
+}

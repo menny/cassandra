@@ -55,7 +55,8 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	if cfg.Render != "markdown" && cfg.Render != "tui" {
 		notifier = tools.NoOpUserNotifier{}
 	}
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, cfg.AllowAskDeveloper, notifier)
+	includeAskDeveloper := cfg.AllowAskDeveloper && cfg.Render != "acp"
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, notifier)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.
@@ -128,7 +129,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		approvalEvaluationPrompt = string(content)
 	}
 
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, cfg.AllowAskDeveloper)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -156,7 +157,8 @@ func (r *Reviewer) Close() error {
 
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, r.Config.AllowAskDeveloper)
+	includeAskDeveloper := r.Config.AllowAskDeveloper && r.Config.Render != "acp"
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, includeAskDeveloper)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
@@ -315,8 +317,68 @@ func (s *terminalSpinner) Stop() {
 	<-doneChan
 }
 
+func (r *Reviewer) executePostReviewTurn(ctx context.Context, cleanInput string, maxIterations int, spinnerWriter io.Writer) error {
+	r.Agent.reporter.ReportPostReviewUserQuery(cleanInput)
+
+	var spinner *terminalSpinner
+	if r.Config.Render == "tui" && spinnerWriter != nil {
+		spinner = newTerminalSpinner(spinnerWriter)
+		spinner.Start("Cassandra is thinking...")
+	}
+
+	reply, err := r.Agent.RunChatFlight(ctx, cleanInput, maxIterations, r.Config.MaxTokens)
+	if spinner != nil {
+		spinner.Stop()
+	}
+
+	turnMetrics := r.Agent.GetMetrics()
+	if r.DiscussionMetrics == nil {
+		r.DiscussionMetrics = &turnMetrics
+	} else {
+		r.DiscussionMetrics.Tokens.Input += turnMetrics.Tokens.Input
+		r.DiscussionMetrics.Tokens.Output += turnMetrics.Tokens.Output
+		r.DiscussionMetrics.Tokens.Thinking += turnMetrics.Tokens.Thinking
+		r.DiscussionMetrics.Tokens.Cached += turnMetrics.Tokens.Cached
+		r.DiscussionMetrics.Tokens.TotalInput += turnMetrics.Tokens.TotalInput
+		r.DiscussionMetrics.Tokens.TotalOutput += turnMetrics.Tokens.TotalOutput
+		r.DiscussionMetrics.Iterations += turnMetrics.Iterations
+		r.DiscussionMetrics.ToolCalls.Total += turnMetrics.ToolCalls.Total
+		if r.DiscussionMetrics.ToolCalls.ByTool == nil {
+			r.DiscussionMetrics.ToolCalls.ByTool = make(map[string]int)
+		}
+		for k, v := range turnMetrics.ToolCalls.ByTool {
+			r.DiscussionMetrics.ToolCalls.ByTool[k] += v
+		}
+	}
+	r.Agent.ResetMetrics()
+
+	if err != nil {
+		return fmt.Errorf("chat flight failed: %w", err)
+	}
+
+	r.Agent.reporter.ReportPostReviewReply(reply)
+	return nil
+}
+
 // RunInteractivePostReview starts a continuous chat loop with the developer.
 func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
+	// Reset metrics to isolate the interactive post-review discussion phase
+	r.Agent.ResetMetrics()
+
+	// Append system instruction indicating conversational post-review phase
+	r.Agent.history = append(r.Agent.history, llm.Message{
+		Role: llm.RoleSystem,
+		Text: postReviewSystemInstruction,
+	})
+
+	maxIterations := CalculateMaxIterations(1)
+
+	if acpRep, ok := r.Agent.reporter.(*acpReporter); ok {
+		return acpRep.ServePostReview(ctx, func(turnCtx context.Context, cleanInput string) error {
+			return r.executePostReviewTurn(turnCtx, cleanInput, maxIterations, nil)
+		})
+	}
+
 	replCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -339,17 +401,6 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			}
 		}()
 	}
-
-	// Reset metrics to isolate the interactive post-review discussion phase
-	r.Agent.ResetMetrics()
-
-	// Append system instruction indicating conversational post-review phase
-	r.Agent.history = append(r.Agent.history, llm.Message{
-		Role: llm.RoleSystem,
-		Text: postReviewSystemInstruction,
-	})
-
-	maxIterations := CalculateMaxIterations(1)
 
 	accessible := !term.IsTerminal(int(os.Stdin.Fd()))
 	if ctx.Value(replStdinKey{}) != nil {
@@ -414,45 +465,9 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 			continue
 		}
 
-		r.Agent.reporter.ReportPostReviewUserQuery(cleanInput)
-
-		var spinner *terminalSpinner
-		if r.Config.Render == "tui" {
-			spinner = newTerminalSpinner(errWriter)
-			spinner.Start("Cassandra is thinking...")
+		if err := r.executePostReviewTurn(replCtx, cleanInput, maxIterations, errWriter); err != nil {
+			return err
 		}
-
-		reply, err := r.Agent.RunChatFlight(replCtx, cleanInput, maxIterations, r.Config.MaxTokens)
-		if spinner != nil {
-			spinner.Stop()
-		}
-
-		turnMetrics := r.Agent.GetMetrics()
-		if r.DiscussionMetrics == nil {
-			r.DiscussionMetrics = &turnMetrics
-		} else {
-			r.DiscussionMetrics.Tokens.Input += turnMetrics.Tokens.Input
-			r.DiscussionMetrics.Tokens.Output += turnMetrics.Tokens.Output
-			r.DiscussionMetrics.Tokens.Thinking += turnMetrics.Tokens.Thinking
-			r.DiscussionMetrics.Tokens.Cached += turnMetrics.Tokens.Cached
-			r.DiscussionMetrics.Tokens.TotalInput += turnMetrics.Tokens.TotalInput
-			r.DiscussionMetrics.Tokens.TotalOutput += turnMetrics.Tokens.TotalOutput
-			r.DiscussionMetrics.Iterations += turnMetrics.Iterations
-			r.DiscussionMetrics.ToolCalls.Total += turnMetrics.ToolCalls.Total
-			if r.DiscussionMetrics.ToolCalls.ByTool == nil {
-				r.DiscussionMetrics.ToolCalls.ByTool = make(map[string]int)
-			}
-			for k, v := range turnMetrics.ToolCalls.ByTool {
-				r.DiscussionMetrics.ToolCalls.ByTool[k] += v
-			}
-		}
-		r.Agent.ResetMetrics()
-
-		if err != nil {
-			return fmt.Errorf("chat flight failed: %w", err)
-		}
-
-		r.Agent.reporter.ReportPostReviewReply(reply)
 	}
 }
 
