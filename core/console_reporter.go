@@ -284,7 +284,7 @@ func (r *consoleReporter) ReportMCPStatus(name string, status string, err error)
 	}
 }
 
-func (r *consoleReporter) ReportToolStatus(name string, status string, err error) {
+func (r *consoleReporter) ReportToolStatus(_ llm.ToolCall, _ string, _ error) {
 	// Console reporter does not display individual tool execution logs to avoid terminal clutter.
 	// In-place updates are managed by the TUI reporter.
 }

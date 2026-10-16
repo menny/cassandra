@@ -205,7 +205,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	var reporter core.Reporter
 	switch cfg.Render {
 	case "acp":
-		reporter = core.NewACPReporter(os.Stdout, os.Stdin, stderr.Writer(), cancelSession)
+		reporter = core.NewACPReporter(sessionCtx, os.Stdout, os.Stdin, stderr.Writer(), cancelSession)
 	case "tui":
 		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancelSession)
 	case "markdown":

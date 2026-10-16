@@ -91,7 +91,7 @@ func setupACPPair(t *testing.T, cancelSession context.CancelFunc) (Reporter, *ac
 	clientOutR, clientOutW := io.Pipe()
 
 	var stderrBuf bytes.Buffer
-	reporter := NewACPReporter(agentOutW, clientOutR, &stderrBuf, cancelSession)
+	reporter := NewACPReporter(context.Background(), agentOutW, clientOutR, &stderrBuf, cancelSession)
 
 	client := newTestACPClient()
 	clientConn := acp.NewClientSideConnection(client, clientOutW, agentOutR)
@@ -151,7 +151,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	reporter.ReportMCPStatus("broken", "failed", errors.New("connection refused"))
 	reporter.ReportIteration(1)
 
-	reporter.ReportToolCalls([]llm.ToolCall{
+	testCalls := []llm.ToolCall{
 		{
 			ID:        "tc_state",
 			Name:      "emit_reviewer_state",
@@ -167,10 +167,11 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 			Name:      "grep_files",
 			Arguments: `{"pattern":"TODO"}`,
 		},
-	})
-	reporter.ReportToolStatus("read_file", "started", nil)
-	reporter.ReportToolStatus("read_file", "completed", nil)
-	reporter.ReportToolStatus("grep_files", "failed", errors.New("grep error"))
+	}
+	reporter.ReportToolCalls(testCalls)
+	reporter.ReportToolStatus(testCalls[1], "started", nil)
+	reporter.ReportToolStatus(testCalls[1], "completed", nil)
+	reporter.ReportToolStatus(testCalls[2], "failed", errors.New("grep error"))
 
 	require.NoError(t, reporter.ReportStageReview("Pre-Review Summary", "Summary text"))
 	reporter.ReportFinalReview()
@@ -418,4 +419,163 @@ func TestACPReporter_CancelInFlightPrompt(t *testing.T) {
 
 	cancelSession()
 	require.NoError(t, <-postReviewDone)
+}
+
+func TestACPReporter_ConcurrentOutOfOrderToolCalls(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, client, _, cleanup := setupACPPair(t, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	_, err = clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	tc1 := llm.ToolCall{
+		ID:        "call_read_a",
+		Name:      "read_file",
+		Arguments: `{"file_path":"a.go"}`,
+	}
+	tc2 := llm.ToolCall{
+		ID:        "call_read_b",
+		Name:      "read_file",
+		Arguments: `{"file_path":"b.go"}`,
+	}
+
+	reporter.ReportToolCalls([]llm.ToolCall{tc1, tc2})
+
+	// Finish tc2 FIRST with an error, out of order relative to dispatch
+	reporter.ReportToolStatus(tc2, "failed", errors.New("file b.go not found"))
+	// Finish tc1 SECOND with success
+	reporter.ReportToolStatus(tc1, "completed", nil)
+
+	// Verify that client updates correctly correlated by ToolCallId, not FIFO queue
+	var updates []*acp.SessionToolCallUpdate
+	require.Eventually(t, func() bool {
+		updates = nil
+		for _, n := range client.snapshotUpdates() {
+			if n.Update.ToolCallUpdate != nil {
+				updates = append(updates, n.Update.ToolCallUpdate)
+			}
+		}
+		return len(updates) == 2
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// First update received by client must be for call_read_b and marked failed
+	require.Equal(t, acp.ToolCallId("call_read_b"), updates[0].ToolCallId)
+	require.NotNil(t, updates[0].Status)
+	require.Equal(t, acp.ToolCallStatusFailed, *updates[0].Status)
+	require.Equal(t, "file b.go not found", updates[0].RawOutput)
+
+	// Second update received by client must be for call_read_a and marked completed
+	require.Equal(t, acp.ToolCallId("call_read_a"), updates[1].ToolCallId)
+	require.NotNil(t, updates[1].Status)
+	require.Equal(t, acp.ToolCallStatusCompleted, *updates[1].Status)
+}
+
+func TestACPReporter_ContextCancellationUnblocksSendUpdate(t *testing.T) {
+	runnerCtx, runnerCancel := context.WithCancel(context.Background())
+
+	agentOutR, agentOutW := io.Pipe()
+	clientOutR, clientOutW := io.Pipe()
+
+	var stderrBuf bytes.Buffer
+	reporter := NewACPReporter(runnerCtx, agentOutW, clientOutR, &stderrBuf, nil)
+
+	client := newTestACPClient()
+	clientConn := acp.NewClientSideConnection(client, clientOutW, agentOutR)
+	clientConn.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	defer func() {
+		_ = clientOutW.Close()
+		_ = agentOutW.Close()
+		if closer, ok := reporter.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		<-clientConn.Done()
+	}()
+
+	// Perform initialize but deliberately do NOT call session/new
+	_, err := clientConn.Initialize(runnerCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	unblocked := make(chan struct{})
+	go func() {
+		// ReportFetchingDiff calls sendUpdate, which would block on sessionReady
+		reporter.ReportFetchingDiff()
+		close(unblocked)
+	}()
+
+	// Canceling the runner context must unblock sendUpdate immediately
+	runnerCancel()
+
+	select {
+	case <-unblocked:
+		// Success: sendUpdate unblocked
+	case <-time.After(2 * time.Second):
+		t.Fatal("sendUpdate remained blocked after runner context cancellation")
+	}
+}
+
+func TestACPReporter_CloseSessionManagedCancellation(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	canceledCount := 0
+	var mu sync.Mutex
+	safeCancel := func() {
+		mu.Lock()
+		canceledCount++
+		mu.Unlock()
+		cancelSession()
+	}
+
+	_, clientConn, _, _, cleanup := setupACPPair(t, safeCancel)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	// Call CloseSession twice concurrently
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, closeErr := clientConn.CloseSession(context.Background(), acp.CloseSessionRequest{
+				SessionId: newSessResp.SessionId,
+			})
+			require.NoError(t, closeErr)
+		}()
+	}
+	wg.Wait()
+
+	// Wait briefly for managed shutdown goroutine to complete
+	select {
+	case <-sessionCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("sessionCtx was not canceled by CloseSession")
+	}
+
+	mu.Lock()
+	require.Equal(t, 1, canceledCount, "cancelSession should be invoked exactly once via sync.Once")
+	mu.Unlock()
 }

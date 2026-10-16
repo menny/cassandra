@@ -654,8 +654,8 @@ func (r *tuiReporter) ReportMCPStatus(name string, status string, err error) {
 	r.send(mcpStatusMsg{name: name, status: status, err: err})
 }
 
-func (r *tuiReporter) ReportToolStatus(name string, status string, err error) {
-	r.send(toolStatusMsg{name: name, status: status, err: err})
+func (r *tuiReporter) ReportToolStatus(tc llm.ToolCall, status string, err error) {
+	r.send(toolStatusMsg{name: tc.Name, status: status, err: err})
 }
 
 func (r *tuiReporter) ReportReviewHeader(files int, guidelines string, model string) {

@@ -111,8 +111,13 @@ type acpReporter struct {
 	promptHandler func(ctx context.Context, query string) error
 	activeCancel  context.CancelFunc
 
-	pendingTools map[string][]acp.ToolCallId
-	toolSeq      int
+	pendingCallsByID map[string]acp.ToolCallId
+	pendingByName    map[string][]acp.ToolCallId
+	toolSeq          int
+
+	ctx              context.Context
+	closeSessionOnce sync.Once
+	shutdownWg       sync.WaitGroup
 
 	cfg             *config.Config
 	targetDir       string
@@ -131,21 +136,26 @@ var (
 // NewACPReporter creates a Reporter backed by an ACP AgentSideConnection over
 // stdout and stdin. All diagnostic warnings and internal connection logs are
 // routed to stderr so stdout remains reserved exclusively for JSON-RPC frames.
-func NewACPReporter(stdout io.Writer, stdin io.Reader, stderr io.Writer, cancelSession context.CancelFunc) Reporter {
+func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stderr io.Writer, cancelSession context.CancelFunc) Reporter {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if stderr == nil {
 		stderr = io.Discard
 	}
 	gate := &sessionGateWriter{out: stdout}
 	r := &acpReporter{
-		gateWriter:    gate,
-		in:            stdin,
-		stderr:        stderr,
-		cancelSession: cancelSession,
-		sessionID:     defaultACPSessionID,
-		currentMode:   acpModeReview,
-		sessionReady:  make(chan struct{}),
-		reviewReady:   make(chan struct{}),
-		pendingTools:  make(map[string][]acp.ToolCallId),
+		ctx:              ctx,
+		gateWriter:       gate,
+		in:               stdin,
+		stderr:           stderr,
+		cancelSession:    cancelSession,
+		sessionID:        defaultACPSessionID,
+		currentMode:      acpModeReview,
+		sessionReady:     make(chan struct{}),
+		reviewReady:      make(chan struct{}),
+		pendingCallsByID: make(map[string]acp.ToolCallId),
+		pendingByName:    make(map[string][]acp.ToolCallId),
 		planStatuses: map[string]acp.PlanEntryStatus{
 			planStepContext:   acp.PlanEntryStatusPending,
 			planStepPreReview: acp.PlanEntryStatusPending,
@@ -174,6 +184,7 @@ func (r *acpReporter) Close() error {
 			_ = closer.Close()
 			<-r.conn.Done()
 		}
+		r.shutdownWg.Wait()
 	})
 	return nil
 }
@@ -231,13 +242,15 @@ func (r *acpReporter) sendUpdate(update acp.SessionUpdate) {
 	case <-r.sessionReady:
 	case <-r.conn.Done():
 		return
+	case <-r.ctx.Done():
+		return
 	}
 
 	r.mu.Lock()
 	sid := r.sessionID
 	r.mu.Unlock()
 
-	_ = r.conn.SessionUpdate(context.Background(), acp.SessionNotification{
+	_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
 		SessionId: sid,
 		Update:    update,
 	})
@@ -421,9 +434,15 @@ func (r *acpReporter) Cancel(_ context.Context, _ acp.CancelNotification) error 
 
 func (r *acpReporter) CloseSession(_ context.Context, _ acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
 	r.cancelActiveTurn()
-	if r.cancelSession != nil {
-		go r.cancelSession()
-	}
+	r.closeSessionOnce.Do(func() {
+		if r.cancelSession != nil {
+			r.shutdownWg.Add(1)
+			go func() {
+				defer r.shutdownWg.Done()
+				r.cancelSession()
+			}()
+		}
+	})
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -509,7 +528,10 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		if callID == "" {
 			callID = acp.ToolCallId(fmt.Sprintf("call_%d", r.toolSeq))
 		}
-		r.pendingTools[tc.Name] = append(r.pendingTools[tc.Name], callID)
+		if tc.ID != "" {
+			r.pendingCallsByID[tc.ID] = callID
+		}
+		r.pendingByName[tc.Name] = append(r.pendingByName[tc.Name], callID)
 		r.mu.Unlock()
 
 		kind, known := acpToolKinds[tc.Name]
@@ -541,17 +563,38 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	}
 }
 
-func (r *acpReporter) ReportToolStatus(name string, status string, err error) {
+func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error) {
 	if status == "started" {
 		return
 	}
 
 	r.mu.Lock()
-	queue := r.pendingTools[name]
 	var callID acp.ToolCallId
-	if len(queue) > 0 {
-		callID = queue[0]
-		r.pendingTools[name] = queue[1:]
+	if tc.ID != "" {
+		if id, ok := r.pendingCallsByID[tc.ID]; ok {
+			callID = id
+			delete(r.pendingCallsByID, tc.ID)
+			if queue := r.pendingByName[tc.Name]; len(queue) > 0 {
+				for i, qid := range queue {
+					if qid == callID {
+						r.pendingByName[tc.Name] = append(queue[:i], queue[i+1:]...)
+						break
+					}
+				}
+			}
+		}
+	}
+	if callID == "" {
+		if queue := r.pendingByName[tc.Name]; len(queue) > 0 {
+			callID = queue[0]
+			r.pendingByName[tc.Name] = queue[1:]
+			for idKey, cid := range r.pendingCallsByID {
+				if cid == callID {
+					delete(r.pendingCallsByID, idKey)
+					break
+				}
+			}
+		}
 	}
 	r.mu.Unlock()
 
