@@ -21,6 +21,24 @@ type SessionMetrics struct {
 	ToolCalls  ToolCallMetrics `json:"tool_calls"`
 }
 
+// Add accumulates other's token, iteration, and tool-call counts into m.
+func (m *SessionMetrics) Add(other SessionMetrics) {
+	m.Tokens.Input += other.Tokens.Input
+	m.Tokens.Output += other.Tokens.Output
+	m.Tokens.Thinking += other.Tokens.Thinking
+	m.Tokens.Cached += other.Tokens.Cached
+	m.Tokens.TotalInput += other.Tokens.TotalInput
+	m.Tokens.TotalOutput += other.Tokens.TotalOutput
+	m.Iterations += other.Iterations
+	m.ToolCalls.Total += other.ToolCalls.Total
+	if len(other.ToolCalls.ByTool) > 0 && m.ToolCalls.ByTool == nil {
+		m.ToolCalls.ByTool = make(map[string]int, len(other.ToolCalls.ByTool))
+	}
+	for k, v := range other.ToolCalls.ByTool {
+		m.ToolCalls.ByTool[k] += v
+	}
+}
+
 // PhaseMetrics captures the metrics for a specific review phase.
 type PhaseMetrics struct {
 	Phase   string         `json:"phase"`

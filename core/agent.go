@@ -472,13 +472,22 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 }
 
 // RunChatFlight executes the conversational ReAct loop for a single chat turn in the REPL.
-func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIterations, maxTokens int) (string, error) {
+// If the turn fails or is canceled before completion, any messages appended to
+// a.history during the turn are rolled back so history role alternation stays valid.
+func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIterations, maxTokens int) (reply string, err error) {
 	if maxIterations <= 0 {
 		maxIterations = AbsoluteMaxIter
 	}
 	if maxTokens <= 0 {
 		maxTokens = llm.DefaultMaxTokens
 	}
+
+	origHistoryLen := len(a.history)
+	defer func() {
+		if err != nil {
+			a.history = a.history[:origHistoryLen]
+		}
+	}()
 
 	a.iterations = 0 // Reset iteration counter at the start of the flight
 	a.history = append(a.history, llm.Message{
@@ -636,4 +645,20 @@ func compactToolCallArgs(tc llm.ToolCall) string {
 		s = s[:maxLen] + "…"
 	}
 	return s
+}
+
+const reviewerStateToolName = "emit_reviewer_state"
+
+// parseReviewerState extracts the focus area and message if tc is an
+// emit_reviewer_state tool call.
+func parseReviewerState(tc llm.ToolCall) (focusArea, message string, ok bool) {
+	if tc.Name != reviewerStateToolName {
+		return "", "", false
+	}
+	var args struct {
+		Message   string `json:"message"`
+		FocusArea string `json:"focus_area"`
+	}
+	_ = tc.UnmarshalArguments(&args)
+	return args.FocusArea, args.Message, true
 }

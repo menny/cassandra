@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -53,37 +54,46 @@ func availableACPModes() []acp.SessionMode {
 	}
 }
 
-// sessionGateWriter wraps the outbound ACP stream so that the sessionReady
-// channel is closed immediately after the NewSessionResponse JSON-RPC frame is
-// written, guaranteeing that subsequent session/update notifications never
-// precede the session/new response on the wire.
+// sessionGateWriter wraps the outbound ACP stream so that registered callbacks
+// (such as closing sessionReady after NewSessionResponse or triggering session
+// cancellation after CloseSessionResponse) are invoked immediately after the
+// next JSON-RPC frame is written.
 type sessionGateWriter struct {
-	mu          sync.Mutex
-	out         io.Writer
-	armOnNext   bool
-	readySignal func()
+	mu           sync.Mutex
+	out          io.Writer
+	readySignals []func()
 }
 
 func (w *sessionGateWriter) arm(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.armOnNext = true
-	w.readySignal = fn
+	w.readySignals = append(w.readySignals, fn)
+}
+
+func (w *sessionGateWriter) flushSignals() {
+	w.mu.Lock()
+	signals := w.readySignals
+	w.readySignals = nil
+	w.mu.Unlock()
+
+	for _, fn := range signals {
+		if fn != nil {
+			fn()
+		}
+	}
 }
 
 func (w *sessionGateWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	n, err := w.out.Write(p)
-	var signal func()
-	if w.armOnNext {
-		w.armOnNext = false
-		signal = w.readySignal
-		w.readySignal = nil
-	}
+	signals := w.readySignals
+	w.readySignals = nil
 	w.mu.Unlock()
 
-	if signal != nil {
-		signal()
+	for _, fn := range signals {
+		if fn != nil {
+			fn()
+		}
 	}
 	return n, err
 }
@@ -114,6 +124,8 @@ type acpReporter struct {
 	pendingByName    map[string][]acp.ToolCallId
 	toolSeq          int
 
+	// ctx bridges core.Reporter methods (which do not accept a context.Context)
+	// to outbound conn.SessionUpdate notifications.
 	ctx              context.Context
 	closeSessionOnce sync.Once
 	shutdownWg       sync.WaitGroup
@@ -182,6 +194,7 @@ func (r *acpReporter) Close() error {
 			_ = closer.Close()
 			<-r.conn.Done()
 		}
+		r.gateWriter.flushSignals()
 		r.shutdownWg.Wait()
 	})
 	return nil
@@ -397,8 +410,6 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	case <-r.reviewReady:
 	case <-turnCtx.Done():
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
-	case <-ctx.Done():
-		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	case <-r.conn.Done():
 		return acp.PromptResponse{}, errors.New("ACP connection closed")
 	}
@@ -518,16 +529,11 @@ func (r *acpReporter) ReportStageIteration(stage string, iter int) {
 
 func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	for _, tc := range tcs {
-		if tc.Name == "emit_reviewer_state" {
-			var args struct {
-				Message   string `json:"message"`
-				FocusArea string `json:"focus_area"`
-			}
-			_ = json.Unmarshal([]byte(tc.Arguments), &args)
-			if args.Message != "" {
-				thought := args.Message
-				if args.FocusArea != "" {
-					thought = fmt.Sprintf("[%s] %s", args.FocusArea, args.Message)
+		if focusArea, message, ok := parseReviewerState(tc); ok {
+			if message != "" {
+				thought := message
+				if focusArea != "" {
+					thought = fmt.Sprintf("[%s] %s", focusArea, message)
 				}
 				r.sendUpdate(acp.UpdateAgentThoughtText(thought + "\n"))
 			}
@@ -564,9 +570,11 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 		var rawArgs map[string]any
 		if err := json.Unmarshal([]byte(tc.Arguments), &rawArgs); err == nil && len(rawArgs) > 0 {
 			opts = append(opts, acp.WithStartRawInput(rawArgs))
-			if path, ok := rawArgs["file_path"].(string); ok && path != "" {
-				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: path}}))
-			} else if path, ok := rawArgs["path"].(string); ok && path != "" {
+			path, _ := rawArgs["file_path"].(string)
+			if path == "" {
+				path, _ = rawArgs["path"].(string)
+			}
+			if path != "" {
 				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: path}}))
 			}
 		}
@@ -586,13 +594,8 @@ func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error
 		if id, ok := r.pendingCallsByID[tc.ID]; ok {
 			callID = id
 			delete(r.pendingCallsByID, tc.ID)
-			if queue := r.pendingByName[tc.Name]; len(queue) > 0 {
-				for i, qid := range queue {
-					if qid == callID {
-						r.pendingByName[tc.Name] = append(queue[:i], queue[i+1:]...)
-						break
-					}
-				}
+			if idx := slices.Index(r.pendingByName[tc.Name], callID); idx >= 0 {
+				r.pendingByName[tc.Name] = slices.Delete(r.pendingByName[tc.Name], idx, idx+1)
 			}
 		}
 	}
@@ -652,10 +655,7 @@ func (r *acpReporter) ReportUsage(usage llm.Usage) {
 	r.mu.Unlock()
 
 	used := usage.TotalInput() + usage.TotalOutput()
-	size := maxTokens
-	if size < used {
-		size = used
-	}
+	size := max(maxTokens, used)
 
 	r.sendUpdate(acp.SessionUpdate{
 		UsageUpdate: &acp.SessionUsageUpdate{
@@ -711,32 +711,41 @@ func (r *acpReporter) ReportMCPStatus(name string, status string, err error) {
 	r.sendUpdate(acp.UpdateAgentThoughtText(fmt.Sprintf("[MCP] %s: %s\n", name, status)))
 }
 
-func (r *acpReporter) ReportReviewHeader(files int, guidelines string, model string) {
+func (r *acpReporter) buildSessionInfo(files int, guidelines, model string) (string, map[string]any) {
 	r.mu.Lock()
 	cfg := r.cfg
 	targetDir := r.targetDir
 	r.mu.Unlock()
 
-	title := fmt.Sprintf("Code Review (%d files, %s)", files, model)
 	meta := map[string]any{
-		"changedFiles": files,
-		"guidelines":   guidelines,
-		"model":        model,
+		"guidelines": guidelines,
+		"model":      model,
+	}
+	detail := model
+	if files >= 0 {
+		meta["changedFiles"] = files
+		detail = fmt.Sprintf("%d files, %s", files, model)
 	}
 	if targetDir != "" {
 		meta["targetDir"] = targetDir
 	}
+
+	title := fmt.Sprintf("Code Review (%s)", detail)
 	if cfg != nil {
 		if cfg.Provider != "" {
 			meta["provider"] = cfg.Provider
 		}
 		if cfg.Base != "" && cfg.Head != "" {
-			title = fmt.Sprintf("Code Review: %s..%s (%d files, %s)", cfg.Base, cfg.Head, files, model)
+			title = fmt.Sprintf("Code Review: %s..%s (%s)", cfg.Base, cfg.Head, detail)
 			meta["base"] = cfg.Base
 			meta["head"] = cfg.Head
 		}
 	}
+	return title, meta
+}
 
+func (r *acpReporter) ReportReviewHeader(files int, guidelines string, model string) {
+	title, meta := r.buildSessionInfo(files, guidelines, model)
 	r.emitSessionInfo(title, meta)
 }
 
@@ -751,21 +760,7 @@ func (r *acpReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	r.hasPreReview = cfg.PreReviewPromptFile != ""
 	r.mu.Unlock()
 
-	title := fmt.Sprintf("Code Review (%s)", cfg.Model)
-	meta := map[string]any{
-		"provider":   cfg.Provider,
-		"model":      cfg.Model,
-		"guidelines": cfg.MainGuidelines,
-	}
-	if targetDir != "" {
-		meta["targetDir"] = targetDir
-	}
-	if cfg.Base != "" && cfg.Head != "" {
-		title = fmt.Sprintf("Code Review: %s..%s (%s)", cfg.Base, cfg.Head, cfg.Model)
-		meta["base"] = cfg.Base
-		meta["head"] = cfg.Head
-	}
-
+	title, meta := r.buildSessionInfo(-1, cfg.MainGuidelines, cfg.Model)
 	r.emitSessionInfo(title, meta)
 	r.advancePlan(map[string]acp.PlanEntryStatus{
 		planStepContext: acp.PlanEntryStatusInProgress,

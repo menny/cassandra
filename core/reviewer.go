@@ -38,6 +38,10 @@ type Reviewer struct {
 	DiscussionMetrics        *SessionMetrics
 }
 
+func allowAskDeveloper(cfg *config.Config) bool {
+	return cfg != nil && cfg.AllowAskDeveloper && cfg.Render != "acp"
+}
+
 // NewReviewer instantiates a Reviewer based on the provided configuration.
 // targetDir is the directory where local tools (like grep) will operate.
 func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, reporter Reporter) (r *Reviewer, err error) {
@@ -55,7 +59,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	if cfg.Render != "markdown" && cfg.Render != "tui" {
 		notifier = tools.NoOpUserNotifier{}
 	}
-	includeAskDeveloper := cfg.AllowAskDeveloper && cfg.Render != "acp"
+	includeAskDeveloper := allowAskDeveloper(cfg)
 	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, notifier)
 
 	var mcpManager *mcp.Manager
@@ -157,8 +161,7 @@ func (r *Reviewer) Close() error {
 
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
-	includeAskDeveloper := r.Config.AllowAskDeveloper && r.Config.Render != "acp"
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, includeAskDeveloper)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config))
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
@@ -326,13 +329,7 @@ func (r *Reviewer) executePostReviewTurn(ctx context.Context, cleanInput string,
 		spinner.Start("Cassandra is thinking...")
 	}
 
-	origHistoryLen := len(r.Agent.history)
 	reply, err := r.Agent.RunChatFlight(ctx, cleanInput, maxIterations, r.Config.MaxTokens)
-	if err != nil {
-		if len(r.Agent.history) > origHistoryLen {
-			r.Agent.history = r.Agent.history[:origHistoryLen]
-		}
-	}
 	if spinner != nil {
 		spinner.Stop()
 	}
@@ -341,20 +338,7 @@ func (r *Reviewer) executePostReviewTurn(ctx context.Context, cleanInput string,
 	if r.DiscussionMetrics == nil {
 		r.DiscussionMetrics = &turnMetrics
 	} else {
-		r.DiscussionMetrics.Tokens.Input += turnMetrics.Tokens.Input
-		r.DiscussionMetrics.Tokens.Output += turnMetrics.Tokens.Output
-		r.DiscussionMetrics.Tokens.Thinking += turnMetrics.Tokens.Thinking
-		r.DiscussionMetrics.Tokens.Cached += turnMetrics.Tokens.Cached
-		r.DiscussionMetrics.Tokens.TotalInput += turnMetrics.Tokens.TotalInput
-		r.DiscussionMetrics.Tokens.TotalOutput += turnMetrics.Tokens.TotalOutput
-		r.DiscussionMetrics.Iterations += turnMetrics.Iterations
-		r.DiscussionMetrics.ToolCalls.Total += turnMetrics.ToolCalls.Total
-		if r.DiscussionMetrics.ToolCalls.ByTool == nil {
-			r.DiscussionMetrics.ToolCalls.ByTool = make(map[string]int)
-		}
-		for k, v := range turnMetrics.ToolCalls.ByTool {
-			r.DiscussionMetrics.ToolCalls.ByTool[k] += v
-		}
+		r.DiscussionMetrics.Add(turnMetrics)
 	}
 	r.Agent.ResetMetrics()
 

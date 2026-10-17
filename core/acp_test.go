@@ -83,7 +83,7 @@ func (c *testACPClient) snapshotUpdates() []acp.SessionNotification {
 	return out
 }
 
-func setupACPPair(t *testing.T, cancelSession context.CancelFunc) (Reporter, *acp.ClientSideConnection, *testACPClient, *bytes.Buffer, func()) {
+func setupACPPair(t *testing.T, ctx context.Context, cancelSession context.CancelFunc) (Reporter, *acp.ClientSideConnection, *testACPClient, *bytes.Buffer, func()) {
 	t.Helper()
 
 	// agentToClient: agent writes to agentOutW, client reads from agentOutR
@@ -92,7 +92,7 @@ func setupACPPair(t *testing.T, cancelSession context.CancelFunc) (Reporter, *ac
 	clientOutR, clientOutW := io.Pipe()
 
 	var stderrBuf bytes.Buffer
-	reporter := NewACPReporter(context.Background(), agentOutW, clientOutR, &stderrBuf, cancelSession)
+	reporter := NewACPReporter(ctx, agentOutW, clientOutR, &stderrBuf, cancelSession)
 
 	client := newTestACPClient()
 	clientConn := acp.NewClientSideConnection(client, clientOutW, agentOutR)
@@ -110,11 +110,22 @@ func setupACPPair(t *testing.T, cancelSession context.CancelFunc) (Reporter, *ac
 	return reporter, clientConn, client, &stderrBuf, cleanup
 }
 
+func waitForActivePromptTurn(t *testing.T, reporter Reporter) {
+	t.Helper()
+	acpRep, ok := reporter.(*acpReporter)
+	require.True(t, ok)
+	require.Eventually(t, func() bool {
+		acpRep.mu.Lock()
+		defer acpRep.mu.Unlock()
+		return acpRep.activeCancel != nil
+	}, 2*time.Second, 5*time.Millisecond)
+}
+
 func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
-	reporter, clientConn, client, stderrBuf, cleanup := setupACPPair(t, cancelSession)
+	reporter, clientConn, client, stderrBuf, cleanup := setupACPPair(t, sessionCtx, cancelSession)
 	defer cleanup()
 
 	// 1. Handshake: Initialize + NewSession
@@ -364,7 +375,7 @@ func TestACPReporter_CancelInFlightPrompt(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
-	reporter, clientConn, _, _, cleanup := setupACPPair(t, cancelSession)
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
 	defer cleanup()
 
 	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
@@ -427,7 +438,7 @@ func TestACPReporter_ConcurrentOutOfOrderToolCalls(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
-	reporter, clientConn, client, _, cleanup := setupACPPair(t, cancelSession)
+	reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
 	defer cleanup()
 
 	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
@@ -485,25 +496,10 @@ func TestACPReporter_ConcurrentOutOfOrderToolCalls(t *testing.T) {
 
 func TestACPReporter_ContextCancellationUnblocksSendUpdate(t *testing.T) {
 	runnerCtx, runnerCancel := context.WithCancel(context.Background())
+	defer runnerCancel()
 
-	agentOutR, agentOutW := io.Pipe()
-	clientOutR, clientOutW := io.Pipe()
-
-	var stderrBuf bytes.Buffer
-	reporter := NewACPReporter(runnerCtx, agentOutW, clientOutR, &stderrBuf, nil)
-
-	client := newTestACPClient()
-	clientConn := acp.NewClientSideConnection(client, clientOutW, agentOutR)
-	clientConn.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	defer func() {
-		_ = clientOutW.Close()
-		_ = agentOutW.Close()
-		if closer, ok := reporter.(io.Closer); ok {
-			_ = closer.Close()
-		}
-		<-clientConn.Done()
-	}()
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, runnerCtx, nil)
+	defer cleanup()
 
 	// Perform initialize but deliberately do NOT call session/new
 	_, err := clientConn.Initialize(runnerCtx, acp.InitializeRequest{
@@ -542,7 +538,7 @@ func TestACPReporter_CloseSessionManagedCancellation(t *testing.T) {
 		cancelSession()
 	}
 
-	_, clientConn, _, _, cleanup := setupACPPair(t, safeCancel)
+	_, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, safeCancel)
 	defer cleanup()
 
 	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
@@ -586,7 +582,7 @@ func TestACPReporter_PromptCancellationDuringInitialReview(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
-	reporter, clientConn, _, _, cleanup := setupACPPair(t, cancelSession)
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
 	defer cleanup()
 
 	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
@@ -615,8 +611,7 @@ func TestACPReporter_PromptCancellationDuringInitialReview(t *testing.T) {
 		promptDone <- resp
 	}()
 
-	// Give the goroutine a moment to enter Prompt and register activeCancel
-	time.Sleep(50 * time.Millisecond)
+	waitForActivePromptTurn(t, reporter)
 
 	// Cancel via ACP session/cancel
 	require.NoError(t, clientConn.Cancel(sessionCtx, acp.CancelNotification{
@@ -631,15 +626,13 @@ func TestACPReporter_PromptCancellationDuringInitialReview(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Prompt did not cancel during initial review wait")
 	}
-
-	_ = reporter
 }
 
 func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
-	reporter, clientConn, _, _, cleanup := setupACPPair(t, cancelSession)
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
 	defer cleanup()
 
 	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
@@ -654,14 +647,16 @@ func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
 	require.NoError(t, err)
 
 	// First Prompt will block on reviewReady
+	turn1Done := make(chan struct{}, 1)
 	go func() {
+		defer close(turn1Done)
 		_, _ = clientConn.Prompt(sessionCtx, acp.PromptRequest{
 			SessionId: newSessResp.SessionId,
 			Prompt:    []acp.ContentBlock{acp.TextBlock("Turn 1")},
 		})
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForActivePromptTurn(t, reporter)
 
 	// Second Prompt concurrently should be rejected
 	_, err = clientConn.Prompt(sessionCtx, acp.PromptRequest{
@@ -671,5 +666,10 @@ func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "concurrent prompt turns are not allowed")
 
-	_ = reporter
+	cancelSession()
+	select {
+	case <-turn1Done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Turn 1 prompt goroutine did not exit after cancellation")
+	}
 }
