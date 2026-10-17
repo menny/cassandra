@@ -158,6 +158,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 		cfg.Render = "acp"
 		cfg.InteractivePostReview = true
+		cfg.AllowAskDeveloper = false
 	} else if cfg.Render == "acp" {
 		return errors.New("ACP mode can only be enabled via the --acp CLI flag")
 	}

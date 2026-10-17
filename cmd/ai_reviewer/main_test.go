@@ -297,17 +297,29 @@ func TestRun_ACPValidation(t *testing.T) {
 		require.Contains(t, err.Error(), "--acp requires --interactive-post-review to be enabled")
 	})
 
-	t.Run("errors when --acp is combined with --allow-ask-developer", func(t *testing.T) {
+	t.Run("disables allow-ask-developer automatically when --acp is set", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		// Create a cassandra.toml with allow-ask-developer = true
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("allow-ask-developer = true\n"), 0o644))
+
 		args := []string{
 			"--provider", "google",
 			"--model", "gemini-1.5-flash",
 			"--provider-api-key", "fake-key",
 			"--acp",
-			"--allow-ask-developer",
 		}
-		err := run(ctx, args, stderr)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+		// run() will fail later due to missing git repository, not due to allow-ask-developer validation
+		err = run(ctx, args, stderr)
+		if err != nil {
+			require.NotContains(t, err.Error(), "--allow-ask-developer can only be used")
+		}
 	})
 
 	t.Run("errors when --render=acp is passed without --acp", func(t *testing.T) {

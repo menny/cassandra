@@ -439,10 +439,12 @@ func (r *acpReporter) CloseSession(_ context.Context, _ acp.CloseSessionRequest)
 	r.closeSessionOnce.Do(func() {
 		if r.cancelSession != nil {
 			r.shutdownWg.Add(1)
-			go func() {
-				defer r.shutdownWg.Done()
-				r.cancelSession()
-			}()
+			r.gateWriter.arm(func() {
+				go func() {
+					defer r.shutdownWg.Done()
+					r.cancelSession()
+				}()
+			})
 		}
 	})
 	return acp.CloseSessionResponse{}, nil

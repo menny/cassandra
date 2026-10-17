@@ -111,7 +111,7 @@ flowchart LR
      - `agent_message_chunk`: final review report
 3. **Post-Review Chat Phase (`ServePostReview`)**:
    - `Reviewer.RunInteractivePostReview` appends the post-review system instruction to `Agent.history` and calls `acpReporter.ServePostReview`.
-   - `ServePostReview` transitions the session mode to `chat` (`current_mode_update`), marks the `plan` chat step as `in_progress`, registers the turn callback (`Reviewer.executePostReviewTurn`), and closes `reviewReady`.
+   - `ServePostReview` transitions the session mode to `chat` (`current_mode_update`), registers the turn callback (`Reviewer.executePostReviewTurn`), and closes `reviewReady`.
    - Each `Prompt` call runs `Agent.RunChatFlight` with a per-turn cancellable context, streams tool calls/thoughts plus the assistant's reply via `ReportPostReviewReply`, reports turn token usage via `usage_update`, accumulates token/tool metrics into `Reviewer.DiscussionMetrics`, and returns `StopReasonEndTurn` (or `StopReasonCancelled` if interrupted via `session/cancel`).
 
 ```mermaid
@@ -147,7 +147,6 @@ sequenceDiagram
 
     Reviewer->>ACP: RunInteractivePostReview -> ServePostReview()
     ACP--)Client: session/update (current_mode_update: mode="chat")
-    ACP--)Client: session/update (plan: chat step in_progress)
     Note over ACP: reviewReady closed; ready for session/prompt turns
 
     loop Interactive Post-Review Chat

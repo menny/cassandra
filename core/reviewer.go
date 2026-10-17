@@ -326,7 +326,13 @@ func (r *Reviewer) executePostReviewTurn(ctx context.Context, cleanInput string,
 		spinner.Start("Cassandra is thinking...")
 	}
 
+	origHistoryLen := len(r.Agent.history)
 	reply, err := r.Agent.RunChatFlight(ctx, cleanInput, maxIterations, r.Config.MaxTokens)
+	if err != nil {
+		if len(r.Agent.history) > origHistoryLen {
+			r.Agent.history = r.Agent.history[:origHistoryLen]
+		}
+	}
 	if spinner != nil {
 		spinner.Stop()
 	}
