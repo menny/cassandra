@@ -26,7 +26,6 @@ const (
 	planStepContext   = "Gather git diff and commit context"
 	planStepPreReview = "Generate pre-review summary"
 	planStepReview    = "Inspect code and formulate review"
-	planStepChat      = "Interactive post-review discussion"
 )
 
 var acpToolKinds = map[string]acp.ToolKind{
@@ -160,7 +159,6 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 			planStepContext:   acp.PlanEntryStatusPending,
 			planStepPreReview: acp.PlanEntryStatusPending,
 			planStepReview:    acp.PlanEntryStatusPending,
-			planStepChat:      acp.PlanEntryStatusPending,
 		},
 	}
 
@@ -224,7 +222,6 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 		planStepContext:   acp.PlanEntryStatusCompleted,
 		planStepPreReview: acp.PlanEntryStatusCompleted,
 		planStepReview:    acp.PlanEntryStatusCompleted,
-		planStepChat:      acp.PlanEntryStatusInProgress,
 	})
 
 	r.signalReviewReady()
@@ -318,11 +315,6 @@ func (r *acpReporter) advancePlan(updates map[string]acp.PlanEntryStatus) {
 			Priority: acp.PlanEntryPriorityHigh,
 			Status:   r.planStatuses[planStepReview],
 		},
-		acp.PlanEntry{
-			Content:  planStepChat,
-			Priority: acp.PlanEntryPriorityMedium,
-			Status:   r.planStatuses[planStepChat],
-		},
 	)
 	r.mu.Unlock()
 
@@ -383,9 +375,28 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		return acp.PromptResponse{}, err
 	}
 
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	defer turnCancel()
+
+	r.mu.Lock()
+	if r.activeCancel != nil {
+		r.mu.Unlock()
+		return acp.PromptResponse{}, errors.New("concurrent prompt turns are not allowed on the same session")
+	}
+	r.activeCancel = turnCancel
+	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		r.activeCancel = nil
+		r.mu.Unlock()
+	}()
+
 	// Wait for the initial review to complete and the post-review handler to be ready.
 	select {
 	case <-r.reviewReady:
+	case <-turnCtx.Done():
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	case <-ctx.Done():
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	case <-r.conn.Done():
@@ -400,16 +411,7 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 
 	r.mu.Lock()
 	handler := r.promptHandler
-	turnCtx, turnCancel := context.WithCancel(ctx)
-	r.activeCancel = turnCancel
 	r.mu.Unlock()
-
-	defer func() {
-		turnCancel()
-		r.mu.Lock()
-		r.activeCancel = nil
-		r.mu.Unlock()
-	}()
 
 	if handler == nil {
 		return acp.PromptResponse{}, errors.New("post-review chat handler is not available")
@@ -480,6 +482,14 @@ func extractPromptText(blocks []acp.ContentBlock) string {
 // --- core.Reporter implementation ---
 
 func (r *acpReporter) ReportIteration(iter int) {
+	r.mu.Lock()
+	isChat := r.currentMode == acpModeChat
+	r.mu.Unlock()
+
+	if isChat {
+		return
+	}
+
 	r.advancePlan(map[string]acp.PlanEntryStatus{
 		planStepContext:   acp.PlanEntryStatusCompleted,
 		planStepPreReview: acp.PlanEntryStatusCompleted,
@@ -595,6 +605,9 @@ func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error
 				}
 			}
 		}
+	}
+	if len(r.pendingByName[tc.Name]) == 0 {
+		delete(r.pendingByName, tc.Name)
 	}
 	r.mu.Unlock()
 

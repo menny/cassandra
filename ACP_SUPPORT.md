@@ -32,7 +32,6 @@ When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` w
      - `Gather git diff and commit context`
      - `Generate pre-review summary` (when `--pre-review-prompt-file` is configured)
      - `Inspect code and formulate review`
-     - `Interactive post-review discussion`
 5. **Context Window & Token Usage (`usage_update`)**:
    - On each interaction (during review iterations and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`).
 6. **Real-Time Initial Review Streaming**:

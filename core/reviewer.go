@@ -373,10 +373,13 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 
 	maxIterations := CalculateMaxIterations(1)
 
-	if acpRep, ok := r.Agent.reporter.(*acpReporter); ok {
-		return acpRep.ServePostReview(ctx, func(turnCtx context.Context, cleanInput string) error {
+	if server, ok := r.Agent.reporter.(PostReviewServer); ok {
+		return server.ServePostReview(ctx, func(turnCtx context.Context, cleanInput string) error {
 			return r.executePostReviewTurn(turnCtx, cleanInput, maxIterations, nil)
 		})
+	}
+	if r.Config.Render == "acp" {
+		return errors.New("ACP mode requires a reporter that implements PostReviewServer")
 	}
 
 	replCtx, cancel := context.WithCancel(ctx)

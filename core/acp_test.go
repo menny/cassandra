@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -322,13 +323,14 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.NotEmpty(t, plans)
 	latestPlan := plans[len(plans)-1]
 	require.NotEmpty(t, latestPlan.Entries)
-	var foundChatPlan bool
+	var planContents []string
 	for _, entry := range latestPlan.Entries {
-		if entry.Content == planStepChat && entry.Status == acp.PlanEntryStatusInProgress {
-			foundChatPlan = true
-		}
+		planContents = append(planContents, entry.Content)
+		require.Equal(t, acp.PlanEntryStatusCompleted, entry.Status)
+		require.NotContains(t, strings.ToLower(entry.Content), "interactive", "plan should not include interactive discussion")
 	}
-	require.True(t, foundChatPlan, "expected plan to have chat step in progress")
+	require.Contains(t, planContents, planStepContext)
+	require.Contains(t, planContents, planStepReview)
 
 	// Verify token usage updates during chat turns
 	require.NotEmpty(t, usageUpdates)
@@ -578,4 +580,96 @@ func TestACPReporter_CloseSessionManagedCancellation(t *testing.T) {
 	mu.Lock()
 	require.Equal(t, 1, canceledCount, "cancelSession should be invoked exactly once via sync.Once")
 	mu.Unlock()
+}
+
+func TestACPReporter_PromptCancellationDuringInitialReview(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	// Start Prompt turn while initial review has NOT finished (reviewReady is not closed)
+	promptDone := make(chan acp.PromptResponse, 1)
+	promptErr := make(chan error, 1)
+	go func() {
+		resp, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+			SessionId: newSessResp.SessionId,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("Question before review finishes")},
+		})
+		if err != nil {
+			promptErr <- err
+			return
+		}
+		promptDone <- resp
+	}()
+
+	// Give the goroutine a moment to enter Prompt and register activeCancel
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel via ACP session/cancel
+	require.NoError(t, clientConn.Cancel(sessionCtx, acp.CancelNotification{
+		SessionId: newSessResp.SessionId,
+	}))
+
+	select {
+	case err := <-promptErr:
+		t.Fatalf("unexpected error from Prompt: %v", err)
+	case resp := <-promptDone:
+		require.Equal(t, acp.StopReasonCancelled, resp.StopReason)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Prompt did not cancel during initial review wait")
+	}
+
+	_ = reporter
+}
+
+func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	// First Prompt will block on reviewReady
+	go func() {
+		_, _ = clientConn.Prompt(sessionCtx, acp.PromptRequest{
+			SessionId: newSessResp.SessionId,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("Turn 1")},
+		})
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Second Prompt concurrently should be rejected
+	_, err = clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("Turn 2")},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "concurrent prompt turns are not allowed")
+
+	_ = reporter
 }

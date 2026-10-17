@@ -77,6 +77,12 @@ type Reporter interface {
 	ReportPostReviewUserQuery(query string)
 }
 
+// PostReviewServer is an optional interface implemented by reporters (such as ACP)
+// that handle interactive post-review conversations asynchronously.
+type PostReviewServer interface {
+	ServePostReview(ctx context.Context, handler func(ctx context.Context, query string) error) error
+}
+
 // AgentOption configures an Agent.
 type AgentOption func(*Agent)
 
