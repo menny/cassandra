@@ -27,7 +27,7 @@ When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` w
 4. **Execution Plan Checklist (`plan`)**:
    - Cassandra publishes and live-updates an ACP Execution Plan (`entries` with `content`, `priority`, and `status`: `pending` $\to$ `in_progress` $\to$ `completed`):
      - `Gather git diff and commit context`
-     - `Generate pre-review summary` (when `--pre-review-prompt-file` is configured)
+     - `Generate pre-review summary` (when `--pre-review-prompt` is configured)
      - `Inspect code and formulate review`
 5. **Context Window & Token Usage (`usage_update`)**:
    - On each interaction (during review iterations and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`).
@@ -56,7 +56,7 @@ cassandra \
 - **CLI-Only Flags**: `--acp` and `--wait-for-message` can only be passed on the command line. Setting `acp = true`, `wait-for-message = true`, or `render = "acp"` inside `cassandra.toml` is rejected.
 - **Implied Settings**: Passing `--acp` automatically sets `--render=acp` and `--interactive-post-review=true`.
   - Combining `--acp` with a conflicting `--render` mode (e.g., `--render=tui` or `--render=markdown`) or `--interactive-post-review=false` returns a validation error.
-- **Deferred Review Start (`--wait-for-message`)**: When `--wait-for-message` is passed alongside `--acp`, Cassandra starts the ACP server, completes the `initialize` and `session/new` handshake, and gathers initial context, but waits for the first `session/prompt` user message before starting the pre-review summary and initial code review. That triggering user message stays queued until the review completes, after which it is answered as the first post-review chat turn. Without `--wait-for-message`, the review starts immediately after `session/new`.
+- **Deferred Review Start (`--wait-for-message`)**: When `--wait-for-message` is passed alongside `--acp`, Cassandra starts the ACP server, completes the `initialize` and `session/new` handshake, and gathers initial context, but waits for the first `session/prompt` user message before starting the pre-review summary and initial code review. If that initial message contains non-whitespace text, it is appended to the review request inside `<extra_initial_user_context_or_guidelines>...</extra_initial_user_context_or_guidelines>`, and the first prompt turn completes once the review is emitted. Subsequent `session/prompt` turns are handled as interactive post-review chat turns. Without `--wait-for-message`, the review starts immediately after `session/new`.
 - **Non-Interactive Initial Review (`ask_developer` Disabled)**: During the automated review pass, the `ask_developer` tool is disabled in ACP mode so the initial review streams to completion without blocking on mid-review terminal prompts; all developer interaction happens in the ACP `session/prompt` chat phase.
 - **Strict `stdout` / `stderr` Separation**: In ACP mode, `stdout` is reserved strictly for newline-delimited JSON-RPC 2.0 ACP frames. All non-ACP diagnostics and warnings are routed to `stderr`. Still-configured side-effect flags (`--review-output-file`, `--output-json`, `--metrics-json`) continue to write directly to their target files on disk.
 

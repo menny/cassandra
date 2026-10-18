@@ -26,13 +26,19 @@ from pathlib import Path
 
 # Map providers to environment variables
 PROVIDER_ENV_VARS = {
-    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "MENNY_GEMINI_API_TOKEN"],
+    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
     "anthropic": ["ANTHROPIC_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
 }
 
 # Config keys holding a single file path / dir that may be repo-relative.
-PATH_KEYS = ("provider-options-file", "pre-review-prompt", "mcp-config", "wishlist-dir")
+PATH_KEYS = (
+    "provider-options-file",
+    "pre-review-prompt",
+    "approval-evaluation-prompt-file",
+    "mcp-config",
+    "wishlist-dir",
+)
 # Config keys holding a list of guideline paths or named prompts.
 PATH_LIST_KEYS = ("supplemental-guidelines",)
 

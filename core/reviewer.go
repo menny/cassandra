@@ -166,8 +166,12 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		if !ok {
 			return "", errors.New("--wait-for-message requires a reporter that implements PostReviewServer")
 		}
-		if err := server.WaitForFirstMessage(ctx); err != nil {
+		firstMsg, err := server.WaitForFirstMessage(ctx)
+		if err != nil {
 			return "", err
+		}
+		if trimmed := strings.TrimSpace(firstMsg); trimmed != "" {
+			requestText += "\n\n<extra_initial_user_context_or_guidelines>\n" + trimmed + "\n</extra_initial_user_context_or_guidelines>"
 		}
 	}
 

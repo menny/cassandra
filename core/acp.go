@@ -142,8 +142,12 @@ type acpReporter struct {
 	reviewReady chan struct{}
 	reviewOnce  sync.Once
 
-	firstMessageReady chan struct{}
-	firstMessageOnce  sync.Once
+	firstMessageReady   chan struct{}
+	firstMessageOnce    sync.Once
+	firstMessageText    string
+	waitForMessageArmed bool
+
+	stagedReviews []string
 
 	promptHandler func(ctx context.Context, query string) error
 	activeCancel  context.CancelFunc
@@ -151,6 +155,7 @@ type acpReporter struct {
 	pendingCallsByID map[string]acp.ToolCallId
 	pendingByName    map[string][]acp.ToolCallId
 	toolSeq          int
+	msgSeq           int
 
 	// ctx bridges core.Reporter methods (which do not accept a context.Context)
 	// to outbound conn.SessionUpdate notifications.
@@ -219,7 +224,7 @@ func (r *acpReporter) Close() error {
 		r.cancelActiveTurn()
 		r.signalSessionReady()
 		r.signalReviewReady()
-		r.signalFirstMessage()
+		r.signalFirstMessage("")
 		if closer, ok := r.in.(io.Closer); ok && r.in != os.Stdin {
 			_ = closer.Close()
 			<-r.conn.Done()
@@ -242,24 +247,38 @@ func (r *acpReporter) signalReviewReady() {
 	})
 }
 
-func (r *acpReporter) signalFirstMessage() {
+func (r *acpReporter) signalFirstMessage(text string) bool {
+	isFirst := false
 	r.firstMessageOnce.Do(func() {
+		isFirst = true
+		r.mu.Lock()
+		r.firstMessageText = text
+		r.mu.Unlock()
 		close(r.firstMessageReady)
 	})
+	return isFirst
 }
 
 // WaitForFirstMessage blocks until the first ACP session/prompt request is
-// received, the context is canceled, or the ACP connection closes.
-func (r *acpReporter) WaitForFirstMessage(ctx context.Context) error {
+// received, the context is canceled, or the ACP connection closes, and returns
+// the text of that initial user message.
+func (r *acpReporter) WaitForFirstMessage(ctx context.Context) (string, error) {
+	r.mu.Lock()
+	r.waitForMessageArmed = true
+	r.mu.Unlock()
+
 	select {
 	case <-r.firstMessageReady:
-		return nil
+		r.mu.Lock()
+		text := r.firstMessageText
+		r.mu.Unlock()
+		return text, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		return "", ctx.Err()
 	case <-r.ctx.Done():
-		return r.ctx.Err()
+		return "", r.ctx.Err()
 	case <-r.conn.Done():
-		return errors.New("ACP connection closed")
+		return "", errors.New("ACP connection closed")
 	}
 }
 
@@ -314,6 +333,29 @@ func (r *acpReporter) sendUpdate(update acp.SessionUpdate) {
 	_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
 		SessionId: sid,
 		Update:    update,
+	})
+}
+
+func (r *acpReporter) sendAgentMessage(text string) {
+	if text == "" {
+		return
+	}
+	if !strings.HasSuffix(text, "\n") {
+		text += "\n\n"
+	} else if !strings.HasSuffix(text, "\n\n") {
+		text += "\n"
+	}
+
+	r.mu.Lock()
+	r.msgSeq++
+	msgID := fmt.Sprintf("00000000-0000-4000-8000-%012x", r.msgSeq)
+	r.mu.Unlock()
+
+	r.sendUpdate(acp.SessionUpdate{
+		AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+			Content:   acp.TextBlock(text),
+			MessageId: &msgID,
+		},
 	})
 }
 
@@ -461,7 +503,9 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		r.mu.Unlock()
 	}()
 
-	r.signalFirstMessage()
+	query := extractPromptText(params.Prompt)
+	cleanInput := strings.TrimSpace(query)
+	isFirstMessage := r.signalFirstMessage(cleanInput)
 
 	// Wait for the initial review to complete and the post-review handler to be ready.
 	select {
@@ -472,15 +516,21 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		return acp.PromptResponse{}, errors.New("ACP connection closed")
 	}
 
-	query := extractPromptText(params.Prompt)
-	cleanInput := strings.TrimSpace(query)
-	if cleanInput == "" {
+	r.mu.Lock()
+	waitForMessage := r.waitForMessageArmed || (r.cfg != nil && r.cfg.WaitForMessage)
+	handler := r.promptHandler
+	r.mu.Unlock()
+
+	// When --wait-for-message is enabled, the first user message triggered the
+	// initial review (and was injected into the review prompt as extra user
+	// context), so the turn completes as soon as the review is emitted.
+	if isFirstMessage && waitForMessage {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 
-	r.mu.Lock()
-	handler := r.promptHandler
-	r.mu.Unlock()
+	if cleanInput == "" {
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	}
 
 	if handler == nil {
 		return acp.PromptResponse{}, errors.New("post-review chat handler is not available")
@@ -566,6 +616,7 @@ func (r *acpReporter) ReportIteration(iter int) {
 	r.mu.Unlock()
 
 	if isChat {
+		r.sendUpdate(acp.UpdateAgentThoughtText(fmt.Sprintf("Thinking (iteration %d)...\n", iter)))
 		return
 	}
 
@@ -862,7 +913,7 @@ func (r *acpReporter) ReportNoChanges() {
 		planStepContext: acp.PlanEntryStatusCompleted,
 		planStepReview:  acp.PlanEntryStatusCompleted,
 	})
-	r.sendUpdate(acp.UpdateAgentMessageText("No changes found to review."))
+	r.sendAgentMessage("No changes found to review.")
 	r.signalReviewReady()
 }
 
@@ -872,8 +923,25 @@ func (r *acpReporter) ReportReview(result string) error {
 		planStepPreReview: acp.PlanEntryStatusCompleted,
 		planStepReview:    acp.PlanEntryStatusCompleted,
 	})
-	if result != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(r.formatMessageText(result)))
+
+	r.mu.Lock()
+	staged := r.stagedReviews
+	r.stagedReviews = nil
+	r.mu.Unlock()
+
+	formattedReview := r.formatMessageText(result)
+	if len(staged) > 0 {
+		var parts []string
+		parts = append(parts, staged...)
+		if formattedReview != "" {
+			parts = append(parts, fmt.Sprintf("# Code Review\n\n%s", formattedReview))
+		}
+		r.sendAgentMessage(strings.Join(parts, "\n\n---\n\n"))
+		return nil
+	}
+
+	if formattedReview != "" {
+		r.sendAgentMessage(formattedReview)
 	}
 	return nil
 }
@@ -886,7 +954,10 @@ func (r *acpReporter) ReportStageReview(stage, result string) error {
 		})
 	}
 	if result != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(fmt.Sprintf("# %s\n\n%s\n\n", stage, r.formatMessageText(result))))
+		formatted := strings.TrimSpace(r.formatMessageText(result))
+		r.mu.Lock()
+		r.stagedReviews = append(r.stagedReviews, fmt.Sprintf("# %s\n\n%s", stage, formatted))
+		r.mu.Unlock()
 	}
 	return nil
 }
@@ -921,7 +992,7 @@ func (r *acpReporter) NotifyUser() {}
 
 func (r *acpReporter) ReportPostReviewReply(message string) {
 	if message != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(r.formatMessageText(message)))
+		r.sendAgentMessage(r.formatMessageText(message))
 	}
 }
 

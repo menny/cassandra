@@ -314,9 +314,9 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	}
 
 	require.Contains(t, thoughts, "[security] Checking auth middleware\n")
-	require.Contains(t, messages, "Initial automated review findings.")
-	require.Contains(t, messages, "First ACP chat reply")
-	require.Contains(t, messages, "Second ACP chat reply")
+	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\n---\n\n# Code Review\n\nInitial automated review findings.\n\n")
+	require.Contains(t, messages, "First ACP chat reply\n\n")
+	require.Contains(t, messages, "Second ACP chat reply\n\n")
 	require.Len(t, toolStarts, 2)
 	require.Equal(t, acp.ToolKindRead, toolStarts[0].Kind)
 	require.Len(t, toolStarts[0].Locations, 1)
@@ -765,30 +765,121 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 	require.Equal(t, 0, lm.callIdx, "pre-review and initial review must not start before first user message")
 
 	// 2. Send the first user message via session/prompt.
-	// This unblocks Reviewer.Run (pre-review + initial review) and queues the
-	// user message until the review finishes, then executes the chat turn.
+	// This unblocks Reviewer.Run, appends the message inside
+	// <extra_initial_user_context_or_guidelines>, runs pre-review + initial
+	// review, and completes Turn 1 once the review is emitted.
+	promptResp1, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Please focus on concurrency in file.go"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp1.StopReason)
+
+	// Turn 1 must have executed only the pre-review (1) and initial review (2) passes
+	require.Equal(t, 2, lm.callIdx)
+
+	// Both passes must have received the <extra_initial_user_context_or_guidelines> block
+	expectedExtraBlock := "<extra_initial_user_context_or_guidelines>\nPlease focus on concurrency in file.go\n</extra_initial_user_context_or_guidelines>"
+	require.Contains(t, lm.calls[0][len(lm.calls[0])-1].Text, expectedExtraBlock)
+	require.Contains(t, lm.calls[1][len(lm.calls[1])-1].Text, expectedExtraBlock)
+
+	// 3. Send a second user message (follow-up question) and verify it runs as a post-review chat turn
+	promptResp2, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Follow-up question about finding 1"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp2.StopReason)
+	require.Equal(t, 3, lm.callIdx)
+
+	var messages []string
+	messageIDs := make(map[string]bool)
+	for _, n := range client.snapshotUpdates() {
+		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			messages = append(messages, n.Update.AgentMessageChunk.Content.Text.Text)
+			require.NotNil(t, n.Update.AgentMessageChunk.MessageId)
+			messageIDs[*n.Update.AgentMessageChunk.MessageId] = true
+		}
+	}
+	require.Len(t, messages, 2)
+	require.Len(t, messageIDs, 2, "review turn and follow-up chat turn must have distinct MessageIds")
+	require.Equal(t, "# Pre-Review Summary\n\nPre-review summary result\n\n---\n\n# Code Review\n\nInitial review result\n\n", messages[0])
+	require.Equal(t, "Reply to queued first user message\n\n", messages[1])
+
+	cancelSession()
+	require.NoError(t, <-pipelineDone)
+}
+
+func TestACPReporter_WaitForMessage_WhitespaceOnlyOmitsExtraBlock(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "google"
+	cfg.Model = "gemini-test"
+	cfg.Render = "acp"
+	cfg.InteractivePostReview = true
+	cfg.WaitForMessage = true
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{Text: "Initial review result"},
+		},
+	}
+
+	reviewer := &Reviewer{
+		Agent:        NewAgent(lm, newMockDispatcher(), WithReporter(reporter)),
+		Config:       cfg,
+		RootDir:      t.TempDir(),
+		StablePrompt: "stable system prompt",
+		Guidelines:   "general guidelines",
+	}
+
+	pipelineDone := make(chan error, 1)
+	go func() {
+		reviewText, runErr := reviewer.Run(sessionCtx, []string{"file.go"}, "diff content")
+		if runErr != nil {
+			pipelineDone <- runErr
+			return
+		}
+		if repErr := reporter.ReportReview(reviewText); repErr != nil {
+			pipelineDone <- repErr
+			return
+		}
+		pipelineDone <- reviewer.RunInteractivePostReview(sessionCtx)
+	}()
+
 	promptResp, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
 		SessionId: newSessResp.SessionId,
 		Prompt: []acp.ContentBlock{
-			acp.TextBlock("Please review and explain any issues in file.go"),
+			acp.TextBlock("   \n\t  "),
 		},
 	})
 	require.NoError(t, err)
 	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
 
-	// All 3 LLM passes must have completed: pre-review (1), initial review (2), queued chat turn (3)
-	require.Equal(t, 3, lm.callIdx)
-
-	var messages []string
-	for _, n := range client.snapshotUpdates() {
-		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
-			messages = append(messages, n.Update.AgentMessageChunk.Content.Text.Text)
-		}
-	}
-	require.Len(t, messages, 3)
-	require.Contains(t, messages[0], "Pre-review summary result")
-	require.Equal(t, "Initial review result", messages[1])
-	require.Equal(t, "Reply to queued first user message", messages[2])
+	require.Equal(t, 1, lm.callIdx)
+	userMsg := lm.calls[0][len(lm.calls[0])-1].Text
+	require.Equal(t, "diff content", userMsg)
+	require.NotContains(t, userMsg, "extra_initial_user_context_or_guidelines")
 
 	cancelSession()
 	require.NoError(t, <-pipelineDone)

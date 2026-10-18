@@ -80,7 +80,7 @@ type Reporter interface {
 // PostReviewServer is an optional interface implemented by reporters (such as ACP)
 // that handle interactive post-review conversations asynchronously.
 type PostReviewServer interface {
-	WaitForFirstMessage(ctx context.Context) error
+	WaitForFirstMessage(ctx context.Context) (string, error)
 	ServePostReview(ctx context.Context, handler func(ctx context.Context, query string) error) error
 }
 
