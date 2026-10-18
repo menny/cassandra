@@ -157,11 +157,23 @@ def _get_default_base_ref(target_dir):
     sys.exit(1)
 
 
-def resolve_api_key(provider: str, remaining_args: list[str]) -> str | None:
+def resolve_api_key(
+    provider: str, remaining_args: list[str], api_key_env: str | None = None
+) -> str | None:
     """Resolves the API key for the given provider from environment variables."""
     # Check if --provider-api-key was passed directly in remaining args (e.g. --provider-api-key KEY or --provider-api-key=KEY)
     if any(arg.startswith("--provider-api-key") for arg in remaining_args):
         return None
+
+    if api_key_env:
+        val = os.environ.get(api_key_env)
+        if val:
+            return val
+        print(
+            f"Error: environment variable '{api_key_env}' specified via --api-key-env is not set or empty.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     env_vars = PROVIDER_ENV_VARS.get(provider.lower(), [])
     for var in env_vars:
@@ -179,7 +191,7 @@ def resolve_api_key(provider: str, remaining_args: list[str]) -> str | None:
     print(
         f"Error: API key for provider '{provider}' is missing.\n"
         f"Please set one of the following environment variables: {', '.join(expected_vars)} "
-        "or pass --provider-api-key.",
+        "or pass --api-key-env / --provider-api-key.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -229,6 +241,11 @@ def main():
         "--wait-for-message",
         action="store_true",
         help="Wait for an initial ACP user message before starting the review (requires --acp).",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        type=str,
+        help="Optional environment variable name to read the provider API key from.",
     )
     args, remaining_args = parser.parse_known_args()
 
@@ -280,7 +297,7 @@ def main():
 
         # 5. Resolve provider & API key from merged config
         provider = merged_data.get("provider", "google")
-        api_key = resolve_api_key(provider, remaining_args)
+        api_key = resolve_api_key(provider, remaining_args, args.api_key_env)
 
         # 6. Build and run Cassandra via Bazel (--script_path keeps stdin/stdout clean for ACP).
         print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
