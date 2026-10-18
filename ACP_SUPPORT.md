@@ -20,11 +20,8 @@ Key specification resources:
 When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` while preserving its full automated code review pipeline:
 
 1. **Immediate ACP Handshake**: Cassandra accepts the client's `initialize` and `session/new` requests as soon as it starts.
-2. **Session Modes (`session_mode`)**:
-   - `NewSessionResponse` advertises available session modes:
-     - `review` (*Automated Code Review* — analyzing git diff, commit history, and repository context)
-     - `chat` (*Interactive Post-Review Q&A* — discussing review findings and answering follow-up questions)
-   - When initial review finishes and Cassandra enters interactive discussion, it automatically emits a `current_mode_update` notification so the harness status bar or UI mode reflects the transition.
+2. **Session Mode & Model Metadata (`session_mode` & `configOptions`)**:
+   - `NewSessionResponse` advertises the single session mode `review` (*Code review* — analyzing git diff, commit history, and repository context) and reports Cassandra's configured main model (`--model`) via `configOptions` (`category: "model"`).
 3. **Session Metadata & Dynamic Title (`session_info_update`)**:
    - Cassandra dynamically pushes `session_info_update` notifications setting a human-readable title (e.g., `Code Review: main..HEAD (5 files, gemini-2.5-pro)`) and rich `_meta` attributes (`provider`, `model`, `base`, `head`, `targetDir`, `changedFiles`, `guidelines`).
 4. **Execution Plan Checklist (`plan`)**:

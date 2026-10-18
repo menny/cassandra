@@ -147,7 +147,8 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.Equal(t, defaultACPSessionID, newSessResp.SessionId)
 	require.NotNil(t, newSessResp.Modes)
 	require.Equal(t, acpModeReview, newSessResp.Modes.CurrentModeId)
-	require.Len(t, newSessResp.Modes.AvailableModes, 2)
+	require.Len(t, newSessResp.Modes.AvailableModes, 1)
+	require.Equal(t, "Code review", newSessResp.Modes.AvailableModes[0].Name)
 
 	// 2. Simulate initial review streaming through core.Reporter methods
 	cfg := config.NewDefaultConfig()
@@ -274,7 +275,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 		toolCompleted int
 		toolFailed    int
 		sessionInfos  []*acp.SessionSessionInfoUpdate
-		modeUpdates   []*acp.SessionCurrentModeUpdate
+		configUpdates []*acp.SessionConfigOptionUpdate
 		plans         []*acp.SessionUpdatePlan
 		usageUpdates  []*acp.SessionUsageUpdate
 	)
@@ -301,8 +302,8 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 		if u.SessionInfoUpdate != nil {
 			sessionInfos = append(sessionInfos, u.SessionInfoUpdate)
 		}
-		if u.CurrentModeUpdate != nil {
-			modeUpdates = append(modeUpdates, u.CurrentModeUpdate)
+		if u.ConfigOptionUpdate != nil {
+			configUpdates = append(configUpdates, u.ConfigOptionUpdate)
 		}
 		if u.Plan != nil {
 			plans = append(plans, u.Plan)
@@ -328,9 +329,11 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.Contains(t, *sessionInfos[0].Title, "Code Review")
 	require.Equal(t, "google", sessionInfos[0].Meta["provider"])
 
-	// Verify mode transition from review to chat
-	require.NotEmpty(t, modeUpdates)
-	require.Equal(t, acpModeChat, modeUpdates[0].CurrentModeId)
+	// Verify main model is reported in ConfigOptionUpdate
+	require.NotEmpty(t, configUpdates)
+	require.Len(t, configUpdates[0].ConfigOptions, 1)
+	require.NotNil(t, configUpdates[0].ConfigOptions[0].Select)
+	require.Equal(t, acp.SessionConfigValueId("gemini-test"), configUpdates[0].ConfigOptions[0].Select.CurrentValue)
 
 	// Verify plan updates
 	require.NotEmpty(t, plans)

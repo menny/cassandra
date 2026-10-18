@@ -22,7 +22,6 @@ const (
 	defaultACPSessionID = acp.SessionId("sess_1")
 
 	acpModeReview = acp.SessionModeId("review")
-	acpModeChat   = acp.SessionModeId("chat")
 
 	planStepContext   = "Gather git diff and commit context"
 	planStepPreReview = "Generate pre-review summary"
@@ -39,17 +38,39 @@ var acpToolKinds = map[string]acp.ToolKind{
 
 func availableACPModes() []acp.SessionMode {
 	reviewDesc := "Analyzing git diff, commit history, and repository context"
-	chatDesc := "Discussing review findings and answering follow-up questions"
 	return []acp.SessionMode{
 		{
 			Id:          acpModeReview,
-			Name:        "Automated Code Review",
+			Name:        "Code review",
 			Description: &reviewDesc,
 		},
+	}
+}
+
+func acpConfigOptions(modelName string) []acp.SessionConfigOption {
+	if modelName == "" {
+		return nil
+	}
+	category := acp.SessionConfigOptionCategoryModel
+	val := acp.SessionConfigValueId(modelName)
+	ungrouped := acp.SessionConfigSelectOptionsUngrouped{
 		{
-			Id:          acpModeChat,
-			Name:        "Interactive Post-Review Q&A",
-			Description: &chatDesc,
+			Value: val,
+			Name:  modelName,
+		},
+	}
+	return []acp.SessionConfigOption{
+		{
+			Select: &acp.SessionConfigOptionSelect{
+				Id:           acp.SessionConfigId("model"),
+				Name:         "Model",
+				Category:     &category,
+				CurrentValue: val,
+				Options: acp.SessionConfigSelectOptions{
+					Ungrouped: &ungrouped,
+				},
+				Type: "select",
+			},
 		},
 	}
 }
@@ -111,6 +132,7 @@ type acpReporter struct {
 	mu           sync.Mutex
 	sessionID    acp.SessionId
 	currentMode  acp.SessionModeId
+	inPostReview bool
 	sessionReady chan struct{}
 	sessionOnce  sync.Once
 
@@ -254,9 +276,9 @@ func (r *acpReporter) cancelActiveTurn() {
 func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx context.Context, query string) error) error {
 	r.mu.Lock()
 	r.promptHandler = handler
+	r.inPostReview = true
 	r.mu.Unlock()
 
-	r.emitModeUpdate(acpModeChat)
 	r.advancePlan(map[string]acp.PlanEntryStatus{
 		planStepContext:   acp.PlanEntryStatusCompleted,
 		planStepPreReview: acp.PlanEntryStatusCompleted,
@@ -397,11 +419,16 @@ func (r *acpReporter) NewSession(_ context.Context, _ acp.NewSessionRequest) (ac
 	r.mu.Lock()
 	sid := r.sessionID
 	mode := r.currentMode
+	var modelName string
+	if r.cfg != nil {
+		modelName = r.cfg.Model
+	}
 	r.mu.Unlock()
 
 	r.gateWriter.arm(r.signalSessionReady)
 	return acp.NewSessionResponse{
-		SessionId: sid,
+		SessionId:     sid,
+		ConfigOptions: acpConfigOptions(modelName),
 		Modes: &acp.SessionModeState{
 			CurrentModeId:  mode,
 			AvailableModes: availableACPModes(),
@@ -498,7 +525,15 @@ func (r *acpReporter) ResumeSession(_ context.Context, _ acp.ResumeSessionReques
 }
 
 func (r *acpReporter) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	return acp.SetSessionConfigOptionResponse{}, nil
+	r.mu.Lock()
+	var modelName string
+	if r.cfg != nil {
+		modelName = r.cfg.Model
+	}
+	r.mu.Unlock()
+	return acp.SetSessionConfigOptionResponse{
+		ConfigOptions: acpConfigOptions(modelName),
+	}, nil
 }
 
 func (r *acpReporter) SetSessionMode(_ context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
@@ -524,7 +559,7 @@ func extractPromptText(blocks []acp.ContentBlock) string {
 
 func (r *acpReporter) ReportIteration(iter int) {
 	r.mu.Lock()
-	isChat := r.currentMode == acpModeChat
+	isChat := r.inPostReview
 	r.mu.Unlock()
 
 	if isChat {
@@ -790,6 +825,13 @@ func (r *acpReporter) ReportConfig(cfg *config.Config, targetDir string) {
 
 	title, meta := r.buildSessionInfo(-1, cfg.MainGuidelines, cfg.Model)
 	r.emitSessionInfo(title, meta)
+	if opts := acpConfigOptions(cfg.Model); len(opts) > 0 {
+		r.sendUpdate(acp.SessionUpdate{
+			ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{
+				ConfigOptions: opts,
+			},
+		})
+	}
 	r.advancePlan(map[string]acp.PlanEntryStatus{
 		planStepContext: acp.PlanEntryStatusInProgress,
 	})
