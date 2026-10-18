@@ -319,6 +319,10 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.Contains(t, messages, "Second ACP chat reply")
 	require.Len(t, toolStarts, 2)
 	require.Equal(t, acp.ToolKindRead, toolStarts[0].Kind)
+	require.Len(t, toolStarts[0].Locations, 1)
+	require.Equal(t, "/workspace/auth.go", toolStarts[0].Locations[0].Path)
+	require.NotNil(t, toolStarts[0].Locations[0].Line)
+	require.Equal(t, 1, *toolStarts[0].Locations[0].Line)
 	require.Equal(t, acp.ToolKindSearch, toolStarts[1].Kind)
 	require.Equal(t, 1, toolCompleted)
 	require.Equal(t, 1, toolFailed)
@@ -788,4 +792,28 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 
 	cancelSession()
 	require.NoError(t, <-pipelineDone)
+}
+
+func TestLinkifyFileReferences(t *testing.T) {
+	input := strings.Join([]string{
+		"- [blocking] [core/acp.go:42] race condition",
+		"- [nit] [core/reviewer.go:10-20] simplify loop",
+		"- `[issue] [cmd/ai_reviewer/main.go:15-30]` check flag",
+		"- `[auth.go:99]` standalone file",
+		"- check `tools/local_tools.go:50-60` in prose",
+		"- already linked [core/acp.go:42](/custom/link#L42)",
+		"```go",
+		"// [core/acp.go:42] inside code block must not change",
+		"```",
+	}, "\n")
+
+	got := linkifyFileReferences(input, "/workspace")
+
+	require.Contains(t, got, "- [blocking] [core/acp.go:42](/workspace/core/acp.go#L42) race condition")
+	require.Contains(t, got, "- [nit] [core/reviewer.go:10](/workspace/core/reviewer.go#L10) simplify loop")
+	require.Contains(t, got, "- `[issue]` [cmd/ai_reviewer/main.go:15](/workspace/cmd/ai_reviewer/main.go#L15) check flag")
+	require.Contains(t, got, "- [auth.go:99](/workspace/auth.go#L99) standalone file")
+	require.Contains(t, got, "- check [tools/local_tools.go:50](/workspace/tools/local_tools.go#L50) in prose")
+	require.Contains(t, got, "- already linked [core/acp.go:42](/custom/link#L42)")
+	require.Contains(t, got, "// [core/acp.go:42] inside code block must not change")
 }

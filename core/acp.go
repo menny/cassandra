@@ -8,7 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -638,7 +641,9 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 				path, _ = rawArgs["path"].(string)
 			}
 			if path != "" {
-				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{{Path: path}}))
+				opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{
+					r.buildToolCallLocation(path, rawArgs),
+				}))
 			}
 		}
 
@@ -868,7 +873,7 @@ func (r *acpReporter) ReportReview(result string) error {
 		planStepReview:    acp.PlanEntryStatusCompleted,
 	})
 	if result != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(result))
+		r.sendUpdate(acp.UpdateAgentMessageText(r.formatMessageText(result)))
 	}
 	return nil
 }
@@ -881,7 +886,7 @@ func (r *acpReporter) ReportStageReview(stage, result string) error {
 		})
 	}
 	if result != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(fmt.Sprintf("# %s\n\n%s\n\n", stage, result)))
+		r.sendUpdate(acp.UpdateAgentMessageText(fmt.Sprintf("# %s\n\n%s\n\n", stage, r.formatMessageText(result))))
 	}
 	return nil
 }
@@ -916,8 +921,152 @@ func (r *acpReporter) NotifyUser() {}
 
 func (r *acpReporter) ReportPostReviewReply(message string) {
 	if message != "" {
-		r.sendUpdate(acp.UpdateAgentMessageText(message))
+		r.sendUpdate(acp.UpdateAgentMessageText(r.formatMessageText(message)))
 	}
 }
 
 func (r *acpReporter) ReportPostReviewUserQuery(_ string) {}
+
+func (r *acpReporter) resolveFilePath(path string) string {
+	r.mu.Lock()
+	targetDir := r.targetDir
+	r.mu.Unlock()
+
+	if targetDir != "" && !filepath.IsAbs(path) {
+		return filepath.Join(targetDir, path)
+	}
+	return path
+}
+
+func (r *acpReporter) buildToolCallLocation(path string, rawArgs map[string]any) acp.ToolCallLocation {
+	loc := acp.ToolCallLocation{
+		Path: r.resolveFilePath(path),
+	}
+	for _, key := range []string{"line_start", "start_line", "line"} {
+		switch v := rawArgs[key].(type) {
+		case float64:
+			if line := int(v); line > 0 {
+				loc.Line = &line
+				return loc
+			}
+		case int:
+			if v > 0 {
+				line := v
+				loc.Line = &line
+				return loc
+			}
+		}
+	}
+	return loc
+}
+
+var (
+	fencedCodeBlockPattern  = regexp.MustCompile("(?s)```.*?```")
+	backtickLabelRefPattern = regexp.MustCompile("`(\\[[^\\]\\n]+\\])\\s+\\[([^\\]\\n]+)\\]`")
+	backtickBracketPattern  = regexp.MustCompile("`\\[([^\\]\\n]+)\\]`")
+	backtickBareRefPattern  = regexp.MustCompile("`([A-Za-z0-9._/-]+:\\d+(?:-\\d+)?)`")
+	bracketFileRefPattern   = regexp.MustCompile(`\[([A-Za-z0-9._/-]+:\d+(?:-\d+)?)\]`)
+)
+
+func (r *acpReporter) formatMessageText(text string) string {
+	r.mu.Lock()
+	targetDir := r.targetDir
+	r.mu.Unlock()
+	return linkifyFileReferences(text, targetDir)
+}
+
+// linkifyFileReferences converts Cassandra file+line references such as
+// [path/to/file.go:42], [path/to/file.go:10-20], or `path/to/file.go:10-20`
+// outside fenced code blocks into Markdown file links so ACP clients render
+// clickable editor links.
+func linkifyFileReferences(text, targetDir string) string {
+	var sb strings.Builder
+	last := 0
+	for _, loc := range fencedCodeBlockPattern.FindAllStringIndex(text, -1) {
+		sb.WriteString(linkifySegment(text[last:loc[0]], targetDir))
+		sb.WriteString(text[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	sb.WriteString(linkifySegment(text[last:], targetDir))
+	return sb.String()
+}
+
+func linkifySegment(segment, targetDir string) string {
+	// Unwrap `[label] [path:line]` into `[label]` [path:line]
+	segment = backtickLabelRefPattern.ReplaceAllString(segment, "`$1` [$2]")
+	// Unwrap `[path:line]` into [path:line] when it matches a file reference
+	segment = backtickBracketPattern.ReplaceAllStringFunc(segment, func(m string) string {
+		inner := m[2 : len(m)-2]
+		if _, _, ok := parseFileLineRef(inner); ok {
+			return "[" + inner + "]"
+		}
+		return m
+	})
+	// Convert `path:line` or `path:start-end` into [path:line] so it gets linkified
+	segment = backtickBareRefPattern.ReplaceAllStringFunc(segment, func(m string) string {
+		inner := m[1 : len(m)-1]
+		if _, _, ok := parseFileLineRef(inner); ok {
+			return "[" + inner + "]"
+		}
+		return m
+	})
+
+	matches := bracketFileRefPattern.FindAllStringSubmatchIndex(segment, -1)
+	if len(matches) == 0 {
+		return segment
+	}
+
+	var sb strings.Builder
+	last := 0
+	for _, m := range matches {
+		start, end := m[0], m[1]
+		sb.WriteString(segment[last:start])
+		// Skip if already part of a Markdown link [label](href)
+		if end < len(segment) && segment[end] == '(' {
+			sb.WriteString(segment[start:end])
+			last = end
+			continue
+		}
+		inner := segment[m[2]:m[3]]
+		filePath, line, ok := parseFileLineRef(inner)
+		if !ok {
+			sb.WriteString(segment[start:end])
+			last = end
+			continue
+		}
+		destPath := filePath
+		if targetDir != "" && !filepath.IsAbs(filePath) {
+			destPath = filepath.Join(targetDir, filePath)
+		}
+		destPath = filepath.ToSlash(destPath)
+		labelPath := filepath.ToSlash(filePath)
+		fmt.Fprintf(&sb, "[%s:%d](%s#L%d)", labelPath, line, destPath, line)
+		last = end
+	}
+	sb.WriteString(segment[last:])
+	return sb.String()
+}
+
+func parseFileLineRef(ref string) (filePath string, startLine int, ok bool) {
+	colonIdx := strings.LastIndexByte(ref, ':')
+	if colonIdx <= 0 || colonIdx == len(ref)-1 {
+		return "", 0, false
+	}
+	filePath = ref[:colonIdx]
+	linePart := ref[colonIdx+1:]
+
+	// filePath must look like a path (contain '/' or a file extension)
+	base := filepath.Base(filePath)
+	if !strings.Contains(filePath, "/") && !strings.Contains(base, ".") {
+		return "", 0, false
+	}
+
+	if dashIdx := strings.IndexByte(linePart, '-'); dashIdx >= 0 {
+		linePart = linePart[:dashIdx]
+	}
+	line, err := strconv.Atoi(linePart)
+	if err != nil || line <= 0 {
+		return "", 0, false
+	}
+	return filePath, line, true
+}
