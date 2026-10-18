@@ -26,10 +26,46 @@ from pathlib import Path
 
 # Map providers to environment variables
 PROVIDER_ENV_VARS = {
-    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "MENNY_GEMINI_API_TOKEN"],
     "anthropic": ["ANTHROPIC_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
 }
+
+# Config keys holding a single file path / dir that may be repo-relative.
+PATH_KEYS = ("provider-options-file", "pre-review-prompt", "mcp-config", "wishlist-dir")
+# Config keys holding a list of guideline paths or named prompts.
+PATH_LIST_KEYS = ("supplemental-guidelines",)
+
+
+def absolutize_repo_path(value: str, target_dir: Path, cassandra_root: Path) -> str:
+    """Rewrites a config file path to absolute against cassandra_root if not found in target_dir."""
+    if os.path.isabs(value) or "://" in value:
+        return value
+    if (target_dir / value).exists():
+        return value
+    repo_candidate = cassandra_root / value
+    if repo_candidate.exists():
+        return str(repo_candidate)
+    return value
+
+
+def absolutize_config_paths(data: dict, target_dir: Path, cassandra_root: Path) -> dict:
+    """Rewrites repo-relative file paths in merged config to absolute paths."""
+    data = dict(data)
+    for key in PATH_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            data[key] = absolutize_repo_path(value, target_dir, cassandra_root)
+    for key in PATH_LIST_KEYS:
+        value = data.get(key)
+        if isinstance(value, list):
+            data[key] = [
+                absolutize_repo_path(item, target_dir, cassandra_root)
+                if isinstance(item, str)
+                else item
+                for item in value
+            ]
+    return data
 
 
 def serialize_flat_toml(data: dict) -> str:
@@ -183,7 +219,16 @@ def main():
         action="store_true",
         help="Enable Agent Client Protocol (ACP) mode over stdio.",
     )
+    parser.add_argument(
+        "--wait-for-message",
+        action="store_true",
+        help="Wait for an initial ACP user message before starting the review (requires --acp).",
+    )
     args, remaining_args = parser.parse_known_args()
+
+    if args.wait_for_message and not args.acp:
+        print("Error: --wait-for-message can only be used with --acp.", file=sys.stderr)
+        sys.exit(1)
 
     # Determine base configuration file
     if args.config:
@@ -198,30 +243,40 @@ def main():
         sys.exit(1)
 
     temp_file_path = None
+    runner_script = None
     try:
         # Merge target directory's local cassandra.toml if it exists
         local_config = target_dir / "cassandra.toml"
         if local_config.exists() and local_config.resolve() != config_file.resolve():
             print(f"Merging {local_config} into base configuration...", file=sys.stderr)
             merged_data = merge_tomls(config_file, local_config)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".toml",
-                prefix=f"cassandra.{target_dir.name}.",
-                delete=False,
-            ) as f:
-                temp_file_path = Path(f.name)
-                f.write(serialize_flat_toml(merged_data))
-            config_file = temp_file_path
         else:
             with config_file.open("rb") as f:
                 merged_data = tomllib.load(f)
+
+        merged_data = absolutize_config_paths(merged_data, target_dir, cassandra_root)
+        if args.acp and merged_data.get("allow-url-fetch"):
+            print(
+                "Disabling allow-url-fetch (standalone fetch sidecar) for ACP mode.",
+                file=sys.stderr,
+            )
+            merged_data["allow-url-fetch"] = False
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".toml",
+            prefix=f"cassandra.{target_dir.name}.",
+            delete=False,
+        ) as f:
+            temp_file_path = Path(f.name)
+            f.write(serialize_flat_toml(merged_data))
+        config_file = temp_file_path
 
         # 5. Resolve provider & API key from merged config
         provider = merged_data.get("provider", "google")
         api_key = resolve_api_key(provider, remaining_args)
 
-        # 6. Build and run Cassandra via Bazel.
+        # 6. Build and run Cassandra via Bazel (--script_path keeps stdin/stdout clean for ACP).
         print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
 
         run_args = [
@@ -236,6 +291,8 @@ def main():
         ]
         if args.acp:
             run_args.append("--acp")
+            if args.wait_for_message:
+                run_args.append("--wait-for-message")
         else:
             run_args.extend(
                 [
@@ -251,18 +308,36 @@ def main():
 
         run_args.extend(remaining_args)
 
-        cmd = ["bazelisk", "run", "//cmd/ai_reviewer", "--"] + run_args
+        with tempfile.NamedTemporaryFile(
+            prefix="cassandra.runner.", suffix=".sh", delete=False
+        ) as sf:
+            runner_script = Path(sf.name)
 
         try:
-            subprocess.run(cmd, cwd=str(cassandra_root), check=True)
+            subprocess.run(
+                [
+                    "bazelisk",
+                    "run",
+                    "--noshow_progress",
+                    "--ui_event_filters=-info,-stdout,-stderr",
+                    f"--script_path={runner_script}",
+                    "//cmd/ai_reviewer",
+                ],
+                cwd=str(cassandra_root),
+                stdin=subprocess.DEVNULL,
+                stdout=sys.stderr,
+                check=True,
+            )
+            subprocess.run([str(runner_script)] + run_args, cwd=str(cassandra_root), check=True)
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
     finally:
-        if temp_file_path and temp_file_path.exists():
-            try:
-                temp_file_path.unlink()
-            except OSError:
-                pass
+        for path in (temp_file_path, runner_script):
+            if path and path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":

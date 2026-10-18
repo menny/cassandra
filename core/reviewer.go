@@ -161,6 +161,16 @@ func (r *Reviewer) Close() error {
 
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
+	if r.Config != nil && r.Config.WaitForMessage {
+		server, ok := r.Agent.reporter.(PostReviewServer)
+		if !ok {
+			return "", errors.New("--wait-for-message requires a reporter that implements PostReviewServer")
+		}
+		if err := server.WaitForFirstMessage(ctx); err != nil {
+			return "", err
+		}
+	}
+
 	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config))
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)

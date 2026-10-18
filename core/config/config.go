@@ -47,6 +47,7 @@ type Config struct {
 	ProviderOptions              map[string]any `mapstructure:"-"`
 	Render                       string         `mapstructure:"render"`
 	InteractivePostReview        bool           `mapstructure:"interactive-post-review"`
+	WaitForMessage               bool           `mapstructure:"-"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.

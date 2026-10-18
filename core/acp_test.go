@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -672,4 +674,115 @@ func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Turn 1 prompt goroutine did not exit after cancellation")
 	}
+}
+
+func TestACPReporter_WaitForMessage(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	// 1. Handshake: Initialize + NewSession succeed immediately
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	preReviewPromptFile := filepath.Join(tmpDir, "pre-review.md")
+	require.NoError(t, os.WriteFile(preReviewPromptFile, []byte("Summarize changes."), 0o644))
+
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "google"
+	cfg.Model = "gemini-test"
+	cfg.Render = "acp"
+	cfg.InteractivePostReview = true
+	cfg.WaitForMessage = true
+	cfg.PreReviewPromptFile = preReviewPromptFile
+
+	reporter.ReportConfig(cfg, tmpDir)
+	reporter.ReportFetchingDiff()
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{
+				Text:  "Pre-review summary result",
+				Usage: llm.Usage{PromptTokens: 50, OutputTokens: 25},
+			},
+			{
+				Text:  "Initial review result",
+				Usage: llm.Usage{PromptTokens: 100, OutputTokens: 50},
+			},
+			{
+				Text:  "Reply to queued first user message",
+				Usage: llm.Usage{PromptTokens: 150, OutputTokens: 75},
+			},
+		},
+	}
+
+	reviewer := &Reviewer{
+		Agent:        NewAgent(lm, newMockDispatcher(), WithReporter(reporter)),
+		Config:       cfg,
+		RootDir:      tmpDir,
+		StablePrompt: "stable system prompt",
+		Guidelines:   "general guidelines",
+	}
+
+	// Start Reviewer.Run + RunInteractivePostReview in background
+	pipelineDone := make(chan error, 1)
+	go func() {
+		reviewText, runErr := reviewer.Run(sessionCtx, []string{"file.go"}, "diff content")
+		if runErr != nil {
+			pipelineDone <- runErr
+			return
+		}
+		if repErr := reporter.ReportReview(reviewText); repErr != nil {
+			pipelineDone <- repErr
+			return
+		}
+		pipelineDone <- reviewer.RunInteractivePostReview(sessionCtx)
+	}()
+
+	// Verify that after session/new, config updates were sent, but NO LLM calls
+	// have started because no user message (session/prompt) has been sent yet.
+	require.Eventually(t, func() bool {
+		return len(client.snapshotUpdates()) > 0
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, 0, lm.callIdx, "pre-review and initial review must not start before first user message")
+
+	// 2. Send the first user message via session/prompt.
+	// This unblocks Reviewer.Run (pre-review + initial review) and queues the
+	// user message until the review finishes, then executes the chat turn.
+	promptResp, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Please review and explain any issues in file.go"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+
+	// All 3 LLM passes must have completed: pre-review (1), initial review (2), queued chat turn (3)
+	require.Equal(t, 3, lm.callIdx)
+
+	var messages []string
+	for _, n := range client.snapshotUpdates() {
+		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			messages = append(messages, n.Update.AgentMessageChunk.Content.Text.Text)
+		}
+	}
+	require.Len(t, messages, 3)
+	require.Contains(t, messages[0], "Pre-review summary result")
+	require.Equal(t, "Initial review result", messages[1])
+	require.Equal(t, "Reply to queued first user message", messages[2])
+
+	cancelSession()
+	require.NoError(t, <-pipelineDone)
 }

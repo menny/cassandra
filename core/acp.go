@@ -117,6 +117,9 @@ type acpReporter struct {
 	reviewReady chan struct{}
 	reviewOnce  sync.Once
 
+	firstMessageReady chan struct{}
+	firstMessageOnce  sync.Once
+
 	promptHandler func(ctx context.Context, query string) error
 	activeCancel  context.CancelFunc
 
@@ -156,17 +159,18 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 	}
 	gate := &sessionGateWriter{out: stdout}
 	r := &acpReporter{
-		ctx:              ctx,
-		gateWriter:       gate,
-		in:               stdin,
-		stderr:           stderr,
-		cancelSession:    cancelSession,
-		sessionID:        defaultACPSessionID,
-		currentMode:      acpModeReview,
-		sessionReady:     make(chan struct{}),
-		reviewReady:      make(chan struct{}),
-		pendingCallsByID: make(map[string]acp.ToolCallId),
-		pendingByName:    make(map[string][]acp.ToolCallId),
+		ctx:               ctx,
+		gateWriter:        gate,
+		in:                stdin,
+		stderr:            stderr,
+		cancelSession:     cancelSession,
+		sessionID:         defaultACPSessionID,
+		currentMode:       acpModeReview,
+		sessionReady:      make(chan struct{}),
+		reviewReady:       make(chan struct{}),
+		firstMessageReady: make(chan struct{}),
+		pendingCallsByID:  make(map[string]acp.ToolCallId),
+		pendingByName:     make(map[string][]acp.ToolCallId),
 		planStatuses: map[string]acp.PlanEntryStatus{
 			planStepContext:   acp.PlanEntryStatusPending,
 			planStepPreReview: acp.PlanEntryStatusPending,
@@ -190,6 +194,7 @@ func (r *acpReporter) Close() error {
 		r.cancelActiveTurn()
 		r.signalSessionReady()
 		r.signalReviewReady()
+		r.signalFirstMessage()
 		if closer, ok := r.in.(io.Closer); ok && r.in != os.Stdin {
 			_ = closer.Close()
 			<-r.conn.Done()
@@ -210,6 +215,27 @@ func (r *acpReporter) signalReviewReady() {
 	r.reviewOnce.Do(func() {
 		close(r.reviewReady)
 	})
+}
+
+func (r *acpReporter) signalFirstMessage() {
+	r.firstMessageOnce.Do(func() {
+		close(r.firstMessageReady)
+	})
+}
+
+// WaitForFirstMessage blocks until the first ACP session/prompt request is
+// received, the context is canceled, or the ACP connection closes.
+func (r *acpReporter) WaitForFirstMessage(ctx context.Context) error {
+	select {
+	case <-r.firstMessageReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.ctx.Done():
+		return r.ctx.Err()
+	case <-r.conn.Done():
+		return errors.New("ACP connection closed")
+	}
 }
 
 func (r *acpReporter) cancelActiveTurn() {
@@ -404,6 +430,8 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		r.activeCancel = nil
 		r.mu.Unlock()
 	}()
+
+	r.signalFirstMessage()
 
 	// Wait for the initial review to complete and the post-review handler to be ready.
 	select {

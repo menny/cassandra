@@ -56,9 +56,10 @@ cassandra \
 
 ### Flag & Configuration Rules
 
-- **CLI-Only Flag**: `--acp` can only be passed on the command line. Setting `acp = true` or `render = "acp"` inside `cassandra.toml` is rejected.
+- **CLI-Only Flags**: `--acp` and `--wait-for-message` can only be passed on the command line. Setting `acp = true`, `wait-for-message = true`, or `render = "acp"` inside `cassandra.toml` is rejected.
 - **Implied Settings**: Passing `--acp` automatically sets `--render=acp` and `--interactive-post-review=true`.
   - Combining `--acp` with a conflicting `--render` mode (e.g., `--render=tui` or `--render=markdown`) or `--interactive-post-review=false` returns a validation error.
+- **Deferred Review Start (`--wait-for-message`)**: When `--wait-for-message` is passed alongside `--acp`, Cassandra starts the ACP server, completes the `initialize` and `session/new` handshake, and gathers initial context, but waits for the first `session/prompt` user message before starting the pre-review summary and initial code review. That triggering user message stays queued until the review completes, after which it is answered as the first post-review chat turn. Without `--wait-for-message`, the review starts immediately after `session/new`.
 - **Non-Interactive Initial Review (`ask_developer` Disabled)**: During the automated review pass, the `ask_developer` tool is disabled in ACP mode so the initial review streams to completion without blocking on mid-review terminal prompts; all developer interaction happens in the ACP `session/prompt` chat phase.
 - **Strict `stdout` / `stderr` Separation**: In ACP mode, `stdout` is reserved strictly for newline-delimited JSON-RPC 2.0 ACP frames. All non-ACP diagnostics and warnings are routed to `stderr`. Still-configured side-effect flags (`--review-output-file`, `--output-json`, `--metrics-json`) continue to write directly to their target files on disk.
 

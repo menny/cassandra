@@ -354,4 +354,38 @@ func TestRun_ACPValidation(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "--acp is a CLI-only flag and is not supported in configuration files")
 	})
+
+	t.Run("errors when --wait-for-message is passed without --acp", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--wait-for-message",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--wait-for-message can only be used with --acp")
+	})
+
+	t.Run("errors when wait-for-message is set in cassandra.toml", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("wait-for-message = true\n"), 0o644))
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+		}
+		err = run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--wait-for-message is a CLI-only flag and is not supported in configuration files")
+	})
 }

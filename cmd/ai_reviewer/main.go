@@ -67,6 +67,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.BoolVar(&cfg.AllowAskDeveloper, "allow-ask-developer", false, "Allow the AI reviewer to ask the developer questions")
 	fs.BoolVar(&cfg.InteractivePostReview, "interactive-post-review", false, "Start an interactive post-review chat session after the review pass")
 	fs.BoolVar(&acpMode, "acp", false, "Enable Agent Client Protocol (ACP) mode over stdio (CLI-only; implies --render=acp and --interactive-post-review)")
+	fs.BoolVar(&cfg.WaitForMessage, "wait-for-message", false, "Wait for an initial ACP user message before starting the review (CLI-only; requires --acp)")
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 	fs.StringVar(&cfg.WishlistDir, "wishlist-dir", "", "Path to a directory where AI-Reviewer feedback/wishlist will be stored")
@@ -113,7 +114,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("render", "raw")
 
 	fs.VisitAll(func(f *flag.Flag) {
-		if f.Name == "acp" {
+		if f.Name == "acp" || f.Name == "wait-for-message" {
 			return
 		}
 		if f.Changed {
@@ -144,9 +145,16 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	if v.IsSet("acp") {
 		return errors.New("--acp is a CLI-only flag and is not supported in configuration files")
 	}
+	if v.IsSet("wait-for-message") {
+		return errors.New("--wait-for-message is a CLI-only flag and is not supported in configuration files")
+	}
 
 	if err := v.Unmarshal(&cfg); err != nil {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
+	}
+
+	if cfg.WaitForMessage && !acpMode {
+		return errors.New("--wait-for-message can only be used with --acp")
 	}
 
 	if acpMode {
@@ -229,6 +237,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
 	if err != nil {
+		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+			return nil
+		}
 		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
 	defer reviewer.Close()
@@ -332,6 +343,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
+		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+			return nil
+		}
 		return fmt.Errorf("review failed: %w", err)
 	}
 
