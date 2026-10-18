@@ -314,7 +314,8 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	}
 
 	require.Contains(t, thoughts, "[security] Checking auth middleware\n")
-	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\n---\n\n# Code Review\n\nInitial automated review findings.\n\n")
+	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\nIs there anything you want me to focus in this review?\n\n")
+	require.Contains(t, messages, "Initial automated review findings.\n\n")
 	require.Contains(t, messages, "First ACP chat reply\n\n")
 	require.Contains(t, messages, "Second ACP chat reply\n\n")
 	require.Len(t, toolStarts, 2)
@@ -880,6 +881,114 @@ func TestACPReporter_WaitForMessage_WhitespaceOnlyOmitsExtraBlock(t *testing.T) 
 	userMsg := lm.calls[0][len(lm.calls[0])-1].Text
 	require.Equal(t, "diff content", userMsg)
 	require.NotContains(t, userMsg, "extra_initial_user_context_or_guidelines")
+
+	cancelSession()
+	require.NoError(t, <-pipelineDone)
+}
+
+func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	preReviewPromptFile := filepath.Join(tmpDir, "pre-review.md")
+	require.NoError(t, os.WriteFile(preReviewPromptFile, []byte("Summarize changes."), 0o644))
+
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "google"
+	cfg.Model = "gemini-test"
+	cfg.Render = "acp"
+	cfg.InteractivePostReview = true
+	cfg.WaitForMessage = false
+	cfg.PreReviewPromptFile = preReviewPromptFile
+
+	reporter.ReportConfig(cfg, tmpDir)
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{Text: "Pre-review summary output"},
+			{Text: "Main review output with user focus"},
+			{Text: "Post-review chat answer"},
+		},
+	}
+
+	reviewer := &Reviewer{
+		Agent:        NewAgent(lm, newMockDispatcher(), WithReporter(reporter)),
+		Config:       cfg,
+		RootDir:      tmpDir,
+		StablePrompt: "stable system prompt",
+		Guidelines:   "general guidelines",
+	}
+
+	pipelineDone := make(chan error, 1)
+	go func() {
+		reviewText, runErr := reviewer.Run(sessionCtx, []string{"auth.go"}, "diff content")
+		if runErr != nil {
+			pipelineDone <- runErr
+			return
+		}
+		if repErr := reporter.ReportReview(reviewText); repErr != nil {
+			pipelineDone <- repErr
+			return
+		}
+		pipelineDone <- reviewer.RunInteractivePostReview(sessionCtx)
+	}()
+
+	// 1. Pre-review summary runs automatically after session/new and emits the focus prompt
+	require.Eventually(t, func() bool {
+		for _, n := range client.snapshotUpdates() {
+			if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+				if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Is there anything you want me to focus in this review?") {
+					return true
+				}
+			}
+		}
+		return false
+	}, 2*time.Second, 5*time.Millisecond)
+
+	// Main review must NOT have started yet (still at 1 LLM call)
+	require.Equal(t, 1, lm.callIdx)
+
+	// 2. User sends their first message with focus instructions
+	promptResp1, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Focus on error handling in auth.go"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp1.StopReason)
+	require.Equal(t, 2, lm.callIdx)
+
+	// Verify the main review LLM call received both the pre-review summary and extra_initial_user_context_or_guidelines
+	mainReviewUserMsg := lm.calls[1][len(lm.calls[1])-1].Text
+	require.Contains(t, mainReviewUserMsg, "### Pre-Review Summary\nPre-review summary output")
+	require.Contains(t, mainReviewUserMsg, "<extra_initial_user_context_or_guidelines>\nFocus on error handling in auth.go\n</extra_initial_user_context_or_guidelines>")
+
+	// 3. Subsequent prompt runs as a post-review chat turn
+	promptResp2, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Why did you flag line 10?"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp2.StopReason)
+	require.Equal(t, 3, lm.callIdx)
 
 	cancelSession()
 	require.NoError(t, <-pipelineDone)

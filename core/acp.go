@@ -956,8 +956,19 @@ func (r *acpReporter) ReportStageReview(stage, result string) error {
 	if result != "" {
 		formatted := strings.TrimSpace(r.formatMessageText(result))
 		r.mu.Lock()
-		r.stagedReviews = append(r.stagedReviews, fmt.Sprintf("# %s\n\n%s", stage, formatted))
+		waitForMessage := r.cfg != nil && r.cfg.WaitForMessage
+		if waitForMessage {
+			r.stagedReviews = append(r.stagedReviews, fmt.Sprintf("# %s\n\n%s", stage, formatted))
+		}
 		r.mu.Unlock()
+
+		if !waitForMessage {
+			msg := fmt.Sprintf("# %s\n\n%s", stage, formatted)
+			if strings.EqualFold(stage, "Pre-Review Summary") {
+				msg += "\n\nIs there anything you want me to focus in this review?"
+			}
+			r.sendAgentMessage(msg)
+		}
 	}
 	return nil
 }

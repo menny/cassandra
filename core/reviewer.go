@@ -159,19 +159,28 @@ func (r *Reviewer) Close() error {
 	return nil
 }
 
+func (r *Reviewer) waitAndAppendInitialUserContext(ctx context.Context, requestText string) (string, error) {
+	server, ok := r.Agent.reporter.(PostReviewServer)
+	if !ok {
+		return "", errors.New("ACP mode requires a reporter that implements PostReviewServer")
+	}
+	firstMsg, err := server.WaitForFirstMessage(ctx)
+	if err != nil {
+		return "", err
+	}
+	if trimmed := strings.TrimSpace(firstMsg); trimmed != "" {
+		requestText += "\n\n<extra_initial_user_context_or_guidelines>\n" + trimmed + "\n</extra_initial_user_context_or_guidelines>"
+	}
+	return requestText, nil
+}
+
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
 	if r.Config != nil && r.Config.WaitForMessage {
-		server, ok := r.Agent.reporter.(PostReviewServer)
-		if !ok {
-			return "", errors.New("--wait-for-message requires a reporter that implements PostReviewServer")
-		}
-		firstMsg, err := server.WaitForFirstMessage(ctx)
+		var err error
+		requestText, err = r.waitAndAppendInitialUserContext(ctx, requestText)
 		if err != nil {
 			return "", err
-		}
-		if trimmed := strings.TrimSpace(firstMsg); trimmed != "" {
-			requestText += "\n\n<extra_initial_user_context_or_guidelines>\n" + trimmed + "\n</extra_initial_user_context_or_guidelines>"
 		}
 	}
 
@@ -225,6 +234,13 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		sb.WriteString("\n\n")
 		sb.WriteString(requestText)
 		requestText = sb.String()
+
+		if r.Config != nil && r.Config.Render == "acp" && !r.Config.WaitForMessage {
+			requestText, err = r.waitAndAppendInitialUserContext(ctx, requestText)
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 
 	if r.Config.PreReviewPromptFile != "" {
