@@ -521,9 +521,10 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	handler := r.promptHandler
 	r.mu.Unlock()
 
-	// When --wait-for-message is enabled, the first user message triggered the
-	// initial review (and was injected into the review prompt as extra user
-	// context), so the turn completes as soon as the review is emitted.
+	// When the initial review waited for a message (via --wait-for-message or
+	// pre-review focus), the first user message triggered the review (and was
+	// injected into the review prompt as extra user context), so the turn
+	// completes as soon as the review is emitted.
 	if isFirstMessage && waitForMessage {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
@@ -965,7 +966,7 @@ func (r *acpReporter) ReportStageReview(stage, result string) error {
 		if !waitForMessage {
 			msg := fmt.Sprintf("# %s\n\n%s", stage, formatted)
 			if strings.EqualFold(stage, "Pre-Review Summary") {
-				msg += "\n\nIs there anything you want me to focus in this review?"
+				msg += "\n\nIs there anything you want me to focus on in this review?"
 			}
 			r.sendAgentMessage(msg)
 		}

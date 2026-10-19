@@ -314,7 +314,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	}
 
 	require.Contains(t, thoughts, "[security] Checking auth middleware\n")
-	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\nIs there anything you want me to focus in this review?\n\n")
+	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\nIs there anything you want me to focus on in this review?\n\n")
 	require.Contains(t, messages, "Initial automated review findings.\n\n")
 	require.Contains(t, messages, "First ACP chat reply\n\n")
 	require.Contains(t, messages, "Second ACP chat reply\n\n")
@@ -952,7 +952,7 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 	require.Eventually(t, func() bool {
 		for _, n := range client.snapshotUpdates() {
 			if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
-				if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Is there anything you want me to focus in this review?") {
+				if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Is there anything you want me to focus on in this review?") {
 					return true
 				}
 			}
