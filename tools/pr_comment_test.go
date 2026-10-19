@@ -229,3 +229,31 @@ func TestPRCommentTool(t *testing.T) {
 		require.Contains(t, err.Error(), "GitHub rejected inline comment")
 	})
 }
+
+func TestRegisterLocalTools_PRComment(t *testing.T) {
+	t.Run("when allowPRComment is true", func(t *testing.T) {
+		r := NewRegistry()
+		RegisterLocalTools(r, "", nil, "", false, true, nil)
+		var hasCommentTool bool
+		for _, td := range r.ToTools() {
+			if td.Name == "post_pr_comment" {
+				hasCommentTool = true
+				break
+			}
+		}
+		require.True(t, hasCommentTool)
+	})
+
+	t.Run("when allowPRComment is false", func(t *testing.T) {
+		r := NewRegistry()
+		RegisterLocalTools(r, "", nil, "", false, false, nil)
+		var hasCommentTool bool
+		for _, td := range r.ToTools() {
+			if td.Name == "post_pr_comment" {
+				hasCommentTool = true
+				break
+			}
+		}
+		require.False(t, hasCommentTool)
+	})
+}

@@ -42,6 +42,10 @@ func allowAskDeveloper(cfg *config.Config) bool {
 	return cfg != nil && cfg.AllowAskDeveloper && cfg.Render != "acp"
 }
 
+func isACPSession(cfg *config.Config) bool {
+	return cfg != nil && cfg.Render == "acp"
+}
+
 // NewReviewer instantiates a Reviewer based on the provided configuration.
 // targetDir is the directory where local tools (like grep) will operate.
 func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, reporter Reporter) (r *Reviewer, err error) {
@@ -60,7 +64,8 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		notifier = tools.NoOpUserNotifier{}
 	}
 	includeAskDeveloper := allowAskDeveloper(cfg)
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, notifier, cfg.MetadataJSONFile)
+	includePRComment := isACPSession(cfg)
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, includePRComment, notifier, cfg.MetadataJSONFile)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.
@@ -137,7 +142,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	if cfg != nil {
 		currentModel = cfg.Model
 	}
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), currentModel)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), includePRComment, currentModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -192,7 +197,7 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	if r.Config != nil {
 		currentModel = r.Config.Model
 	}
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), currentModel)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), isACPSession(r.Config), currentModel)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
