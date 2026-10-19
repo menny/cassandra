@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1113,4 +1114,70 @@ func TestResolveSessionDetails_WithoutPRMetadata(t *testing.T) {
 	title, desc := resolveSessionDetails(context.Background(), tmpDir, cfg)
 	require.Equal(t, "Review feat/my-branch", title)
 	require.Empty(t, desc)
+}
+
+func TestResolveSessionDetails_WithPRMetadata_ZeroPRNumber(t *testing.T) {
+	tmpDir := t.TempDir()
+	metadataPath := filepath.Join(tmpDir, "pr_metadata.json")
+	pr := PRMetadata{
+		Title:    "Local changes",
+		PRNumber: 0,
+		Author:   "developer_one",
+	}
+	data, err := json.Marshal(pr)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(metadataPath, data, 0o644))
+
+	cfg := &config.Config{
+		MetadataJSONFile: metadataPath,
+	}
+
+	title, desc := resolveSessionDetails(context.Background(), tmpDir, cfg)
+	require.Equal(t, "Review Local changes", title)
+	require.Equal(t, "Reviewing changes by developer_one", desc)
+}
+
+func TestResolveSessionDetails_WithPRMetadata_ZeroPRNumber_NoAuthor(t *testing.T) {
+	tmpDir := t.TempDir()
+	metadataPath := filepath.Join(tmpDir, "pr_metadata.json")
+	pr := PRMetadata{
+		Title:    "Local changes without author",
+		PRNumber: 0,
+	}
+	data, err := json.Marshal(pr)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(metadataPath, data, 0o644))
+
+	cfg := &config.Config{
+		MetadataJSONFile: metadataPath,
+	}
+
+	title, desc := resolveSessionDetails(context.Background(), tmpDir, cfg)
+	require.Equal(t, "Review Local changes without author", title)
+	require.Empty(t, desc)
+}
+
+func TestResolveSessionDetails_EmptyTargetDirWithGit(t *testing.T) {
+	tmpDir := t.TempDir()
+	runGitCmd := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v failed: %s", args, string(out))
+	}
+	runGitCmd("init", "-b", "feature-test")
+	runGitCmd("config", "user.email", "test@example.com")
+	runGitCmd("config", "user.name", "Test User")
+	runGitCmd("config", "commit.gpgsign", "false")
+
+	testFile := filepath.Join(tmpDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("content"), 0o644))
+	runGitCmd("add", "test.txt")
+	runGitCmd("commit", "-m", "Initial test commit")
+
+	t.Chdir(tmpDir)
+
+	title, desc := resolveSessionDetails(context.Background(), "", nil)
+	require.Equal(t, "Review feature-test", title)
+	require.Contains(t, desc, "Initial test commit")
 }

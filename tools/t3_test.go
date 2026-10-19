@@ -23,7 +23,7 @@ func TestRegisterT3Tools(t *testing.T) {
 		require.Empty(t, r.ToTools())
 
 		// Directly calling callT3McpTool outside T3 returns an error
-		_, err := callT3McpTool("orchestrator_capabilities", map[string]any{})
+		_, err := callT3McpTool(context.Background(), "orchestrator_capabilities", map[string]any{})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "only available in a T3 Code session")
 	})
@@ -32,22 +32,12 @@ func TestRegisterT3Tools(t *testing.T) {
 		t.Setenv("T3_ACP_MCP_ENDPOINT", "http://127.0.0.1:3773/mcp")
 		t.Setenv("T3_ACP_MCP_NODE", "")
 
-		require.True(t, IsT3Session())
+		require.False(t, IsT3Session())
 
 		r := NewRegistry()
 		registerT3Tools(r)
 
-		toolDefs := r.ToTools()
-		require.Len(t, toolDefs, 4)
-
-		tcCaps := llm.ToolCall{
-			ID:        "tc_caps",
-			Name:      "orchestrator_capabilities",
-			Arguments: `{}`,
-		}
-		_, err := r.HandleCall(context.Background(), tcCaps)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "T3_ACP_MCP_NODE")
+		require.Empty(t, r.ToTools())
 	})
 
 	t.Run("inside T3 environment with mock node binary", func(t *testing.T) {
@@ -139,5 +129,21 @@ esac
 		resLaunch, err := r.HandleCall(context.Background(), tcLaunch)
 		require.NoError(t, err)
 		require.Contains(t, resLaunch, "threadId")
+	})
+
+	t.Run("truncates output exceeding 40 KB", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mockScript := filepath.Join(tmpDir, "mock_node.sh")
+		scriptContent := `#!/bin/sh
+printf '%*s' 50000 | tr ' ' 'A'
+`
+		require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+
+		t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+		res, err := callT3McpTool(context.Background(), "orchestrator_capabilities", map[string]any{})
+		require.NoError(t, err)
+		require.True(t, len(res) <= maxT3ToolOutputBytes+len("\n... (truncated)"))
+		require.Contains(t, res, "... (truncated)")
 	})
 }

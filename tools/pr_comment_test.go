@@ -64,6 +64,90 @@ func TestPRCommentTool(t *testing.T) {
 		require.Contains(t, err.Error(), "could not determine repository")
 	})
 
+	t.Run("missing line when path specified", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		r := NewRegistry()
+		registerPRCommentTool(r, "", "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_missing_line",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "test", "repo": "owner/repo", "pr_number": 1, "path": "main.go"}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "'line' is required when 'path' is specified")
+	})
+
+	t.Run("missing path when line specified", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		r := NewRegistry()
+		registerPRCommentTool(r, "", "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_missing_path",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "test", "repo": "owner/repo", "pr_number": 1, "line": 10}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "'path' is required when 'line' is specified")
+	})
+
+	t.Run("missing path when start_line specified", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		r := NewRegistry()
+		registerPRCommentTool(r, "", "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_missing_path_start_line",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "test", "repo": "owner/repo", "pr_number": 1, "start_line": 10}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "'path' is required when 'start_line' is specified")
+	})
+
+	t.Run("security: rejects directory traversal path escaping root", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		tmpDir := t.TempDir()
+		r := NewRegistry()
+		registerPRCommentTool(r, tmpDir, "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_traversal",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "bad path", "repo": "owner/repo", "pr_number": 1, "path": "../outside.go", "line": 5}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid path")
+	})
+
+	t.Run("security: rejects symlink escaping root", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		tmpDir := t.TempDir()
+		outsideDir := t.TempDir()
+		outsideFile := filepath.Join(outsideDir, "secret.go")
+		require.NoError(t, os.WriteFile(outsideFile, []byte("package secret"), 0o644))
+
+		symlinkPath := filepath.Join(tmpDir, "symlink.go")
+		require.NoError(t, os.Symlink(outsideFile, symlinkPath))
+
+		r := NewRegistry()
+		registerPRCommentTool(r, tmpDir, "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_symlink_escape",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "symlink escape", "repo": "owner/repo", "pr_number": 1, "path": "symlink.go", "line": 1}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid path")
+	})
+
 	t.Run("post top-level PR comment successfully", func(t *testing.T) {
 		t.Setenv("GITHUB_TOKEN", "dummy-token")
 

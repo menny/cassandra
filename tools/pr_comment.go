@@ -162,6 +162,22 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 			return "", errors.New("comment body cannot be empty")
 		}
 
+		if args.Path != "" && args.Line <= 0 {
+			return "", errors.New("'line' is required when 'path' is specified for an inline comment")
+		}
+		if args.Line > 0 && args.Path == "" {
+			return "", errors.New("'path' is required when 'line' is specified for an inline comment")
+		}
+		if args.StartLine > 0 && args.Path == "" {
+			return "", errors.New("'path' is required when 'start_line' is specified for an inline comment")
+		}
+
+		if args.Path != "" && rootDir != "" {
+			if _, err := util.ValidatePathInRoot(rootDir, args.Path); err != nil {
+				return "", fmt.Errorf("invalid path: %w", err)
+			}
+		}
+
 		owner, repo, prNumber, err := resolvePRTarget(ctx, rootDir, metadataFile, args.Repo, args.PRNumber)
 		if err != nil {
 			return "", err

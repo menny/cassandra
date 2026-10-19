@@ -850,10 +850,14 @@ func resolveSessionDetails(ctx context.Context, targetDir string, cfg *config.Co
 			if err := json.Unmarshal(data, &pr); err == nil && pr.Title != "" {
 				title := fmt.Sprintf("Review %s", pr.Title)
 				var desc string
-				if pr.Author != "" {
-					desc = fmt.Sprintf("Reviewing PR %d by %s", pr.PRNumber, pr.Author)
-				} else {
-					desc = fmt.Sprintf("Reviewing PR %d", pr.PRNumber)
+				if pr.PRNumber > 0 {
+					if pr.Author != "" {
+						desc = fmt.Sprintf("Reviewing PR %d by %s", pr.PRNumber, pr.Author)
+					} else {
+						desc = fmt.Sprintf("Reviewing PR %d", pr.PRNumber)
+					}
+				} else if pr.Author != "" {
+					desc = fmt.Sprintf("Reviewing changes by %s", pr.Author)
 				}
 				return title, desc
 			}
@@ -861,16 +865,14 @@ func resolveSessionDetails(ctx context.Context, targetDir string, cfg *config.Co
 	}
 
 	branch := ""
-	if targetDir != "" {
-		if out, err := util.RunGit(ctx, targetDir, "branch", "--show-current"); err == nil {
-			branch = strings.TrimSpace(string(out))
-		}
-		if branch == "" {
-			if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
-				b := strings.TrimSpace(string(out))
-				if b != "HEAD" {
-					branch = b
-				}
+	if out, err := util.RunGit(ctx, targetDir, "branch", "--show-current"); err == nil {
+		branch = strings.TrimSpace(string(out))
+	}
+	if branch == "" {
+		if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+			b := strings.TrimSpace(string(out))
+			if b != "HEAD" {
+				branch = b
 			}
 		}
 	}
@@ -884,13 +886,11 @@ func resolveSessionDetails(ctx context.Context, targetDir string, cfg *config.Co
 	title := fmt.Sprintf("Review %s", branch)
 
 	var sha, commitTitle string
-	if targetDir != "" {
-		if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--short", "HEAD"); err == nil {
-			sha = strings.TrimSpace(string(out))
-		}
-		if out, err := util.RunGit(ctx, targetDir, "log", "-1", "--format=%s", "HEAD"); err == nil {
-			commitTitle = strings.TrimSpace(string(out))
-		}
+	if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--short", "HEAD"); err == nil {
+		sha = strings.TrimSpace(string(out))
+	}
+	if out, err := util.RunGit(ctx, targetDir, "log", "-1", "--format=%s", "HEAD"); err == nil {
+		commitTitle = strings.TrimSpace(string(out))
 	}
 
 	var desc string

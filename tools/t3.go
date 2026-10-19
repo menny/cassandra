@@ -11,12 +11,14 @@ import (
 	"github.com/menny/cassandra/llm"
 )
 
+const maxT3ToolOutputBytes = 40 * 1024
+
 // IsT3Session returns true if Cassandra is currently running inside a T3 Code environment.
 func IsT3Session() bool {
-	return os.Getenv("T3_ACP_MCP_ENDPOINT") != "" || os.Getenv("T3_ACP_MCP_NODE") != ""
+	return os.Getenv("T3_ACP_MCP_NODE") != ""
 }
 
-func callT3McpTool(tool string, args any) (string, error) {
+func callT3McpTool(ctx context.Context, tool string, args any) (string, error) {
 	if !IsT3Session() {
 		return "", fmt.Errorf("tool %q is only available in a T3 Code session", tool)
 	}
@@ -36,13 +38,17 @@ func callT3McpTool(tool string, args any) (string, error) {
 		cmdArgs = append(cmdArgs, entrypoint)
 	}
 	cmdArgs = append(cmdArgs, "acp-mcp-call", tool, string(argsJSON))
-	cmd := exec.Command(node, cmdArgs...)
+	cmd := exec.CommandContext(ctx, node, cmdArgs...)
 	cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("calling T3 MCP tool %q failed: %w (output: %s)", tool, err, string(out))
 	}
-	return string(out), nil
+	result := string(out)
+	if len(result) > maxT3ToolOutputBytes {
+		result = result[:maxT3ToolOutputBytes] + "\n... (truncated)"
+	}
+	return result, nil
 }
 
 // ModelSelection specifies provider instance and model parameters for thread launch.
@@ -109,7 +115,7 @@ func registerT3Tools(r *Registry) {
 	}
 
 	RegisterToolWithArgs(r, linkDef, func(ctx context.Context, args linkArgs) (string, error) {
-		return callT3McpTool("link_pull_request", args)
+		return callT3McpTool(ctx, "link_pull_request", args)
 	})
 
 	listDef := llm.ToolDef{
@@ -131,7 +137,7 @@ func registerT3Tools(r *Registry) {
 	}
 
 	RegisterToolWithArgs(r, listDef, func(ctx context.Context, args listArgs) (string, error) {
-		return callT3McpTool("list_thread_pull_requests", args)
+		return callT3McpTool(ctx, "list_thread_pull_requests", args)
 	})
 
 	capDef := llm.ToolDef{
@@ -146,7 +152,7 @@ func registerT3Tools(r *Registry) {
 	type capArgs struct{}
 
 	RegisterToolWithArgs(r, capDef, func(ctx context.Context, args capArgs) (string, error) {
-		return callT3McpTool("orchestrator_capabilities", args)
+		return callT3McpTool(ctx, "orchestrator_capabilities", args)
 	})
 
 	launchDef := llm.ToolDef{
@@ -190,10 +196,7 @@ func registerT3Tools(r *Registry) {
 	RegisterToolWithArgs(r, launchDef, func(ctx context.Context, args ThreadLaunchArgs) (string, error) {
 		trimmed := strings.TrimSpace(args.Title)
 		if strings.HasPrefix(trimmed, "Review Fix") {
-			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "Review Fix"))
-			rest = strings.TrimPrefix(rest, "-")
-			rest = strings.TrimPrefix(rest, ":")
-			rest = strings.TrimSpace(rest)
+			rest := strings.TrimLeft(strings.TrimPrefix(trimmed, "Review Fix"), " -:")
 			if rest != "" {
 				args.Title = "Review Fix " + rest
 			} else {
@@ -204,6 +207,6 @@ func registerT3Tools(r *Registry) {
 		} else {
 			args.Title = "Review Fix"
 		}
-		return callT3McpTool("t3_thread_launch", args)
+		return callT3McpTool(ctx, "t3_thread_launch", args)
 	})
 }
