@@ -412,6 +412,10 @@ func formatMetadata(metadata core.PRMetadata) string {
 	if metadata.RepoFullName != "" {
 		fmt.Fprintf(&sb, "- **Repository**: %s\n", metadata.RepoFullName)
 	}
+	if metadata.PRNumber > 0 {
+		fmt.Fprintf(&sb, "- **PR Number**: #%d\n", metadata.PRNumber)
+		sb.WriteString("- **PR Linking**: This pull request is already registered and linked to this thread.\n")
+	}
 	fmt.Fprintf(&sb, "- **Author**: %s\n", metadata.Author)
 	fmt.Fprintf(&sb, "- **Date**: %s\n", metadata.CreatedAt.Format("2006-01-02"))
 	fmt.Fprintf(&sb, "- **Title**: %s\n", metadata.Title)

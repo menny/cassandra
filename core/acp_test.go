@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -331,7 +332,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	// Verify SessionInfoUpdate (title, metadata)
 	require.NotEmpty(t, sessionInfos)
 	require.NotNil(t, sessionInfos[0].Title)
-	require.Contains(t, *sessionInfos[0].Title, "Code Review")
+	require.Equal(t, "Review HEAD", *sessionInfos[0].Title)
 	require.Equal(t, "google", sessionInfos[0].Meta["provider"])
 
 	// Verify main model is reported in ConfigOptionUpdate
@@ -1080,4 +1081,36 @@ func TestACPReporter_WaitForMessage_NoChangesDoesNotDropFirstMessage(t *testing.
 
 	cancelSession()
 	require.NoError(t, <-postReviewDone)
+}
+
+func TestResolveSessionDetails_WithPRMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	metadataPath := filepath.Join(tmpDir, "pr_metadata.json")
+	pr := PRMetadata{
+		Title:    "Fix authentication timeout",
+		PRNumber: 132,
+		Author:   "developer_one",
+	}
+	data, err := json.Marshal(pr)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(metadataPath, data, 0o644))
+
+	cfg := &config.Config{
+		MetadataJSONFile: metadataPath,
+	}
+
+	title, desc := resolveSessionDetails(context.Background(), tmpDir, cfg)
+	require.Equal(t, "Review Fix authentication timeout", title)
+	require.Equal(t, "Reviewing PR 132 by developer_one", desc)
+}
+
+func TestResolveSessionDetails_WithoutPRMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Head: "feat/my-branch",
+	}
+
+	title, desc := resolveSessionDetails(context.Background(), tmpDir, cfg)
+	require.Equal(t, "Review feat/my-branch", title)
+	require.Empty(t, desc)
 }

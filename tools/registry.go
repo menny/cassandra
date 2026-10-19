@@ -73,6 +73,7 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 	registerLocalGrepFiles(r, root, ignoredLockFiles)
 	registerWishlistTool(r, wishlistDir)
 	registerEmitReviewerState(r)
+	registerT3Tools(r)
 	if allowAskDeveloper {
 		registerAskDeveloper(r, notifier)
 	}
