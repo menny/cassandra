@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,46 +17,32 @@ func IsT3Session() bool {
 }
 
 func callT3McpTool(tool string, args any) (string, error) {
+	if !IsT3Session() {
+		return "", fmt.Errorf("tool %q is only available in a T3 Code session", tool)
+	}
+
 	node := os.Getenv("T3_ACP_MCP_NODE")
-	endpoint := os.Getenv("T3_ACP_MCP_ENDPOINT")
-	if node == "" && endpoint == "" {
-		switch tool {
-		case "orchestrator_capabilities":
-			return `{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","displayName":"Antigravity","models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"},{"id":"gemini-3.8-flash-low","label":"Gemini 3.8 Flash (Low)"}]}]}`, nil
-		case "t3_thread_launch":
-			return `{"threadId":"test-thread-id-123"}`, nil
-		default:
-			return `{"alreadyLinked":true,"success":true}`, nil
-		}
+	if node == "" {
+		return "", fmt.Errorf("T3 MCP node executable (T3_ACP_MCP_NODE) is not configured")
 	}
 
 	argsJSON, err := json.Marshal(args)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to serialize args for %q: %w", tool, err)
 	}
 
-	if node != "" {
-		var cmdArgs []string
-		if entrypoint := os.Getenv("T3_ACP_MCP_ENTRYPOINT"); entrypoint != "" {
-			cmdArgs = append(cmdArgs, entrypoint)
-		}
-		cmdArgs = append(cmdArgs, "acp-mcp-call", tool, string(argsJSON))
-		cmd := exec.Command(node, cmdArgs...)
-		cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1")
-		out, err := cmd.Output()
-		if err == nil && len(out) > 0 {
-			return string(out), nil
-		}
+	var cmdArgs []string
+	if entrypoint := os.Getenv("T3_ACP_MCP_ENTRYPOINT"); entrypoint != "" {
+		cmdArgs = append(cmdArgs, entrypoint)
 	}
-
-	switch tool {
-	case "orchestrator_capabilities":
-		return `{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","displayName":"Antigravity","models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"},{"id":"gemini-3.8-flash-low","label":"Gemini 3.8 Flash (Low)"}]}]}`, nil
-	case "t3_thread_launch":
-		return `{"threadId":"test-thread-id-123"}`, nil
-	default:
-		return `{"alreadyLinked":true,"success":true}`, nil
+	cmdArgs = append(cmdArgs, "acp-mcp-call", tool, string(argsJSON))
+	cmd := exec.Command(node, cmdArgs...)
+	cmd.Env = append(os.Environ(), "ELECTRON_RUN_AS_NODE=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("calling T3 MCP tool %q failed: %w (output: %s)", tool, err, string(out))
 	}
+	return string(out), nil
 }
 
 // ModelSelection specifies provider instance and model parameters for thread launch.
