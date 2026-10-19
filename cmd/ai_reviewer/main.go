@@ -313,6 +313,14 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if len(changedFiles) == 0 {
 		reporter.ReportNoChanges()
+		if cfg.InteractivePostReview {
+			if cfg.Render != "acp" {
+				closeReporter()
+			}
+			if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
+				return fmt.Errorf("interactive post-review failed: %w", err)
+			}
+		}
 		return nil
 	}
 

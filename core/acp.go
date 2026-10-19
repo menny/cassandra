@@ -517,7 +517,7 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	}
 
 	r.mu.Lock()
-	waitForMessage := r.waitForMessageArmed || (r.cfg != nil && r.cfg.WaitForMessage)
+	waitForMessage := r.waitForMessageArmed
 	handler := r.promptHandler
 	r.mu.Unlock()
 
@@ -915,7 +915,6 @@ func (r *acpReporter) ReportNoChanges() {
 		planStepReview:  acp.PlanEntryStatusCompleted,
 	})
 	r.sendAgentMessage("No changes found to review.")
-	r.signalReviewReady()
 }
 
 func (r *acpReporter) ReportReview(result string) error {
@@ -1080,7 +1079,7 @@ func linkifySegment(segment, targetDir string) string {
 	// Unwrap `[path:line]` into [path:line] when it matches a file reference
 	segment = backtickBracketPattern.ReplaceAllStringFunc(segment, func(m string) string {
 		inner := m[2 : len(m)-2]
-		if _, _, ok := parseFileLineRef(inner); ok {
+		if _, _, _, ok := parseFileLineRef(inner); ok {
 			return "[" + inner + "]"
 		}
 		return m
@@ -1088,7 +1087,7 @@ func linkifySegment(segment, targetDir string) string {
 	// Convert `path:line` or `path:start-end` into [path:line] so it gets linkified
 	segment = backtickBareRefPattern.ReplaceAllStringFunc(segment, func(m string) string {
 		inner := m[1 : len(m)-1]
-		if _, _, ok := parseFileLineRef(inner); ok {
+		if _, _, _, ok := parseFileLineRef(inner); ok {
 			return "[" + inner + "]"
 		}
 		return m
@@ -1111,7 +1110,7 @@ func linkifySegment(segment, targetDir string) string {
 			continue
 		}
 		inner := segment[m[2]:m[3]]
-		filePath, line, ok := parseFileLineRef(inner)
+		filePath, linePart, line, ok := parseFileLineRef(inner)
 		if !ok {
 			sb.WriteString(segment[start:end])
 			last = end
@@ -1123,33 +1122,34 @@ func linkifySegment(segment, targetDir string) string {
 		}
 		destPath = filepath.ToSlash(destPath)
 		labelPath := filepath.ToSlash(filePath)
-		fmt.Fprintf(&sb, "[%s:%d](%s#L%d)", labelPath, line, destPath, line)
+		fmt.Fprintf(&sb, "[%s:%s](%s#L%d)", labelPath, linePart, destPath, line)
 		last = end
 	}
 	sb.WriteString(segment[last:])
 	return sb.String()
 }
 
-func parseFileLineRef(ref string) (filePath string, startLine int, ok bool) {
+func parseFileLineRef(ref string) (filePath, linePart string, startLine int, ok bool) {
 	colonIdx := strings.LastIndexByte(ref, ':')
 	if colonIdx <= 0 || colonIdx == len(ref)-1 {
-		return "", 0, false
+		return "", "", 0, false
 	}
 	filePath = ref[:colonIdx]
-	linePart := ref[colonIdx+1:]
+	linePart = ref[colonIdx+1:]
 
 	// filePath must look like a path (contain '/' or a file extension)
 	base := filepath.Base(filePath)
 	if !strings.Contains(filePath, "/") && !strings.Contains(base, ".") {
-		return "", 0, false
+		return "", "", 0, false
 	}
 
+	startPart := linePart
 	if dashIdx := strings.IndexByte(linePart, '-'); dashIdx >= 0 {
-		linePart = linePart[:dashIdx]
+		startPart = linePart[:dashIdx]
 	}
-	line, err := strconv.Atoi(linePart)
+	line, err := strconv.Atoi(startPart)
 	if err != nil || line <= 0 {
-		return "", 0, false
+		return "", "", 0, false
 	}
-	return filePath, line, true
+	return filePath, linePart, line, true
 }

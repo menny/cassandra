@@ -1010,10 +1010,74 @@ func TestLinkifyFileReferences(t *testing.T) {
 	got := linkifyFileReferences(input, "/workspace")
 
 	require.Contains(t, got, "- [blocking] [core/acp.go:42](/workspace/core/acp.go#L42) race condition")
-	require.Contains(t, got, "- [nit] [core/reviewer.go:10](/workspace/core/reviewer.go#L10) simplify loop")
-	require.Contains(t, got, "- `[issue]` [cmd/ai_reviewer/main.go:15](/workspace/cmd/ai_reviewer/main.go#L15) check flag")
+	require.Contains(t, got, "- [nit] [core/reviewer.go:10-20](/workspace/core/reviewer.go#L10) simplify loop")
+	require.Contains(t, got, "- `[issue]` [cmd/ai_reviewer/main.go:15-30](/workspace/cmd/ai_reviewer/main.go#L15) check flag")
 	require.Contains(t, got, "- [auth.go:99](/workspace/auth.go#L99) standalone file")
-	require.Contains(t, got, "- check [tools/local_tools.go:50](/workspace/tools/local_tools.go#L50) in prose")
+	require.Contains(t, got, "- check [tools/local_tools.go:50-60](/workspace/tools/local_tools.go#L50) in prose")
 	require.Contains(t, got, "- already linked [core/acp.go:42](/custom/link#L42)")
 	require.Contains(t, got, "// [core/acp.go:42] inside code block must not change")
+}
+
+func TestACPReporter_WaitForMessage_NoChangesDoesNotDropFirstMessage(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newSessResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "google"
+	cfg.Model = "gemini-test"
+	cfg.Render = "acp"
+	cfg.InteractivePostReview = true
+	cfg.WaitForMessage = true
+
+	reporter.ReportConfig(cfg, tmpDir)
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{Text: "There are no modified files in this commit."},
+		},
+	}
+	reviewer := &Reviewer{
+		Agent:   NewAgent(lm, newMockDispatcher(), WithReporter(reporter)),
+		Config:  cfg,
+		RootDir: tmpDir,
+	}
+
+	// In main.go when len(changedFiles) == 0, ReportNoChanges is emitted and then
+	// RunInteractivePostReview is started because cfg.InteractivePostReview is true.
+	reporter.ReportNoChanges()
+
+	postReviewDone := make(chan error, 1)
+	go func() {
+		postReviewDone <- reviewer.RunInteractivePostReview(sessionCtx)
+	}()
+
+	// The user's very first message must be handled by the post-review handler,
+	// rather than dropped by a false positive on waitForMessage.
+	promptResp, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newSessResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Why were no changes detected?"),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+	require.Equal(t, 1, lm.callIdx, "post-review LLM must be called for the user's first prompt")
+
+	cancelSession()
+	require.NoError(t, <-postReviewDone)
 }
