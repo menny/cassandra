@@ -266,3 +266,126 @@ func TestRun_AllowAskDeveloperValidation(t *testing.T) {
 		require.Contains(t, err.Error(), "failed to read diff file")
 	})
 }
+
+func TestRun_ACPValidation(t *testing.T) {
+	ctx := context.Background()
+	stderr := log.New(os.Stderr, "", 0)
+
+	t.Run("errors when --acp is combined with conflicting --render", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+			"--render", "tui",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp cannot be combined with --render=\"tui\"")
+	})
+
+	t.Run("errors when --acp is combined with --interactive-post-review=false", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+			"--interactive-post-review=false",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp requires --interactive-post-review to be enabled")
+	})
+
+	t.Run("disables allow-ask-developer automatically when --acp is set", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		// Create a cassandra.toml with allow-ask-developer = true
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("allow-ask-developer = true\n"), 0o644))
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+		}
+		// run() will fail later due to missing git repository, not due to allow-ask-developer validation
+		err = run(ctx, args, stderr)
+		if err != nil {
+			require.NotContains(t, err.Error(), "--allow-ask-developer can only be used")
+		}
+	})
+
+	t.Run("errors when --render=acp is passed without --acp", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--render", "acp",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "ACP mode can only be enabled via the --acp CLI flag")
+	})
+
+	t.Run("errors when acp is set in cassandra.toml", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("acp = true\n"), 0o644))
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+		}
+		err = run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--acp is a CLI-only flag and is not supported in configuration files")
+	})
+
+	t.Run("errors when --wait-for-message is passed without --acp", func(t *testing.T) {
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--wait-for-message",
+		}
+		err := run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--wait-for-message can only be used with --acp")
+	})
+
+	t.Run("errors when wait-for-message is set in cassandra.toml", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		tomlPath := filepath.Join(tmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(tomlPath, []byte("wait-for-message = true\n"), 0o644))
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--acp",
+		}
+		err = run(ctx, args, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "--wait-for-message is a CLI-only flag and is not supported in configuration files")
+	})
+}

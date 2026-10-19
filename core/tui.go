@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +27,7 @@ type mcpStatusMsg struct {
 }
 
 type toolStatusMsg struct {
+	id     string
 	name   string
 	status string
 	err    error
@@ -65,6 +65,7 @@ type mcpServerState struct {
 }
 
 type toolCallState struct {
+	id        string
 	name      string
 	arguments string
 	status    string // "queued", "started", "completed", "failed"
@@ -164,19 +165,15 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var revState *reviewerState
 
 			for _, tc := range msg.tcs {
-				if tc.Name == "emit_reviewer_state" {
-					var args struct {
-						Message   string `json:"message"`
-						FocusArea string `json:"focus_area"`
-					}
-					_ = json.Unmarshal([]byte(tc.Arguments), &args)
+				if focusArea, message, ok := parseReviewerState(tc); ok {
 					revState = &reviewerState{
-						focusArea:       args.FocusArea,
-						message:         args.Message,
-						renderedMessage: renderMarkdown(args.Message, os.Stderr),
+						focusArea:       focusArea,
+						message:         message,
+						renderedMessage: renderMarkdown(message, os.Stderr),
 					}
 				} else {
 					standardCalls = append(standardCalls, &toolCallState{
+						id:        tc.ID,
 						name:      tc.Name,
 						arguments: tc.Arguments,
 						status:    "queued",
@@ -198,16 +195,22 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolStatusMsg:
 		if len(m.iterations) > 0 {
 			current := m.iterations[len(m.iterations)-1]
+			matchesCall := func(tc *toolCallState) bool {
+				if msg.id != "" && tc.id != "" {
+					return tc.id == msg.id
+				}
+				return tc.name == msg.name
+			}
 			if msg.status == "started" {
 				for _, tc := range current.toolCalls {
-					if tc.name == msg.name && tc.status == "queued" {
+					if matchesCall(tc) && tc.status == "queued" {
 						tc.status = "started"
 						break
 					}
 				}
 			} else if msg.status == "completed" || msg.status == "failed" {
 				for _, tc := range current.toolCalls {
-					if tc.name == msg.name && tc.status == "started" {
+					if matchesCall(tc) && (tc.status == "started" || tc.status == "queued") {
 						tc.status = msg.status
 						tc.err = msg.err
 						break
@@ -654,8 +657,8 @@ func (r *tuiReporter) ReportMCPStatus(name string, status string, err error) {
 	r.send(mcpStatusMsg{name: name, status: status, err: err})
 }
 
-func (r *tuiReporter) ReportToolStatus(name string, status string, err error) {
-	r.send(toolStatusMsg{name: name, status: status, err: err})
+func (r *tuiReporter) ReportToolStatus(tc llm.ToolCall, status string, err error) {
+	r.send(toolStatusMsg{id: tc.ID, name: tc.Name, status: status, err: err})
 }
 
 func (r *tuiReporter) ReportReviewHeader(files int, guidelines string, model string) {

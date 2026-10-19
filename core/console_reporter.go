@@ -1,7 +1,6 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -284,7 +283,7 @@ func (r *consoleReporter) ReportMCPStatus(name string, status string, err error)
 	}
 }
 
-func (r *consoleReporter) ReportToolStatus(name string, status string, err error) {
+func (r *consoleReporter) ReportToolStatus(_ llm.ToolCall, _ string, _ error) {
 	// Console reporter does not display individual tool execution logs to avoid terminal clutter.
 	// In-place updates are managed by the TUI reporter.
 }
@@ -485,24 +484,18 @@ func (rawFormatter) FormatReview(result string) string {
 func (rawFormatter) FormatToolCalls(tcs []llm.ToolCall) string {
 	var sb strings.Builder
 	for _, tc := range tcs {
-		if tc.Name == "emit_reviewer_state" {
-			var args struct {
-				Message   string `json:"message"`
-				FocusArea string `json:"focus_area"`
-			}
-			_ = json.Unmarshal([]byte(tc.Arguments), &args)
-
+		if focusArea, message, ok := parseReviewerState(tc); ok {
 			if sb.Len() > 0 {
 				sb.WriteString("\n")
 			}
 
 			reviewerStateTitle := "[Reviewer state]"
-			if len(args.FocusArea) > 0 {
-				fmt.Fprintf(&sb, "🧠 %s focus area: %s\n", reviewerStateTitle, args.FocusArea)
+			if len(focusArea) > 0 {
+				fmt.Fprintf(&sb, "🧠 %s focus area: %s\n", reviewerStateTitle, focusArea)
 			} else {
 				fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
 			}
-			lines := strings.Split(args.Message, "\n")
+			lines := strings.Split(message, "\n")
 			for _, line := range lines {
 				sb.WriteString("  " + line + "\n")
 			}
@@ -615,25 +608,19 @@ func (markdownFormatter) FormatToolCalls(tcs []llm.ToolCall) string {
 	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
 
 	for _, tc := range tcs {
-		if tc.Name == "emit_reviewer_state" {
-			var args struct {
-				Message   string `json:"message"`
-				FocusArea string `json:"focus_area"`
-			}
-			_ = json.Unmarshal([]byte(tc.Arguments), &args)
-
+		if focusArea, message, ok := parseReviewerState(tc); ok {
 			if sb.Len() > 0 {
 				sb.WriteString("\n")
 			}
 
 			reviewerStateTitle := stateStyle.Render("[Reviewer state]")
-			if len(args.FocusArea) > 0 {
-				focusAreaTitle := focusStyle.Render(fmt.Sprintf("focus area: %s", args.FocusArea))
+			if len(focusArea) > 0 {
+				focusAreaTitle := focusStyle.Render(fmt.Sprintf("focus area: %s", focusArea))
 				fmt.Fprintf(&sb, "🧠 %s %s\n", reviewerStateTitle, focusAreaTitle)
 			} else {
 				fmt.Fprintf(&sb, "🧠 %s\n", reviewerStateTitle)
 			}
-			msg := renderMarkdown(args.Message, os.Stderr)
+			msg := renderMarkdown(message, os.Stderr)
 			messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
 			sb.WriteString(messageStyle.Render(msg))
 		} else {

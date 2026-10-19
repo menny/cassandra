@@ -17,12 +17,14 @@ go_library(
     ],
 )
 
+# pure and static ensure the binary is compiled without Cgo/libc dependencies,
+# producing a fully statically linked executable for easy distribution across Linux environments.
 go_binary(
     name = "ai_reviewer",
-    basename = "cassandra",
+    basename = "cassandra",  # keep
     embed = [":ai_reviewer_lib"],
-    pure = "on",
-    static = "on",
+    pure = "on",  # keep
+    static = "on",  # keep
     visibility = ["//visibility:public"],
 )
 

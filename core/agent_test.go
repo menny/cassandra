@@ -192,8 +192,8 @@ func (s *spyReporter) ReportMCPStatus(name string, status string, err error) {
 	s.mcpStatuses = append(s.mcpStatuses, mcpStatus{name: name, status: status, err: err})
 }
 
-func (s *spyReporter) ReportToolStatus(name string, status string, err error) {
-	s.toolStatuses = append(s.toolStatuses, toolStatus{name: name, status: status, err: err})
+func (s *spyReporter) ReportToolStatus(tc llm.ToolCall, status string, err error) {
+	s.toolStatuses = append(s.toolStatuses, toolStatus{name: tc.Name, status: status, err: err})
 }
 
 func (s *spyReporter) ReportReviewHeader(files int, guidelines string, model string) {
@@ -1158,11 +1158,10 @@ func TestTuiReporter(t *testing.T) {
 	reporter.ReportMCPStatus("mcp-server-test", "loaded", nil)
 
 	reporter.ReportIteration(1)
-	reporter.ReportToolCalls([]llm.ToolCall{
-		{ID: "1", Name: "test_tool", Arguments: "{}"},
-	})
-	reporter.ReportToolStatus("test_tool", "started", nil)
-	reporter.ReportToolStatus("test_tool", "completed", nil)
+	tc := llm.ToolCall{ID: "1", Name: "test_tool", Arguments: "{}"}
+	reporter.ReportToolCalls([]llm.ToolCall{tc})
+	reporter.ReportToolStatus(tc, "started", nil)
+	reporter.ReportToolStatus(tc, "completed", nil)
 
 	reporter.ReportWarning("some warning", nil)
 

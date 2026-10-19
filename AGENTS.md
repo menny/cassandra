@@ -88,6 +88,34 @@ Tools that interact with external data (files, network, pipes) MUST be resilient
 ### 8. Parallel Execution Patterns
 When parallelizing tool execution or background tasks, state updates (counters, logs, metrics) MUST be performed sequentially in the main loop before spawning goroutines. This ensures that log order remains predictable and eliminates the need for mutexes or atomic operations on shared counters during the parallel phase.
 
+### 10. Multi-Turn Chat History Rollback
+- **Rule**: Multi-turn chat handlers and conversational agents **MUST** restore message history to its pre-turn state if a turn is interrupted or fails before completion.
+- **Rationale**: Prevents history corruption and fatal consecutive-role API rejections (e.g. Anthropic or Gemini HTTP 400 errors like `"messages: roles must alternate between user and assistant"`) on subsequent prompt turns.
+- **Implementation**:
+  ```go
+  // bad
+  func (r *Reviewer) executePostReviewTurn(ctx context.Context, input string) error {
+  	reply, err := r.Agent.RunChatFlight(ctx, input, ...)
+  	if err != nil {
+  		return err // leaves r.Agent.history tainted with orphaned RoleUser
+  	}
+  	return nil
+  }
+
+  // good
+  func (r *Reviewer) executePostReviewTurn(ctx context.Context, input string) error {
+  	origLen := len(r.Agent.history)
+  	reply, err := r.Agent.RunChatFlight(ctx, input, ...)
+  	if err != nil {
+  		if len(r.Agent.history) > origLen {
+  			r.Agent.history = r.Agent.history[:origLen]
+  		}
+  		return err
+  	}
+  	return nil
+  }
+  ```
+
 ### 9. Goroutine Leak Prevention
 To guarantee that background tasks do not leak system resources and stack memory:
 

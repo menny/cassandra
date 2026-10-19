@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "core",
     srcs = [
+        "acp.go",
         "agent.go",
         "console_reporter.go",
         "github.go",
@@ -26,6 +27,7 @@ go_library(
         "@com_github_charmbracelet_huh//:huh",
         "@com_github_charmbracelet_lipgloss//:lipgloss",
         "@com_github_charmbracelet_lipgloss//table",
+        "@com_github_coder_acp_go_sdk//:acp-go-sdk",
         "@org_golang_x_term//:term",
     ],
 )
@@ -33,17 +35,20 @@ go_library(
 go_test(
     name = "core_test",
     srcs = [
+        "acp_test.go",
         "agent_test.go",
         "console_reporter_test.go",
         "main_test.go",
         "metrics_test.go",
         "review_types_test.go",
         "reviewer_test.go",
+        "tui_test.go",
     ],
     embed = [":core"],
     deps = [
         "//core/config",
         "//llm",
+        "@com_github_coder_acp_go_sdk//:acp-go-sdk",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_goleak//:goleak",

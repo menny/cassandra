@@ -44,6 +44,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	fs := flag.NewFlagSet("cassandra", flag.ContinueOnError)
 
+	var acpMode bool
 	fs.StringVar(&cfg.WorkingDir, "cwd", "", "Working directory (defaults to BUILD_WORKSPACE_DIRECTORY or current directory)")
 	fs.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
 	fs.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
@@ -65,6 +66,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.BoolVar(&cfg.AllowURLFetch, "allow-url-fetch", false, "Enable the mcp-server-fetch tool (requires uvx to be installed)")
 	fs.BoolVar(&cfg.AllowAskDeveloper, "allow-ask-developer", false, "Allow the AI reviewer to ask the developer questions")
 	fs.BoolVar(&cfg.InteractivePostReview, "interactive-post-review", false, "Start an interactive post-review chat session after the review pass")
+	fs.BoolVar(&acpMode, "acp", false, "Enable Agent Client Protocol (ACP) mode over stdio (CLI-only; implies --render=acp and --interactive-post-review)")
+	fs.BoolVar(&cfg.WaitForMessage, "wait-for-message", false, "Wait for an initial ACP user message before starting the review (CLI-only; requires --acp)")
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 	fs.StringVar(&cfg.WishlistDir, "wishlist-dir", "", "Path to a directory where AI-Reviewer feedback/wishlist will be stored")
@@ -111,6 +114,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("render", "raw")
 
 	fs.VisitAll(func(f *flag.Flag) {
+		if f.Name == "acp" || f.Name == "wait-for-message" {
+			return
+		}
 		if f.Changed {
 			if err := v.BindPFlag(f.Name, f); err != nil {
 				stderr.Printf("Warning: failed to bind flag %s to viper: %v\n", f.Name, err)
@@ -136,8 +142,33 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 	}
 
+	if v.IsSet("acp") {
+		return errors.New("--acp is a CLI-only flag and is not supported in configuration files")
+	}
+	if v.IsSet("wait-for-message") {
+		return errors.New("--wait-for-message is a CLI-only flag and is not supported in configuration files")
+	}
+
 	if err := v.Unmarshal(&cfg); err != nil {
 		return fmt.Errorf("failed to unmarshal configuration: %w", err)
+	}
+
+	if cfg.WaitForMessage && !acpMode {
+		return errors.New("--wait-for-message can only be used with --acp")
+	}
+
+	if acpMode {
+		if fs.Changed("render") && cfg.Render != "acp" {
+			return fmt.Errorf("--acp cannot be combined with --render=%q", cfg.Render)
+		}
+		if fs.Changed("interactive-post-review") && !cfg.InteractivePostReview {
+			return errors.New("--acp requires --interactive-post-review to be enabled")
+		}
+		cfg.Render = "acp"
+		cfg.InteractivePostReview = true
+		cfg.AllowAskDeveloper = false
+	} else if cfg.Render == "acp" {
+		return errors.New("ACP mode can only be enabled via the --acp CLI flag")
 	}
 
 	if err := cfg.LoadProviderOptions(); err != nil {
@@ -165,27 +196,30 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("missing required arguments:\n  - %s", strings.Join(missing, "\n  - "))
 	}
 
-	if cfg.Render != "raw" && cfg.Render != "markdown" && cfg.Render != "tui" {
-		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', or 'tui')", cfg.Render)
+	if cfg.Render != "raw" && cfg.Render != "markdown" && cfg.Render != "tui" && cfg.Render != "acp" {
+		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', 'tui', or 'acp')", cfg.Render)
 	}
 
 	if cfg.AllowAskDeveloper && cfg.Render != "markdown" && cfg.Render != "tui" {
-		return fmt.Errorf("--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+		return errors.New("--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
 	}
 
-	if cfg.InteractivePostReview && cfg.Render != "markdown" && cfg.Render != "tui" {
-		return errors.New("--interactive-post-review can only be used when --render is 'markdown' or 'tui'")
+	if cfg.InteractivePostReview && cfg.Render != "markdown" && cfg.Render != "tui" && cfg.Render != "acp" {
+		return errors.New("--interactive-post-review can only be used when --render is 'markdown', 'tui', or 'acp'")
 	}
 
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	defer cancelSession()
 
 	var reporter core.Reporter
-	if cfg.Render == "tui" {
+	switch cfg.Render {
+	case "acp":
+		reporter = core.NewACPReporter(sessionCtx, os.Stdout, os.Stdin, stderr.Writer(), cancelSession)
+	case "tui":
 		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancelSession)
-	} else if cfg.Render == "markdown" {
+	case "markdown":
 		reporter = core.NewMarkdownReporter(os.Stdout, stderr.Writer())
-	} else {
+	default:
 		reporter = core.NewRawReporter(os.Stdout, stderr.Writer())
 	}
 
@@ -203,6 +237,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
 	if err != nil {
+		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+			return nil
+		}
 		return fmt.Errorf("failed to initialize reviewer: %w", err)
 	}
 	defer reviewer.Close()
@@ -276,6 +313,14 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	if len(changedFiles) == 0 {
 		reporter.ReportNoChanges()
+		if cfg.InteractivePostReview {
+			if cfg.Render != "acp" {
+				closeReporter()
+			}
+			if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
+				return fmt.Errorf("interactive post-review failed: %w", err)
+			}
+		}
 		return nil
 	}
 
@@ -306,6 +351,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
+		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+			return nil
+		}
 		return fmt.Errorf("review failed: %w", err)
 	}
 
@@ -347,7 +395,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	if cfg.InteractivePostReview {
-		closeReporter()
+		if cfg.Render != "acp" {
+			closeReporter()
+		}
 		if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
 			return fmt.Errorf("interactive post-review failed: %w", err)
 		}

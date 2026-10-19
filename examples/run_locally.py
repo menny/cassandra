@@ -31,6 +31,48 @@ PROVIDER_ENV_VARS = {
     "openai": ["OPENAI_API_KEY"],
 }
 
+# Config keys holding a single file path / dir that may be repo-relative.
+PATH_KEYS = (
+    "provider-options-file",
+    "pre-review-prompt",
+    "approval-evaluation-prompt-file",
+    "mcp-config",
+    "wishlist-dir",
+)
+# Config keys holding a list of guideline paths or named prompts.
+PATH_LIST_KEYS = ("supplemental-guidelines",)
+
+
+def absolutize_repo_path(value: str, target_dir: Path, cassandra_root: Path) -> str:
+    """Rewrites a config file path to absolute against cassandra_root if not found in target_dir."""
+    if os.path.isabs(value) or "://" in value:
+        return value
+    if (target_dir / value).exists():
+        return value
+    repo_candidate = cassandra_root / value
+    if repo_candidate.exists():
+        return str(repo_candidate)
+    return value
+
+
+def absolutize_config_paths(data: dict, target_dir: Path, cassandra_root: Path) -> dict:
+    """Rewrites repo-relative file paths in merged config to absolute paths."""
+    data = dict(data)
+    for key in PATH_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value:
+            data[key] = absolutize_repo_path(value, target_dir, cassandra_root)
+    for key in PATH_LIST_KEYS:
+        value = data.get(key)
+        if isinstance(value, list):
+            data[key] = [
+                absolutize_repo_path(item, target_dir, cassandra_root)
+                if isinstance(item, str)
+                else item
+                for item in value
+            ]
+    return data
+
 
 def serialize_flat_toml(data: dict) -> str:
     """Serializes a flat dictionary back into TOML format."""
@@ -111,15 +153,26 @@ def _get_default_base_ref(target_dir):
         if git_ref_exists(fallback, target_dir):
             return fallback
 
-    print(f"Error: could not determine a default base ref for {target_dir}.", file=sys.stderr)
-    sys.exit(1)
+    return None
 
 
-def resolve_api_key(provider: str, remaining_args: list[str]) -> str | None:
+def resolve_api_key(
+    provider: str, remaining_args: list[str], api_key_env: str | None = None
+) -> str | None:
     """Resolves the API key for the given provider from environment variables."""
     # Check if --provider-api-key was passed directly in remaining args (e.g. --provider-api-key KEY or --provider-api-key=KEY)
     if any(arg.startswith("--provider-api-key") for arg in remaining_args):
         return None
+
+    if api_key_env:
+        val = os.environ.get(api_key_env)
+        if val:
+            return val
+        print(
+            f"Error: environment variable '{api_key_env}' specified via --api-key-env is not set or empty.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     env_vars = PROVIDER_ENV_VARS.get(provider.lower(), [])
     for var in env_vars:
@@ -137,7 +190,7 @@ def resolve_api_key(provider: str, remaining_args: list[str]) -> str | None:
     print(
         f"Error: API key for provider '{provider}' is missing.\n"
         f"Please set one of the following environment variables: {', '.join(expected_vars)} "
-        "or pass --provider-api-key.",
+        "or pass --api-key-env / --provider-api-key.",
         file=sys.stderr,
     )
     sys.exit(1)
@@ -147,38 +200,67 @@ def main():
     # 1. Determine directories
     script_path = Path(__file__).resolve()
     cassandra_root = script_path.parent.parent
-    target_dir = Path.cwd().resolve()
-
-    # 2. Verify target is a git repository
-    if run_git(["rev-parse", "--is-inside-work-tree"], target_dir, check=False) != "true":
-        print(f"Error: {target_dir} is not a git repository.", file=sys.stderr)
-        sys.exit(1)
-
-    # 3. Determine the default base commit (SHA) of the target repository
-    default_base_ref = _get_default_base_ref(target_dir)
-
-    default_base_sha = run_git(["rev-parse", default_base_ref], target_dir)
-
-    merge_base_sha = run_git(["merge-base", "HEAD", default_base_sha], target_dir, check=False)
-    if not merge_base_sha:
-        print(
-            f"Warning: could not compute merge-base, falling back to tip of {default_base_ref}",
-            file=sys.stderr,
-        )
-        merge_base_sha = default_base_sha
-
-    print(f"Detected base ref:           {default_base_ref}", file=sys.stderr)
-    print(f"Default branch tip:          {default_base_sha}", file=sys.stderr)
-    print(f"Effective base (merge-base): {merge_base_sha}", file=sys.stderr)
-
-    # 4. Parse command line arguments.
+    # 1. Parse command line arguments.
     parser = argparse.ArgumentParser(description="Cassandra AI-Reviewer local runner script example.")
+    parser.add_argument(
+        "--cwd",
+        type=Path,
+        help="Path to target git repository (defaults to current directory).",
+    )
     parser.add_argument(
         "--config",
         type=Path,
         help="Path to base TOML configuration file (defaults to examples/cassandra.toml).",
     )
+    parser.add_argument(
+        "--acp",
+        action="store_true",
+        help="Enable Agent Client Protocol (ACP) mode over stdio.",
+    )
+    parser.add_argument(
+        "--wait-for-message",
+        action="store_true",
+        help="Wait for an initial ACP user message before starting the review (requires --acp).",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        "--env-key-name",
+        dest="api_key_env",
+        type=str,
+        help="Optional environment variable name to read the provider API key from.",
+    )
     args, remaining_args = parser.parse_known_args()
+
+    if args.wait_for_message and not args.acp:
+        print("Error: --wait-for-message can only be used with --acp.", file=sys.stderr)
+        sys.exit(1)
+
+    target_dir = args.cwd.resolve() if args.cwd else Path.cwd().resolve()
+
+    # 2. Determine default base commit (SHA) of target repository if in a git repo
+    is_git = run_git(["rev-parse", "--is-inside-work-tree"], target_dir, check=False) == "true"
+    merge_base_sha = None
+
+    if is_git:
+        default_base_ref = _get_default_base_ref(target_dir)
+        if default_base_ref:
+            default_base_sha = run_git(["rev-parse", default_base_ref], target_dir, check=False)
+            if default_base_sha:
+                merge_base_sha = run_git(["merge-base", "HEAD", default_base_sha], target_dir, check=False)
+                if not merge_base_sha:
+                    merge_base_sha = default_base_sha
+
+    if merge_base_sha:
+        if not args.acp:
+            print(f"Detected base ref:           {default_base_ref}", file=sys.stderr)
+            print(f"Default branch tip:          {default_base_sha}", file=sys.stderr)
+            print(f"Effective base (merge-base): {merge_base_sha}", file=sys.stderr)
+    else:
+        if not args.acp:
+            print(
+                f"No git repository or base branch detected in {target_dir}. Assuming no-diff.",
+                file=sys.stderr,
+            )
 
     # Determine base configuration file
     if args.config:
@@ -193,64 +275,115 @@ def main():
         sys.exit(1)
 
     temp_file_path = None
+    runner_script = None
     try:
         # Merge target directory's local cassandra.toml if it exists
         local_config = target_dir / "cassandra.toml"
         if local_config.exists() and local_config.resolve() != config_file.resolve():
-            print(f"Merging {local_config} into base configuration...", file=sys.stderr)
+            if not args.acp:
+                print(f"Merging {local_config} into base configuration...", file=sys.stderr)
             merged_data = merge_tomls(config_file, local_config)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".toml",
-                prefix=f"cassandra.{target_dir.name}.",
-                delete=False,
-            ) as f:
-                temp_file_path = Path(f.name)
-                f.write(serialize_flat_toml(merged_data))
-            config_file = temp_file_path
         else:
             with config_file.open("rb") as f:
                 merged_data = tomllib.load(f)
 
-        # 5. Resolve provider & API key from merged config
-        provider = merged_data.get("provider", "google")
-        api_key = resolve_api_key(provider, remaining_args)
+        merged_data = absolutize_config_paths(merged_data, target_dir, cassandra_root)
+        if args.acp and merged_data.get("allow-url-fetch"):
+            merged_data["allow-url-fetch"] = False
 
-        # 6. Build and run Cassandra via Bazel.
-        print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".toml",
+            prefix=f"cassandra.{target_dir.name}.",
+            delete=False,
+        ) as f:
+            temp_file_path = Path(f.name)
+            f.write(serialize_flat_toml(merged_data))
+        config_file = temp_file_path
+
+        # 5. Resolve provider & API key from merged config or CLI overrides
+        provider = merged_data.get("provider", "google")
+        for i, arg in enumerate(remaining_args):
+            if arg == "--provider" and i + 1 < len(remaining_args):
+                provider = remaining_args[i + 1]
+                break
+            elif arg.startswith("--provider="):
+                provider = arg.split("=", 1)[1]
+                break
+        api_key = resolve_api_key(provider, remaining_args, args.api_key_env)
+
+        # 6. Build and run Cassandra via Bazel (--script_path keeps stdin/stdout clean for ACP).
+        if not args.acp:
+            print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
 
         run_args = [
-            "--render",
-            "markdown",
             "--config",
             str(config_file),
             "--cwd",
             str(target_dir),
-            "--base",
-            merge_base_sha,
-            "--head",
-            "HEAD",
-            "--allow-ask-developer",
-            "--interactive-post-review",
         ]
+        if merge_base_sha:
+            run_args.extend(["--base", merge_base_sha, "--head", "HEAD"])
+        else:
+            run_args.extend(
+                [
+                    "--diff-file",
+                    "/dev/null",
+                    "--files-list-file",
+                    "/dev/null",
+                    "--commits-file",
+                    "/dev/null",
+                ]
+            )
+        if args.acp:
+            run_args.append("--acp")
+            if args.wait_for_message:
+                run_args.append("--wait-for-message")
+        else:
+            run_args.extend(
+                [
+                    "--render",
+                    "markdown",
+                    "--allow-ask-developer",
+                    "--interactive-post-review",
+                ]
+            )
 
         if api_key:
             run_args.extend(["--provider-api-key", api_key])
 
         run_args.extend(remaining_args)
 
-        cmd = ["bazelisk", "run", "//cmd/ai_reviewer", "--"] + run_args
+        with tempfile.NamedTemporaryFile(
+            prefix="cassandra.runner.", suffix=".sh", delete=False
+        ) as sf:
+            runner_script = Path(sf.name)
 
         try:
-            subprocess.run(cmd, cwd=str(cassandra_root), check=True)
+            subprocess.run(
+                [
+                    "bazelisk",
+                    "run",
+                    "--noshow_progress",
+                    "--ui_event_filters=-info,-stdout,-stderr",
+                    f"--script_path={runner_script}",
+                    "//cmd/ai_reviewer",
+                ],
+                cwd=str(cassandra_root),
+                stdin=subprocess.DEVNULL,
+                stdout=sys.stderr,
+                check=True,
+            )
+            subprocess.run([str(runner_script)] + run_args, cwd=str(cassandra_root), check=True)
         except subprocess.CalledProcessError as e:
             sys.exit(e.returncode)
     finally:
-        if temp_file_path and temp_file_path.exists():
-            try:
-                temp_file_path.unlink()
-            except OSError:
-                pass
+        for path in (temp_file_path, runner_script):
+            if path and path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":

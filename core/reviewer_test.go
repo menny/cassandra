@@ -584,3 +584,28 @@ func TestReviewer_Run_PreReviewErrors(t *testing.T) {
 		require.Equal(t, originalLM, reviewer.Agent.llm)
 	})
 }
+
+func TestReviewer_ExecutePostReviewTurn_RollbackHistoryOnError(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Render = "acp"
+
+	errorLLM := &mockLLM{errs: []error{errors.New("provider 500 error")}}
+	dispatcher := newMockDispatcher()
+	spy := &spyReporter{}
+
+	reviewer := &Reviewer{
+		Agent:  NewAgent(errorLLM, dispatcher, WithReporter(spy)),
+		Config: cfg,
+	}
+
+	reviewer.Agent.history = []llm.Message{
+		{Role: llm.RoleSystem, Text: "system prompt"},
+		{Role: llm.RoleAssistant, Text: "initial review"},
+	}
+	initialLen := len(reviewer.Agent.history)
+
+	err := reviewer.executePostReviewTurn(context.Background(), "Why this?", 5, nil)
+	require.Error(t, err)
+	require.Equal(t, initialLen, len(reviewer.Agent.history), "history should roll back to pre-turn length on error")
+	require.Equal(t, llm.RoleAssistant, reviewer.Agent.history[len(reviewer.Agent.history)-1].Role)
+}
