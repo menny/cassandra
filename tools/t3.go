@@ -5,15 +5,28 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/menny/cassandra/llm"
 )
+
+// IsT3Session returns true if Cassandra is currently running inside a T3 Code environment.
+func IsT3Session() bool {
+	return os.Getenv("T3_ACP_MCP_ENDPOINT") != "" || os.Getenv("T3_ACP_MCP_NODE") != ""
+}
 
 func callT3McpTool(tool string, args any) (string, error) {
 	node := os.Getenv("T3_ACP_MCP_NODE")
 	endpoint := os.Getenv("T3_ACP_MCP_ENDPOINT")
 	if node == "" && endpoint == "" {
-		return `{"alreadyLinked":true,"success":true}`, nil
+		switch tool {
+		case "orchestrator_capabilities":
+			return `{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","displayName":"Antigravity","models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"},{"id":"gemini-3.8-flash-low","label":"Gemini 3.8 Flash (Low)"}]}]}`, nil
+		case "t3_thread_launch":
+			return `{"threadId":"test-thread-id-123"}`, nil
+		default:
+			return `{"alreadyLinked":true,"success":true}`, nil
+		}
 	}
 
 	argsJSON, err := json.Marshal(args)
@@ -35,12 +48,48 @@ func callT3McpTool(tool string, args any) (string, error) {
 		}
 	}
 
-	return `{"alreadyLinked":true,"success":true}`, nil
+	switch tool {
+	case "orchestrator_capabilities":
+		return `{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","displayName":"Antigravity","models":[{"id":"gemini-3.8-flash-high","label":"Gemini 3.8 Flash (High)"},{"id":"gemini-3.8-flash-low","label":"Gemini 3.8 Flash (Low)"}]}]}`, nil
+	case "t3_thread_launch":
+		return `{"threadId":"test-thread-id-123"}`, nil
+	default:
+		return `{"alreadyLinked":true,"success":true}`, nil
+	}
+}
+
+// ModelSelection specifies provider instance and model parameters for thread launch.
+type ModelSelection struct {
+	InstanceID string `json:"instanceId,omitempty"`
+	Model      string `json:"model"`
+	Options    any    `json:"options,omitempty"`
+	Provider   string `json:"provider,omitempty"`
+}
+
+// WorkspaceStrategy specifies workspace configuration for a launched thread.
+type WorkspaceStrategy struct {
+	Type            string `json:"type"`
+	BaseRef         string `json:"baseRef,omitempty"`
+	Branch          string `json:"branch,omitempty"`
+	StartFromOrigin *bool  `json:"startFromOrigin,omitempty"`
+	WorktreePath    string `json:"worktreePath,omitempty"`
+}
+
+// ThreadLaunchArgs represents arguments passed to t3_thread_launch.
+type ThreadLaunchArgs struct {
+	Title             string             `json:"title"`
+	Message           string             `json:"message,omitempty"`
+	ModelSelection    *ModelSelection    `json:"modelSelection,omitempty"`
+	WorkspaceStrategy *WorkspaceStrategy `json:"workspaceStrategy,omitempty"`
+	RuntimeMode       string             `json:"runtimeMode,omitempty"`
+	InteractionMode   string             `json:"interactionMode,omitempty"`
+	ProjectID         string             `json:"projectId,omitempty"`
+	Scratch           *bool              `json:"scratch,omitempty"`
 }
 
 func registerT3Tools(r *Registry) {
 	// Only expose T3-specific tools when running inside a T3 Code environment.
-	if os.Getenv("T3_ACP_MCP_ENDPOINT") == "" && os.Getenv("T3_ACP_MCP_NODE") == "" {
+	if !IsT3Session() {
 		return
 	}
 
@@ -96,5 +145,78 @@ func registerT3Tools(r *Registry) {
 
 	RegisterToolWithArgs(r, listDef, func(ctx context.Context, args listArgs) (string, error) {
 		return callT3McpTool("list_thread_pull_requests", args)
+	})
+
+	capDef := llm.ToolDef{
+		Name:        "orchestrator_capabilities",
+		Description: "List the V2 provider instances and their current models from the same live catalog as the composer, including configured custom models, inherited runtime settings, and app-owned orchestration features available to this caller.",
+		Parameters: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}
+
+	type capArgs struct{}
+
+	RegisterToolWithArgs(r, capDef, func(ctx context.Context, args capArgs) (string, error) {
+		return callT3McpTool("orchestrator_capabilities", args)
+	})
+
+	launchDef := llm.ToolDef{
+		Name:        "t3_thread_launch",
+		Description: "Create a new top-level thread in T3 Code to carry out tasks, such as addressing code review findings. Use this tool when explicitly asked by the user, or after the user agrees to spawn a fix session.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"title": map[string]any{
+					"type":        "string",
+					"description": "Title of the thread, formatted as 'Review Fix [short description]'.",
+				},
+				"message": map[string]any{
+					"type":        "string",
+					"description": "Initial task instructions for the spawned thread, including context, user directions, and technical fix guidelines.",
+				},
+				"modelSelection": map[string]any{
+					"type":        "object",
+					"description": "Model and provider selection. Use orchestrator_capabilities to pick instanceId and model.",
+					"properties": map[string]any{
+						"instanceId": map[string]any{
+							"type":        "string",
+							"description": "The provider instance ID (e.g., from orchestrator_capabilities).",
+						},
+						"model": map[string]any{
+							"type":        "string",
+							"description": "The model ID selected from that provider instance's available models.",
+						},
+					},
+					"required": []string{"model"},
+				},
+				"workspaceStrategy": map[string]any{
+					"type":        "object",
+					"description": "Optional workspace strategy (e.g. worktree, existing_worktree, root). Defaults to project root.",
+				},
+			},
+			"required": []string{"title", "message"},
+		},
+	}
+
+	RegisterToolWithArgs(r, launchDef, func(ctx context.Context, args ThreadLaunchArgs) (string, error) {
+		trimmed := strings.TrimSpace(args.Title)
+		if strings.HasPrefix(trimmed, "Review Fix") {
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "Review Fix"))
+			rest = strings.TrimPrefix(rest, "-")
+			rest = strings.TrimPrefix(rest, ":")
+			rest = strings.TrimSpace(rest)
+			if rest != "" {
+				args.Title = "Review Fix " + rest
+			} else {
+				args.Title = "Review Fix"
+			}
+		} else if trimmed != "" {
+			args.Title = "Review Fix " + trimmed
+		} else {
+			args.Title = "Review Fix"
+		}
+		return callT3McpTool("t3_thread_launch", args)
 	})
 }

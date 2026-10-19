@@ -40,6 +40,8 @@ var acpToolKinds = map[string]acp.ToolKind{
 	"wishlist_tool":             acp.ToolKindOther,
 	"link_pull_request":         acp.ToolKindOther,
 	"list_thread_pull_requests": acp.ToolKindOther,
+	"orchestrator_capabilities": acp.ToolKindOther,
+	"t3_thread_launch":          acp.ToolKindOther,
 }
 
 func availableACPModes(desc string) []acp.SessionMode {
@@ -169,9 +171,9 @@ type acpReporter struct {
 	closeSessionOnce sync.Once
 	shutdownWg       sync.WaitGroup
 
-	cfg             *config.Config
-	targetDir       string
-	hasPreReview    bool
+	cfg                *config.Config
+	targetDir          string
+	hasPreReview       bool
 	planStatuses       map[string]acp.PlanEntryStatus
 	cumulativeUsage    llm.Usage
 	sessionTitle       string

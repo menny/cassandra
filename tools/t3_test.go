@@ -13,6 +13,8 @@ func TestRegisterT3Tools(t *testing.T) {
 		t.Setenv("T3_ACP_MCP_ENDPOINT", "")
 		t.Setenv("T3_ACP_MCP_NODE", "")
 
+		require.False(t, IsT3Session())
+
 		r := NewRegistry()
 		registerT3Tools(r)
 
@@ -22,30 +24,59 @@ func TestRegisterT3Tools(t *testing.T) {
 	t.Run("inside T3 environment", func(t *testing.T) {
 		t.Setenv("T3_ACP_MCP_ENDPOINT", "http://127.0.0.1:3773/mcp")
 
+		require.True(t, IsT3Session())
+
 		r := NewRegistry()
 		registerT3Tools(r)
 
 		toolDefs := r.ToTools()
-		require.Len(t, toolDefs, 2)
+		require.Len(t, toolDefs, 4)
 
-		var hasLink, hasList bool
+		toolMap := make(map[string]bool)
 		for _, td := range toolDefs {
-			if td.Name == "link_pull_request" {
-				hasLink = true
-			} else if td.Name == "list_thread_pull_requests" {
-				hasList = true
-			}
+			toolMap[td.Name] = true
 		}
-		require.True(t, hasLink)
-		require.True(t, hasList)
+		require.True(t, toolMap["link_pull_request"])
+		require.True(t, toolMap["list_thread_pull_requests"])
+		require.True(t, toolMap["orchestrator_capabilities"])
+		require.True(t, toolMap["t3_thread_launch"])
 
-		tc := llm.ToolCall{
-			ID:        "tc_1",
+		// Test link_pull_request invocation
+		tcLink := llm.ToolCall{
+			ID:        "tc_link",
 			Name:      "link_pull_request",
 			Arguments: `{"url": "https://github.com/owner/repo/pull/123"}`,
 		}
-		res, err := r.HandleCall(context.Background(), tc)
+		resLink, err := r.HandleCall(context.Background(), tcLink)
 		require.NoError(t, err)
-		require.Contains(t, res, "alreadyLinked")
+		require.Contains(t, resLink, "alreadyLinked")
+
+		// Test orchestrator_capabilities invocation
+		tcCaps := llm.ToolCall{
+			ID:        "tc_caps",
+			Name:      "orchestrator_capabilities",
+			Arguments: `{}`,
+		}
+		resCaps, err := r.HandleCall(context.Background(), tcCaps)
+		require.NoError(t, err)
+		require.Contains(t, resCaps, "providers")
+		require.Contains(t, resCaps, "inheritedProviderInstanceId")
+
+		// Test t3_thread_launch invocation with title prefix formatting
+		tcLaunch := llm.ToolCall{
+			ID:   "tc_launch",
+			Name: "t3_thread_launch",
+			Arguments: `{
+				"title": "Fix memory leak in buffer pool",
+				"message": "Please fix the leak in buffer pool",
+				"modelSelection": {
+					"instanceId": "antigravity",
+					"model": "gemini-3.8-flash-low"
+				}
+			}`,
+		}
+		resLaunch, err := r.HandleCall(context.Background(), tcLaunch)
+		require.NoError(t, err)
+		require.Contains(t, resLaunch, "threadId")
 	})
 }

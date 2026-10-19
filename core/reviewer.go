@@ -133,7 +133,11 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		approvalEvaluationPrompt = string(content)
 	}
 
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper)
+	var currentModel string
+	if cfg != nil {
+		currentModel = cfg.Model
+	}
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), currentModel)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -184,7 +188,11 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		}
 	}
 
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config))
+	var currentModel string
+	if r.Config != nil {
+		currentModel = r.Config.Model
+	}
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), currentModel)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
