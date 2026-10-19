@@ -33,19 +33,16 @@ func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
 func (r *Registry) HandleCall(ctx context.Context, tc llm.ToolCall) (string, error) {
 	handler, ok := r.handlers[tc.Name]
 	if !ok {
-		return "", fmt.Errorf("tool not found: %s", tc.Name)
+		return "", fmt.Errorf("tool %q not found", tc.Name)
 	}
 	return handler(ctx, tc)
 }
 
-// RegisterToolWithArgs registers a tool that uses a specific struct for its
-// arguments. It handles unmarshaling the arguments and returns an error if
-// they are malformed.
-func RegisterToolWithArgs[T any](r *Registry, def llm.ToolDef, handler func(context.Context, T) (string, error)) {
+func RegisterToolWithArgs[T any](r *Registry, def llm.ToolDef, handler func(ctx context.Context, args T) (string, error)) {
 	r.RegisterTool(def, func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		var args T
 		if err := tc.UnmarshalArguments(&args); err != nil {
-			return "", err
+			return "", fmt.Errorf("unmarshaling %s arguments: %w", def.Name, err)
 		}
 		return handler(ctx, args)
 	})
@@ -59,7 +56,7 @@ type NoOpUserNotifier struct{}
 
 func (NoOpUserNotifier) NotifyUser() {}
 
-func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool, notifier UserNotifier) {
+func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wishlistDir string, allowAskDeveloper bool, notifier UserNotifier, metadataJSONFile ...string) {
 	if notifier == nil {
 		notifier = NoOpUserNotifier{}
 	}
@@ -68,12 +65,17 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 			root = resolved
 		}
 	}
+	var metaFile string
+	if len(metadataJSONFile) > 0 {
+		metaFile = metadataJSONFile[0]
+	}
 	registerLocalReadFile(r, root)
 	registerLocalGlobFiles(r, root)
 	registerLocalGrepFiles(r, root, ignoredLockFiles)
 	registerWishlistTool(r, wishlistDir)
 	registerEmitReviewerState(r)
 	registerT3Tools(r)
+	registerPRCommentTool(r, root, metaFile)
 	if allowAskDeveloper {
 		registerAskDeveloper(r, notifier)
 	}

@@ -277,3 +277,17 @@ func TestBuildSystemPrompt_AllowT3ThreadLaunch(t *testing.T) {
 		require.NotContains(t, stable, "<t3_thread_launch_guidelines>")
 	})
 }
+
+func TestBuildSystemPrompt_PRCommentGuidelines(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, "")
+	require.NoError(t, err)
+	require.Contains(t, stable, "<pr_comment_guidelines>")
+	require.Contains(t, stable, "post_pr_comment")
+	require.Contains(t, stable, "ONLY when explicitly asked or confirmed by the user")
+	require.Contains(t, stable, "Do NOT post comments automatically or unprompted.")
+	require.Contains(t, stable, "proactively offer to post them as comments")
+	require.Contains(t, stable, "This tool ONLY posts comments")
+}

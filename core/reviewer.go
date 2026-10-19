@@ -60,7 +60,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		notifier = tools.NoOpUserNotifier{}
 	}
 	includeAskDeveloper := allowAskDeveloper(cfg)
-	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, notifier)
+	tools.RegisterLocalTools(registry, targetDir, cfg.IgnoredLockFiles, cfg.WishlistDir, includeAskDeveloper, notifier, cfg.MetadataJSONFile)
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.

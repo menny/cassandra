@@ -78,10 +78,11 @@ type PromptSummary struct {
 //  5. <personal_review_guidelines>     — semi-static, optional
 //  6. ask_developer guidelines         — semi-static, optional
 //  7. <t3_thread_launch_guidelines>    — semi-static, optional (T3 Code sessions only)
+//  8. <pr_comment_guidelines>          — semi-static
 //
 // Dynamic (Zone 3):
-//  8. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  9. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
+//  9. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  10. <reviewer_context>       — dynamic, varies per PR (REVIEWERS.md files)
 func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, currentModel string) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
@@ -141,6 +142,21 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"   - When presenting the launched thread to the user, link it using markdown: `[Review Fix ...](t3-thread://v1/<threadId>)` using the exact `threadId` returned by `t3_thread_launch`.\n"+
 			"</t3_thread_launch_guidelines>\n", currentModelText)
 	}
+
+	// Zone 2: PR comment guidelines
+	stable += "\n<pr_comment_guidelines>\n" +
+		"You have access to the `post_pr_comment` tool to publish comments on a GitHub pull request.\n\n" +
+		"1. **When to use**:\n" +
+		"   - Use `post_pr_comment` ONLY when explicitly asked or confirmed by the user (e.g., \"post that comment\", \"add an inline note on line 42\").\n" +
+		"   - Do NOT post comments automatically or unprompted.\n\n" +
+		"2. **Proactive suggestions**:\n" +
+		"   - When you identify important findings, architectural questions, or suggested improvements during review or discussion, proactively offer to post them as comments:\n" +
+		"     - \"Would you like me to post this finding as an inline comment on `path/to/file.go:L30-L35`?\"\n" +
+		"     - \"Would you like me to post this summary as a PR comment?\"\n" +
+		"   - Wait for the user's explicit consent before calling the tool.\n\n" +
+		"3. **Strict scope**:\n" +
+		"   - This tool ONLY posts comments (top-level PR discussion comments or inline line/range comments). It cannot approve, reject, or request changes on a pull request.\n" +
+		"</pr_comment_guidelines>\n"
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.
 	agentsMDs := findRepoFiles(workspaceRoot, changedFiles, "AGENTS.md")

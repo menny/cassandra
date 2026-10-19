@@ -7,6 +7,7 @@ go_library(
         "diff.go",
         "emit_reviewer_state.go",
         "local_tools.go",
+        "pr_comment.go",
         "registry.go",
         "t3.go",
         "wishlist.go",
@@ -18,6 +19,7 @@ go_library(
         "//util",
         "@com_github_charmbracelet_huh//:huh",
         "@com_github_charmbracelet_lipgloss//:lipgloss",
+        "@com_github_google_go_github_v69//github",
         "@org_golang_x_term//:term",
     ],
 )
@@ -31,6 +33,7 @@ go_test(
         "local_tools_safety_test.go",
         "local_tools_test.go",
         "main_test.go",
+        "pr_comment_test.go",
         "t3_test.go",
         "wishlist_test.go",
     ],
@@ -38,6 +41,7 @@ go_test(
     deps = [
         "//llm",
         "//util",
+        "@com_github_google_go_github_v69//github",
         "@com_github_stretchr_testify//require",
         "@org_uber_go_goleak//:goleak",
     ],
