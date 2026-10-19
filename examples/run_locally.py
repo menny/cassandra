@@ -153,8 +153,7 @@ def _get_default_base_ref(target_dir):
         if git_ref_exists(fallback, target_dir):
             return fallback
 
-    print(f"Error: could not determine a default base ref for {target_dir}.", file=sys.stderr)
-    sys.exit(1)
+    return None
 
 
 def resolve_api_key(
@@ -201,32 +200,13 @@ def main():
     # 1. Determine directories
     script_path = Path(__file__).resolve()
     cassandra_root = script_path.parent.parent
-    target_dir = Path.cwd().resolve()
-
-    # 2. Verify target is a git repository
-    if run_git(["rev-parse", "--is-inside-work-tree"], target_dir, check=False) != "true":
-        print(f"Error: {target_dir} is not a git repository.", file=sys.stderr)
-        sys.exit(1)
-
-    # 3. Determine the default base commit (SHA) of the target repository
-    default_base_ref = _get_default_base_ref(target_dir)
-
-    default_base_sha = run_git(["rev-parse", default_base_ref], target_dir)
-
-    merge_base_sha = run_git(["merge-base", "HEAD", default_base_sha], target_dir, check=False)
-    if not merge_base_sha:
-        print(
-            f"Warning: could not compute merge-base, falling back to tip of {default_base_ref}",
-            file=sys.stderr,
-        )
-        merge_base_sha = default_base_sha
-
-    print(f"Detected base ref:           {default_base_ref}", file=sys.stderr)
-    print(f"Default branch tip:          {default_base_sha}", file=sys.stderr)
-    print(f"Effective base (merge-base): {merge_base_sha}", file=sys.stderr)
-
-    # 4. Parse command line arguments.
+    # 1. Parse command line arguments.
     parser = argparse.ArgumentParser(description="Cassandra AI-Reviewer local runner script example.")
+    parser.add_argument(
+        "--cwd",
+        type=Path,
+        help="Path to target git repository (defaults to current directory).",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -244,6 +224,8 @@ def main():
     )
     parser.add_argument(
         "--api-key-env",
+        "--env-key-name",
+        dest="api_key_env",
         type=str,
         help="Optional environment variable name to read the provider API key from.",
     )
@@ -252,6 +234,33 @@ def main():
     if args.wait_for_message and not args.acp:
         print("Error: --wait-for-message can only be used with --acp.", file=sys.stderr)
         sys.exit(1)
+
+    target_dir = args.cwd.resolve() if args.cwd else Path.cwd().resolve()
+
+    # 2. Determine default base commit (SHA) of target repository if in a git repo
+    is_git = run_git(["rev-parse", "--is-inside-work-tree"], target_dir, check=False) == "true"
+    merge_base_sha = None
+
+    if is_git:
+        default_base_ref = _get_default_base_ref(target_dir)
+        if default_base_ref:
+            default_base_sha = run_git(["rev-parse", default_base_ref], target_dir, check=False)
+            if default_base_sha:
+                merge_base_sha = run_git(["merge-base", "HEAD", default_base_sha], target_dir, check=False)
+                if not merge_base_sha:
+                    merge_base_sha = default_base_sha
+
+    if merge_base_sha:
+        if not args.acp:
+            print(f"Detected base ref:           {default_base_ref}", file=sys.stderr)
+            print(f"Default branch tip:          {default_base_sha}", file=sys.stderr)
+            print(f"Effective base (merge-base): {merge_base_sha}", file=sys.stderr)
+    else:
+        if not args.acp:
+            print(
+                f"No git repository or base branch detected in {target_dir}. Assuming no-diff.",
+                file=sys.stderr,
+            )
 
     # Determine base configuration file
     if args.config:
@@ -271,7 +280,8 @@ def main():
         # Merge target directory's local cassandra.toml if it exists
         local_config = target_dir / "cassandra.toml"
         if local_config.exists() and local_config.resolve() != config_file.resolve():
-            print(f"Merging {local_config} into base configuration...", file=sys.stderr)
+            if not args.acp:
+                print(f"Merging {local_config} into base configuration...", file=sys.stderr)
             merged_data = merge_tomls(config_file, local_config)
         else:
             with config_file.open("rb") as f:
@@ -279,10 +289,6 @@ def main():
 
         merged_data = absolutize_config_paths(merged_data, target_dir, cassandra_root)
         if args.acp and merged_data.get("allow-url-fetch"):
-            print(
-                "Disabling allow-url-fetch (standalone fetch sidecar) for ACP mode.",
-                file=sys.stderr,
-            )
             merged_data["allow-url-fetch"] = False
 
         with tempfile.NamedTemporaryFile(
@@ -295,23 +301,40 @@ def main():
             f.write(serialize_flat_toml(merged_data))
         config_file = temp_file_path
 
-        # 5. Resolve provider & API key from merged config
+        # 5. Resolve provider & API key from merged config or CLI overrides
         provider = merged_data.get("provider", "google")
+        for i, arg in enumerate(remaining_args):
+            if arg == "--provider" and i + 1 < len(remaining_args):
+                provider = remaining_args[i + 1]
+                break
+            elif arg.startswith("--provider="):
+                provider = arg.split("=", 1)[1]
+                break
         api_key = resolve_api_key(provider, remaining_args, args.api_key_env)
 
         # 6. Build and run Cassandra via Bazel (--script_path keeps stdin/stdout clean for ACP).
-        print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
+        if not args.acp:
+            print(f"Invoking Cassandra AI-Reviewer for {target_dir}...", file=sys.stderr)
 
         run_args = [
             "--config",
             str(config_file),
             "--cwd",
             str(target_dir),
-            "--base",
-            merge_base_sha,
-            "--head",
-            "HEAD",
         ]
+        if merge_base_sha:
+            run_args.extend(["--base", merge_base_sha, "--head", "HEAD"])
+        else:
+            run_args.extend(
+                [
+                    "--diff-file",
+                    "/dev/null",
+                    "--files-list-file",
+                    "/dev/null",
+                    "--commits-file",
+                    "/dev/null",
+                ]
+            )
         if args.acp:
             run_args.append("--acp")
             if args.wait_for_message:
