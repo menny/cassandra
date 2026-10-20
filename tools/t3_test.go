@@ -65,6 +65,12 @@ case "$tool" in
     "t3_thread_launch")
         echo '{"threadId":"test-thread-id-123"}'
         ;;
+    "t3_thread_list")
+        echo '{"projectId":"p1","currentThreadId":"t1","threads":[{"threadId":"t1","title":"Review Feature A"}]}'
+        ;;
+    "t3_thread_update")
+        echo '{"success":true}'
+        ;;
     *)
         exit 1
         ;;
@@ -145,5 +151,77 @@ printf '%*s' 50000 | tr ' ' 'A'
 		require.NoError(t, err)
 		require.True(t, len(res) <= maxT3ToolOutputBytes+len("\n... (truncated)"))
 		require.Contains(t, res, "... (truncated)")
+	})
+}
+
+func TestCleanAndFormatThreadTitle(t *testing.T) {
+	t.Run("CleanThreadTitle", func(t *testing.T) {
+		require.Equal(t, "Review my feature", CleanThreadTitle("Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("⏳ Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("✅ Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("❎ Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("✳️ Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("❌ Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("💬 Review my feature"))
+		require.Equal(t, "Review my feature", CleanThreadTitle("⏳ ✅ Review my feature"))
+		require.Equal(t, "", CleanThreadTitle("⏳ "))
+	})
+
+	t.Run("FormatThreadTitle", func(t *testing.T) {
+		require.Equal(t, "⏳ Review my feature", FormatThreadTitle(ReviewStatePending, "Review my feature"))
+		require.Equal(t, "✅ Review my feature", FormatThreadTitle(ReviewStateApproved, "⏳ Review my feature"))
+		require.Equal(t, "❎ Review my feature", FormatThreadTitle(ReviewStateRejected, "⏳ Review my feature"))
+		require.Equal(t, "✳️ Review my feature", FormatThreadTitle(ReviewStateElse, "⏳ Review my feature"))
+		require.Equal(t, "✅ Review", FormatThreadTitle(ReviewStateApproved, ""))
+	})
+}
+
+func TestThreadTitlePrefixUpdates(t *testing.T) {
+	t.Run("outside T3 session is no-op", func(t *testing.T) {
+		t.Setenv("T3_ACP_MCP_NODE", "")
+		err := UpdateThreadTitlePrefix(context.Background(), ReviewStatePending)
+		require.NoError(t, err)
+
+		_, err = GetCurrentThreadTitle(context.Background())
+		require.Error(t, err)
+	})
+
+	t.Run("inside T3 session updates title", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mockScript := filepath.Join(tmpDir, "mock_node.sh")
+		scriptContent := `#!/bin/sh
+for arg in "$@"; do
+    case "$prev" in
+        "acp-mcp-call") tool="$arg" ;;
+    esac
+    prev="$arg"
+done
+
+case "$tool" in
+    "t3_thread_list")
+        echo '{"projectId":"p1","currentThreadId":"t1","threads":[{"threadId":"t1","title":"⏳ Review Feature A"}]}'
+        ;;
+    "t3_thread_update")
+        echo "$*" >> ` + filepath.Join(tmpDir, "updated.log") + `
+        echo '{"success":true}'
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+`
+		require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+		title, err := GetCurrentThreadTitle(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "⏳ Review Feature A", title)
+
+		err = UpdateThreadTitlePrefix(context.Background(), ReviewStateApproved)
+		require.NoError(t, err)
+
+		logContent, err := os.ReadFile(filepath.Join(tmpDir, "updated.log"))
+		require.NoError(t, err)
+		require.Contains(t, string(logContent), "✅ Review Feature A")
 	})
 }

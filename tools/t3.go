@@ -210,3 +210,117 @@ func registerT3Tools(r *Registry) {
 		return callT3McpTool(ctx, "t3_thread_launch", args)
 	})
 }
+
+const (
+	// ReviewStatePending indicates that the review or pre-review is in progress.
+	ReviewStatePending = "⏳"
+	// ReviewStateApproved indicates that the review concluded with an approval.
+	ReviewStateApproved = "✅"
+	// ReviewStateRejected indicates that the review concluded with a rejection.
+	ReviewStateRejected = "❎"
+	// ReviewStateElse indicates non-blocking feedback, uncertain outcome, or general completion.
+	ReviewStateElse = "✳️"
+)
+
+// CleanThreadTitle strips existing review status emoji prefixes (and following spaces)
+// from a thread title.
+func CleanThreadTitle(title string) string {
+	title = strings.TrimSpace(title)
+	prefixes := []string{
+		"⏳", "✅", "❎", "✳️", "✳", "❌", "💬",
+	}
+	changed := true
+	for changed {
+		changed = false
+		trimmed := strings.TrimSpace(title)
+		for _, p := range prefixes {
+			if strings.HasPrefix(trimmed, p) {
+				title = strings.TrimSpace(strings.TrimPrefix(trimmed, p))
+				changed = true
+				break
+			}
+		}
+	}
+	return title
+}
+
+// FormatThreadTitle formats a thread title with the specified review status emoji prefix.
+func FormatThreadTitle(emoji, baseTitle string) string {
+	clean := CleanThreadTitle(baseTitle)
+	if clean == "" {
+		clean = "Review"
+	}
+	return fmt.Sprintf("%s %s", emoji, clean)
+}
+
+// GetCurrentThreadTitle returns the title of the current T3 thread if running in a T3 session.
+func GetCurrentThreadTitle(ctx context.Context) (string, error) {
+	if !IsT3Session() {
+		return "", fmt.Errorf("not in a T3 Code session")
+	}
+
+	out, err := callT3McpTool(ctx, "t3_thread_list", map[string]any{"limit": 50})
+	if err != nil {
+		return "", err
+	}
+
+	var listResp struct {
+		CurrentThreadID string `json:"currentThreadId"`
+		Threads         []struct {
+			ThreadID string `json:"threadId"`
+			Title    string `json:"title"`
+		} `json:"threads"`
+	}
+	if err := json.Unmarshal([]byte(out), &listResp); err != nil {
+		return "", fmt.Errorf("failed to parse t3_thread_list response: %w", err)
+	}
+
+	for _, th := range listResp.Threads {
+		if th.ThreadID == listResp.CurrentThreadID {
+			return th.Title, nil
+		}
+	}
+
+	if listResp.CurrentThreadID != "" {
+		readOut, err := callT3McpTool(ctx, "t3_thread_read", map[string]any{
+			"threadId": listResp.CurrentThreadID,
+			"limit":    1,
+		})
+		if err == nil {
+			var readResp struct {
+				Thread struct {
+					Title string `json:"title"`
+				} `json:"thread"`
+			}
+			if json.Unmarshal([]byte(readOut), &readResp) == nil && readResp.Thread.Title != "" {
+				return readResp.Thread.Title, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("current thread %q not found in thread list", listResp.CurrentThreadID)
+}
+
+// UpdateThreadTitlePrefix updates the current T3 thread title with the specified review status emoji prefix.
+// If not in a T3 session, it is a no-op and returns nil.
+func UpdateThreadTitlePrefix(ctx context.Context, emoji string) error {
+	if !IsT3Session() {
+		return nil
+	}
+
+	currentTitle, err := GetCurrentThreadTitle(ctx)
+	if err != nil {
+		return err
+	}
+
+	newTitle := FormatThreadTitle(emoji, currentTitle)
+	if newTitle == currentTitle {
+		return nil
+	}
+
+	_, err = callT3McpTool(ctx, "t3_thread_update", map[string]any{
+		"action": "rename",
+		"title":  newTitle,
+	})
+	return err
+}

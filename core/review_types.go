@@ -169,3 +169,51 @@ var StructuredReviewSchema = map[string]any{
 	},
 	"required": []string{"approval", "files_review"},
 }
+
+// ReviewVerdict represents the high-level outcome of a code review.
+type ReviewVerdict string
+
+const (
+	VerdictApproved ReviewVerdict = "approved"
+	VerdictRejected ReviewVerdict = "rejected"
+	VerdictElse     ReviewVerdict = "else"
+)
+
+// DetermineVerdict extracts the ReviewVerdict from a review's markdown text.
+// It inspects lines from the bottom of the review upwards to find the concluding verdict.
+func DetermineVerdict(reviewText string) ReviewVerdict {
+	lines := strings.Split(reviewText, "\n")
+	nonEmptyCount := 0
+	for i := len(lines) - 1; i >= 0 && nonEmptyCount < 25; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		nonEmptyCount++
+
+		// Explicit emoji markers
+		if strings.Contains(line, "✅") && (strings.Contains(strings.ToLower(line), "approv") || strings.Contains(line, "Approved")) {
+			return VerdictApproved
+		}
+		if (strings.Contains(line, "❌") || strings.Contains(line, "❎")) && (strings.Contains(strings.ToLower(line), "reject") || strings.Contains(line, "Rejected")) {
+			return VerdictRejected
+		}
+		if strings.Contains(line, "💬") && (strings.Contains(strings.ToLower(line), "comment") || strings.Contains(line, "Comment")) {
+			return VerdictElse
+		}
+
+		// Bullet point, heading, or bold without emoji (e.g. "- Approved", "**Approved**", "Verdict: Approved")
+		clean := strings.Trim(line, "-*# \t`")
+		cleanLower := strings.ToLower(clean)
+		if strings.HasPrefix(cleanLower, "approved") || strings.HasPrefix(cleanLower, "verdict: approved") || strings.HasPrefix(cleanLower, "status: approved") {
+			return VerdictApproved
+		}
+		if strings.HasPrefix(cleanLower, "rejected") || strings.HasPrefix(cleanLower, "verdict: rejected") || strings.HasPrefix(cleanLower, "status: rejected") {
+			return VerdictRejected
+		}
+		if strings.HasPrefix(cleanLower, "comment") || strings.HasPrefix(cleanLower, "verdict: comment") || strings.HasPrefix(cleanLower, "status: comment") {
+			return VerdictElse
+		}
+	}
+	return VerdictElse
+}
