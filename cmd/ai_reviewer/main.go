@@ -153,7 +153,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return errors.New("--wait-for-message is a CLI-only flag and is not supported in configuration files")
 	}
 
-	if v.IsSet("cassandraConfigFolder") {
+	if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
 		v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 	}
 

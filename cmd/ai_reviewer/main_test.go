@@ -89,7 +89,7 @@ max-tokens = 100
 			}
 		})
 
-		if v.IsSet("cassandraConfigFolder") {
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
 			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 		}
 
@@ -112,11 +112,40 @@ max-tokens = 100
 			}
 		})
 
-		if v.IsSet("cassandraConfigFolder") {
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
 			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 		}
 
 		require.Equal(t, "/camel/custom/path", v.GetString("cassandra-config-folder"))
+	})
+
+	t.Run("CLI flag overrides config file cassandraConfigFolder", func(t *testing.T) {
+		confTmpDir := t.TempDir()
+		confPath := filepath.Join(confTmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(confPath, []byte(`cassandraConfigFolder = "/from/config"`), 0o644))
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		var folder string
+		fs.StringVar(&folder, "cassandra-config-folder", "~/.cassandra", "")
+
+		v := viper.New()
+		v.SetDefault("cassandra-config-folder", "~/.cassandra")
+
+		require.NoError(t, fs.Parse([]string{"--cassandra-config-folder", "/from/cli"}))
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		v.SetConfigFile(confPath)
+		require.NoError(t, v.ReadInConfig())
+
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
+			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
+		}
+
+		require.Equal(t, "/from/cli", v.GetString("cassandra-config-folder"))
 	})
 }
 
