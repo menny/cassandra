@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/google/uuid"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
@@ -71,6 +72,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringSliceVar(&cfg.IgnoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore in diffs (overrides default)")
 	fs.StringVar(&cfg.ConfigFile, "config", "", "Path to a configuration file (toml)")
 	fs.StringVar(&cfg.WishlistDir, "wishlist-dir", "", "Path to a directory where AI-Reviewer feedback/wishlist will be stored")
+	fs.StringVar(&cfg.CassandraConfigFolder, "cassandra-config-folder", "~/.cassandra", "Path to cassandra configuration folder for session persistence (empty string disables persistence)")
+	fs.StringVar(&cfg.CassandraConfigFolder, "cassandraConfigFolder", "~/.cassandra", "Alias for --cassandra-config-folder")
 
 	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
 	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
@@ -112,6 +115,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("allow-ask-developer", false)
 	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
+	v.SetDefault("cassandra-config-folder", "~/.cassandra")
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Name == "acp" || f.Name == "wait-for-message" {
@@ -147,6 +151,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 	if v.IsSet("wait-for-message") {
 		return errors.New("--wait-for-message is a CLI-only flag and is not supported in configuration files")
+	}
+
+	if v.IsSet("cassandraConfigFolder") {
+		v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 	}
 
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -208,13 +216,15 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return errors.New("--interactive-post-review can only be used when --render is 'markdown', 'tui', or 'acp'")
 	}
 
+	sessionStore := core.NewSessionStore(cfg.CassandraConfigFolder)
+
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	defer cancelSession()
 
 	var reporter core.Reporter
 	switch cfg.Render {
 	case "acp":
-		reporter = core.NewACPReporter(sessionCtx, os.Stdout, os.Stdin, stderr.Writer(), cancelSession)
+		reporter = core.NewACPReporter(sessionCtx, os.Stdout, os.Stdin, stderr.Writer(), cancelSession, core.WithACPSessionStore(sessionStore))
 	case "tui":
 		reporter = core.NewTuiReporter(os.Stdout, os.Stderr, cancelSession)
 	case "markdown":
@@ -259,6 +269,30 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			}
 			reporter.ReportMetricsWritten(cfg.MetricsJSONFile)
 		}()
+	}
+
+	if sessWaiter, ok := reporter.(core.SessionWaiter); ok {
+		if err := sessWaiter.WaitForSession(sessionCtx); err != nil {
+			if sessionCtx.Err() != nil && ctx.Err() == nil {
+				return nil
+			}
+			return err
+		}
+		if sessWaiter.SessionID() != "" {
+			reviewer.SetSession(sessionStore, sessWaiter.SessionID())
+		}
+		if sessWaiter.IsLoadedSession() {
+			reviewer.Agent.SetHistory(sessWaiter.LoadedMessages())
+			if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
+				if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+					return nil
+				}
+				return fmt.Errorf("interactive post-review failed: %w", err)
+			}
+			return nil
+		}
+	} else {
+		reviewer.SetSession(sessionStore, uuid.NewString())
 	}
 
 	var diffOutput string
@@ -399,6 +433,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			closeReporter()
 		}
 		if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
+			if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+				return nil
+			}
 			return fmt.Errorf("interactive post-review failed: %w", err)
 		}
 	}

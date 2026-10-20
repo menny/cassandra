@@ -17,14 +17,13 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/google/uuid"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/util"
 )
 
 const (
-	defaultACPSessionID = acp.SessionId("sess_1")
-
 	acpModeReview = acp.SessionModeId("review")
 
 	planStepContext   = "Gather git diff and commit context"
@@ -180,18 +179,42 @@ type acpReporter struct {
 	sessionTitle       string
 	sessionDescription string
 
+	sessionStore    SessionStore
+	isLoadedSession bool
+	loadedMessages  []llm.Message
+	replayDone      chan struct{}
+
 	closeOnce sync.Once
 }
 
 var (
-	_ Reporter  = (*acpReporter)(nil)
-	_ acp.Agent = (*acpReporter)(nil)
+	_ Reporter        = (*acpReporter)(nil)
+	_ acp.Agent       = (*acpReporter)(nil)
+	_ acp.AgentLoader = (*acpReporter)(nil)
+	_ SessionWaiter   = (*acpReporter)(nil)
 )
+
+// ACPOption configures an acpReporter.
+type ACPOption func(*acpReporter)
+
+// WithACPSessionStore sets a SessionStore on the acpReporter for session persistence and loading.
+func WithACPSessionStore(store SessionStore) ACPOption {
+	return func(r *acpReporter) {
+		r.sessionStore = store
+	}
+}
+
+// WithACPSessionID sets an initial session ID on the acpReporter.
+func WithACPSessionID(id acp.SessionId) ACPOption {
+	return func(r *acpReporter) {
+		r.sessionID = id
+	}
+}
 
 // NewACPReporter creates a Reporter backed by an ACP AgentSideConnection over
 // stdout and stdin. All diagnostic warnings and internal connection logs are
 // routed to stderr so stdout remains reserved exclusively for JSON-RPC frames.
-func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stderr io.Writer, cancelSession context.CancelFunc) Reporter {
+func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stderr io.Writer, cancelSession context.CancelFunc, opts ...ACPOption) Reporter {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -205,7 +228,6 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 		in:                stdin,
 		stderr:            stderr,
 		cancelSession:     cancelSession,
-		sessionID:         defaultACPSessionID,
 		currentMode:       acpModeReview,
 		sessionReady:      make(chan struct{}),
 		reviewReady:       make(chan struct{}),
@@ -224,6 +246,10 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 		Level: slog.LevelError,
 	})))
 	r.conn = conn
+
+	for _, opt := range opts {
+		opt(r)
+	}
 
 	return r
 }
@@ -338,6 +364,9 @@ func (r *acpReporter) sendUpdate(update acp.SessionUpdate) {
 	}
 
 	r.mu.Lock()
+	if r.sessionID == "" {
+		r.sessionID = acp.SessionId(uuid.NewString())
+	}
 	sid := r.sessionID
 	r.mu.Unlock()
 
@@ -454,7 +483,7 @@ func (r *acpReporter) Initialize(_ context.Context, _ acp.InitializeRequest) (ac
 			Version: "0.0.1",
 		},
 		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession: false,
+			LoadSession: true,
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
 			},
@@ -473,6 +502,9 @@ func (r *acpReporter) Logout(_ context.Context, _ acp.LogoutRequest) (acp.Logout
 
 func (r *acpReporter) NewSession(_ context.Context, _ acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	r.mu.Lock()
+	if r.sessionID == "" {
+		r.sessionID = acp.SessionId(uuid.NewString())
+	}
 	sid := r.sessionID
 	mode := r.currentMode
 	var modelName string
@@ -526,6 +558,20 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	case <-r.conn.Done():
 		return acp.PromptResponse{}, errors.New("ACP connection closed")
+	}
+
+	r.mu.Lock()
+	replayDone := r.replayDone
+	r.mu.Unlock()
+
+	if replayDone != nil {
+		select {
+		case <-replayDone:
+		case <-turnCtx.Done():
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+		case <-r.conn.Done():
+			return acp.PromptResponse{}, errors.New("ACP connection closed")
+		}
 	}
 
 	r.mu.Lock()
@@ -588,6 +634,245 @@ func (r *acpReporter) ListSessions(_ context.Context, _ acp.ListSessionsRequest)
 
 func (r *acpReporter) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
 	return acp.ResumeSessionResponse{}, nil
+}
+
+func (r *acpReporter) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	if req.SessionId == "" {
+		return acp.LoadSessionResponse{}, errors.New("sessionId is required")
+	}
+
+	r.mu.Lock()
+	store := r.sessionStore
+	r.mu.Unlock()
+
+	if store == nil {
+		return acp.LoadSessionResponse{}, errors.New("session store not configured")
+	}
+
+	messages, err := store.LoadSession(ctx, string(req.SessionId))
+	if err != nil {
+		return acp.LoadSessionResponse{}, fmt.Errorf("failed to load session %q: %w", req.SessionId, err)
+	}
+
+	r.mu.Lock()
+	r.sessionID = req.SessionId
+	r.isLoadedSession = true
+	r.loadedMessages = messages
+	r.inPostReview = true
+	mode := r.currentMode
+	var modelName string
+	if r.cfg != nil {
+		modelName = r.cfg.Model
+	}
+	desc := r.sessionDescription
+	r.mu.Unlock()
+
+	replayDone := make(chan struct{})
+	r.mu.Lock()
+	r.replayDone = replayDone
+	r.mu.Unlock()
+
+	r.shutdownWg.Add(1)
+	r.gateWriter.arm(func() {
+		r.signalSessionReady()
+		r.signalFirstMessage("")
+		go func() {
+			defer r.shutdownWg.Done()
+			defer close(replayDone)
+			r.advancePlan(map[string]acp.PlanEntryStatus{
+				planStepContext:   acp.PlanEntryStatusCompleted,
+				planStepPreReview: acp.PlanEntryStatusCompleted,
+				planStepReview:    acp.PlanEntryStatusCompleted,
+			})
+			r.replayHistory(messages)
+		}()
+	})
+
+	return acp.LoadSessionResponse{
+		ConfigOptions: acpConfigOptions(modelName),
+		Modes: &acp.SessionModeState{
+			CurrentModeId:  mode,
+			AvailableModes: availableACPModes(desc),
+		},
+	}, nil
+}
+
+func (r *acpReporter) replayHistory(messages []llm.Message) {
+	r.mu.Lock()
+	if r.sessionID == "" {
+		r.sessionID = acp.SessionId(uuid.NewString())
+	}
+	sid := r.sessionID
+	r.mu.Unlock()
+
+	for i, msg := range messages {
+		if r.ctx.Err() != nil {
+			return
+		}
+		switch msg.Role {
+		case llm.RoleSystem:
+			continue
+
+		case llm.RoleUser:
+			_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
+				SessionId: sid,
+				Update:    acp.UpdateUserMessageText(msg.Text),
+			})
+
+		case llm.RoleAssistant:
+			if msg.Reasoning != "" {
+				thought := msg.Reasoning
+				if !strings.HasSuffix(thought, "\n") {
+					thought += "\n"
+				}
+				_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
+					SessionId: sid,
+					Update:    acp.UpdateAgentThoughtText(thought),
+				})
+			}
+
+			if len(msg.ToolCalls) > 0 {
+				var nextToolResults []llm.ToolResult
+				if i+1 < len(messages) && messages[i+1].Role == llm.RoleTool {
+					nextToolResults = messages[i+1].ToolResults
+				}
+
+				usedResults := make(map[int]bool)
+				for _, tc := range msg.ToolCalls {
+					if focusArea, message, ok := parseReviewerState(tc); ok {
+						if message != "" {
+							thought := message
+							if focusArea != "" {
+								thought = fmt.Sprintf("[%s] %s", focusArea, message)
+							}
+							_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
+								SessionId: sid,
+								Update:    acp.UpdateAgentThoughtText(thought + "\n"),
+							})
+						}
+						continue
+					}
+
+					var matchingResult *llm.ToolResult
+					for idx := range nextToolResults {
+						if usedResults[idx] {
+							continue
+						}
+						if nextToolResults[idx].ToolCallID == tc.ID || (tc.ID == "" && nextToolResults[idx].Name == tc.Name) {
+							matchingResult = &nextToolResults[idx]
+							usedResults[idx] = true
+							break
+						}
+					}
+
+					kind, known := acpToolKinds[tc.Name]
+					if !known {
+						kind = acp.ToolKindOther
+					}
+					title := tc.Name
+					if compact := compactToolCallArgs(tc); compact != "" {
+						title = fmt.Sprintf("%s(%s)", tc.Name, compact)
+					}
+
+					callID := acp.ToolCallId(tc.ID)
+					if callID == "" {
+						r.mu.Lock()
+						r.toolSeq++
+						callID = acp.ToolCallId(fmt.Sprintf("call_%d", r.toolSeq))
+						r.mu.Unlock()
+					}
+
+					opts := []acp.ToolCallStartOpt{
+						acp.WithStartKind(kind),
+						acp.WithStartStatus(acp.ToolCallStatusCompleted),
+					}
+
+					var rawArgs map[string]any
+					if err := json.Unmarshal([]byte(tc.Arguments), &rawArgs); err == nil && len(rawArgs) > 0 {
+						opts = append(opts, acp.WithStartRawInput(rawArgs))
+						path, _ := rawArgs["file_path"].(string)
+						if path == "" {
+							path, _ = rawArgs["path"].(string)
+						}
+						if path != "" {
+							opts = append(opts, acp.WithStartLocations([]acp.ToolCallLocation{
+								r.buildToolCallLocation(path, rawArgs),
+							}))
+						}
+					}
+
+					if matchingResult != nil {
+						opts = append(opts, acp.WithStartRawOutput(matchingResult.Content))
+					}
+
+					_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
+						SessionId: sid,
+						Update:    acp.StartToolCall(callID, title, opts...),
+					})
+				}
+			}
+
+			if msg.Text != "" {
+				text := msg.Text
+				if !strings.HasSuffix(text, "\n") {
+					text += "\n\n"
+				} else if !strings.HasSuffix(text, "\n\n") {
+					text += "\n"
+				}
+
+				r.mu.Lock()
+				r.msgSeq++
+				msgID := fmt.Sprintf("00000000-0000-4000-8000-%012x", r.msgSeq)
+				r.mu.Unlock()
+
+				_ = r.conn.SessionUpdate(r.ctx, acp.SessionNotification{
+					SessionId: sid,
+					Update: acp.SessionUpdate{
+						AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
+							Content:   acp.TextBlock(text),
+							MessageId: &msgID,
+						},
+					},
+				})
+			}
+
+		case llm.RoleTool:
+			continue
+		}
+	}
+}
+
+func (r *acpReporter) WaitForSession(ctx context.Context) error {
+	select {
+	case <-r.sessionReady:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.ctx.Done():
+		return r.ctx.Err()
+	case <-r.conn.Done():
+		return errors.New("ACP connection closed")
+	}
+}
+
+func (r *acpReporter) IsLoadedSession() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.isLoadedSession
+}
+
+func (r *acpReporter) LoadedMessages() []llm.Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	res := make([]llm.Message, len(r.loadedMessages))
+	copy(res, r.loadedMessages)
+	return res
+}
+
+func (r *acpReporter) SessionID() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return string(r.sessionID)
 }
 
 func (r *acpReporter) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {

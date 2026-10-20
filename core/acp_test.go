@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/google/uuid"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
 	"github.com/stretchr/testify/require"
@@ -87,7 +88,7 @@ func (c *testACPClient) snapshotUpdates() []acp.SessionNotification {
 	return out
 }
 
-func setupACPPair(t *testing.T, ctx context.Context, cancelSession context.CancelFunc) (Reporter, *acp.ClientSideConnection, *testACPClient, *bytes.Buffer, func()) {
+func setupACPPair(t *testing.T, ctx context.Context, cancelSession context.CancelFunc, opts ...ACPOption) (Reporter, *acp.ClientSideConnection, *testACPClient, *bytes.Buffer, func()) {
 	t.Helper()
 
 	// agentToClient: agent writes to agentOutW, client reads from agentOutR
@@ -96,7 +97,7 @@ func setupACPPair(t *testing.T, ctx context.Context, cancelSession context.Cance
 	clientOutR, clientOutW := io.Pipe()
 
 	var stderrBuf bytes.Buffer
-	reporter := NewACPReporter(ctx, agentOutW, clientOutR, &stderrBuf, cancelSession)
+	reporter := NewACPReporter(ctx, agentOutW, clientOutR, &stderrBuf, cancelSession, opts...)
 
 	client := newTestACPClient()
 	clientConn := acp.NewClientSideConnection(client, clientOutW, agentOutR)
@@ -146,7 +147,8 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 		McpServers: []acp.McpServer{},
 	})
 	require.NoError(t, err)
-	require.Equal(t, defaultACPSessionID, newSessResp.SessionId)
+	_, parseErr := uuid.Parse(string(newSessResp.SessionId))
+	require.NoError(t, parseErr)
 	require.NotNil(t, newSessResp.Modes)
 	require.Equal(t, acpModeReview, newSessResp.Modes.CurrentModeId)
 	require.Len(t, newSessResp.Modes.AvailableModes, 1)
@@ -1180,4 +1182,206 @@ func TestResolveSessionDetails_EmptyTargetDirWithGit(t *testing.T) {
 	title, desc := resolveSessionDetails(context.Background(), "", nil)
 	require.Equal(t, "Review feature-test", title)
 	require.Contains(t, desc, "Initial test commit")
+}
+
+func TestACPReporter_Initialize_AdvertisesLoadSession(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	_, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	initResp, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+	require.True(t, initResp.AgentCapabilities.LoadSession)
+}
+
+func TestACPReporter_LoadSession_Success(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	tmpDir := t.TempDir()
+	store := NewSessionStore(tmpDir)
+
+	sessID := "sess_resume_123"
+	initialMsgs := []llm.Message{
+		{Role: llm.RoleSystem, Text: "stable system prompt"},
+		{Role: llm.RoleUser, Text: "Review this diff"},
+		{
+			Role:      llm.RoleAssistant,
+			Reasoning: "Examining auth logic",
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:        "call_1",
+					Name:      "read_file",
+					Arguments: `{"file_path":"auth.go"}`,
+				},
+			},
+		},
+		{
+			Role: llm.RoleTool,
+			ToolResults: []llm.ToolResult{
+				{
+					ToolCallID: "call_1",
+					Name:       "read_file",
+					Content:    "package auth",
+				},
+			},
+		},
+		{Role: llm.RoleAssistant, Text: "Review findings: LGTM"},
+	}
+	require.NoError(t, store.AppendMessages(sessionCtx, sessID, initialMsgs...))
+
+	reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession, WithACPSessionStore(store))
+	defer cleanup()
+
+	initResp, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+	require.True(t, initResp.AgentCapabilities.LoadSession)
+
+	loadResp, err := clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
+		SessionId:  acp.SessionId(sessID),
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, loadResp.Modes)
+	require.Equal(t, acpModeReview, loadResp.Modes.CurrentModeId)
+
+	sessWaiter, ok := reporter.(SessionWaiter)
+	require.True(t, ok)
+	require.NoError(t, sessWaiter.WaitForSession(sessionCtx))
+	require.True(t, sessWaiter.IsLoadedSession())
+	require.Equal(t, sessID, sessWaiter.SessionID())
+	require.Len(t, sessWaiter.LoadedMessages(), len(initialMsgs))
+
+	// Verify replayed updates received by the client
+	require.Eventually(t, func() bool {
+		var hasUserMsg, hasThought, hasToolCall, hasAgentMsg bool
+		for _, n := range client.snapshotUpdates() {
+			if n.Update.UserMessageChunk != nil && n.Update.UserMessageChunk.Content.Text != nil {
+				if n.Update.UserMessageChunk.Content.Text.Text == "Review this diff" {
+					hasUserMsg = true
+				}
+			}
+			if n.Update.AgentThoughtChunk != nil && n.Update.AgentThoughtChunk.Content.Text != nil {
+				if strings.Contains(n.Update.AgentThoughtChunk.Content.Text.Text, "Examining auth logic") {
+					hasThought = true
+				}
+			}
+			if n.Update.ToolCall != nil {
+				if n.Update.ToolCall.ToolCallId == "call_1" {
+					hasToolCall = true
+				}
+			}
+			if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+				if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Review findings: LGTM") {
+					hasAgentMsg = true
+				}
+			}
+		}
+		return hasUserMsg && hasThought && hasToolCall && hasAgentMsg
+	}, 2*time.Second, 5*time.Millisecond)
+
+	// Verify interactive post-review receives prompt turns even if Prompt arrives
+	// BEFORE ServePostReview registers the handler (reproducing fast client prompt arrival)
+	server, ok := reporter.(PostReviewServer)
+	require.True(t, ok)
+	chatTurnHandled := make(chan string, 1)
+
+	promptDone := make(chan struct{})
+	var promptResp acp.PromptResponse
+	var promptErr error
+	go func() {
+		defer close(promptDone)
+		promptResp, promptErr = clientConn.Prompt(sessionCtx, acp.PromptRequest{
+			SessionId: acp.SessionId(sessID),
+			Prompt: []acp.ContentBlock{
+				acp.TextBlock("What about performance?"),
+			},
+		})
+	}()
+
+	// Delay entering ServePostReview to verify Prompt waits cleanly on reviewReady
+	time.Sleep(25 * time.Millisecond)
+	go func() {
+		_ = server.ServePostReview(sessionCtx, func(_ context.Context, query string) error {
+			chatTurnHandled <- query
+			return nil
+		})
+	}()
+
+	<-promptDone
+	require.NoError(t, promptErr)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+	require.Equal(t, "What about performance?", <-chatTurnHandled)
+}
+
+func TestACPReporter_LoadSession_Errors(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	t.Run("no session store configured", func(t *testing.T) {
+		_, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+		})
+		require.NoError(t, err)
+
+		_, err = clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
+			SessionId:  "sess_any",
+			Cwd:        "/workspace",
+			McpServers: []acp.McpServer{},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "session store not configured")
+	})
+
+	t.Run("empty session ID", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		_, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession, WithACPSessionStore(store))
+		defer cleanup()
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+		})
+		require.NoError(t, err)
+
+		_, err = clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
+			SessionId:  "",
+			Cwd:        "/workspace",
+			McpServers: []acp.McpServer{},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "sessionId is required")
+	})
+
+	t.Run("session not found", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		_, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession, WithACPSessionStore(store))
+		defer cleanup()
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+		})
+		require.NoError(t, err)
+
+		_, err = clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
+			SessionId:  "non_existent_session",
+			Cwd:        "/workspace",
+			McpServers: []acp.McpServer{},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to load session")
+	})
 }

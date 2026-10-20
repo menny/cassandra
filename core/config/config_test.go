@@ -75,4 +75,55 @@ ignored-lock-files = [" go.sum ", " package-lock.json\t"]
 			}
 		}
 	})
+
+	t.Run("default cassandra-config-folder", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		if cfg.CassandraConfigFolder != "~/.cassandra" {
+			t.Errorf("expected default CassandraConfigFolder to be ~/.cassandra, got %q", cfg.CassandraConfigFolder)
+		}
+	})
+
+	t.Run("unmarshal cassandra-config-folder", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+cassandra-config-folder = "/custom/path"
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if cfg.CassandraConfigFolder != "/custom/path" {
+			t.Errorf("expected CassandraConfigFolder to be /custom/path, got %q", cfg.CassandraConfigFolder)
+		}
+	})
+
+	t.Run("unmarshal cassandraConfigFolder alias", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+cassandraConfigFolder = "/alias/path"
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if cfg.CassandraConfigFolder != "/alias/path" {
+			t.Errorf("expected CassandraConfigFolder to be /alias/path, got %q", cfg.CassandraConfigFolder)
+		}
+	})
 }

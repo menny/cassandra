@@ -168,6 +168,13 @@ func (r *Reviewer) Close() error {
 	return nil
 }
 
+// SetSession sets or updates the SessionStore and session ID on the Reviewer's Agent.
+func (r *Reviewer) SetSession(store SessionStore, sessionID string) {
+	if r.Agent != nil {
+		r.Agent.SetSession(store, sessionID)
+	}
+}
+
 func (r *Reviewer) waitAndAppendInitialUserContext(ctx context.Context, requestText string) (string, error) {
 	server, ok := r.Agent.reporter.(PostReviewServer)
 	if !ok {
@@ -398,11 +405,26 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 	// Reset metrics to isolate the interactive post-review discussion phase
 	r.Agent.ResetMetrics()
 
-	// Append system instruction indicating conversational post-review phase
-	r.Agent.history = append(r.Agent.history, llm.Message{
-		Role: llm.RoleSystem,
-		Text: postReviewSystemInstruction,
-	})
+	// Append system instruction indicating conversational post-review phase if not already present
+	hasPostReviewSys := false
+	for _, msg := range r.Agent.history {
+		if msg.Role == llm.RoleSystem && msg.Text == postReviewSystemInstruction {
+			hasPostReviewSys = true
+			break
+		}
+	}
+	if !hasPostReviewSys {
+		postMsg := llm.Message{
+			Role: llm.RoleSystem,
+			Text: postReviewSystemInstruction,
+		}
+		r.Agent.history = append(r.Agent.history, postMsg)
+		if r.Agent.sessionStore != nil && r.Agent.sessionID != "" {
+			if storeErr := r.Agent.sessionStore.AppendMessages(ctx, r.Agent.sessionID, postMsg); storeErr != nil {
+				r.Agent.reporter.ReportWarning("Failed to persist post-review system instruction", storeErr)
+			}
+		}
+	}
 
 	maxIterations := CalculateMaxIterations(1)
 
