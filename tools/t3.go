@@ -45,6 +45,44 @@ func callT3McpTool(ctx context.Context, tool string, args any) (string, error) {
 		return "", fmt.Errorf("calling T3 MCP tool %q failed: %w (output: %s)", tool, err, string(out))
 	}
 	result := string(out)
+
+	// Unpack standard MCP tool call envelope if present.
+	var env struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool            `json:"isError"`
+	}
+	if err := json.Unmarshal(out, &env); err == nil && (len(env.Content) > 0 || len(env.StructuredContent) > 0 || env.IsError) {
+		if env.IsError {
+			var errMsgs []string
+			for _, c := range env.Content {
+				if c.Text != "" {
+					errMsgs = append(errMsgs, c.Text)
+				}
+			}
+			if len(errMsgs) > 0 {
+				return "", fmt.Errorf("calling T3 MCP tool %q failed: %s", tool, strings.Join(errMsgs, "; "))
+			}
+			return "", fmt.Errorf("calling T3 MCP tool %q failed", tool)
+		}
+		if len(env.StructuredContent) > 0 && string(env.StructuredContent) != "null" {
+			result = string(env.StructuredContent)
+		} else if len(env.Content) > 0 {
+			var texts []string
+			for _, c := range env.Content {
+				if c.Text != "" {
+					texts = append(texts, c.Text)
+				}
+			}
+			if len(texts) > 0 {
+				result = strings.Join(texts, "\n")
+			}
+		}
+	}
+
 	if len(result) > maxT3ToolOutputBytes {
 		result = result[:maxT3ToolOutputBytes] + "\n... (truncated)"
 	}
@@ -270,9 +308,25 @@ func GetCurrentThreadTitle(ctx context.Context) (string, error) {
 			ThreadID string `json:"threadId"`
 			Title    string `json:"title"`
 		} `json:"threads"`
+		StructuredContent *struct {
+			CurrentThreadID string `json:"currentThreadId"`
+			Threads         []struct {
+				ThreadID string `json:"threadId"`
+				Title    string `json:"title"`
+			} `json:"threads"`
+		} `json:"structuredContent,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(out), &listResp); err != nil {
 		return "", fmt.Errorf("failed to parse t3_thread_list response: %w", err)
+	}
+
+	if listResp.StructuredContent != nil {
+		if listResp.CurrentThreadID == "" {
+			listResp.CurrentThreadID = listResp.StructuredContent.CurrentThreadID
+		}
+		if len(listResp.Threads) == 0 {
+			listResp.Threads = listResp.StructuredContent.Threads
+		}
 	}
 
 	for _, th := range listResp.Threads {
@@ -291,11 +345,25 @@ func GetCurrentThreadTitle(ctx context.Context) (string, error) {
 				Thread struct {
 					Title string `json:"title"`
 				} `json:"thread"`
+				StructuredContent *struct {
+					Thread struct {
+						Title string `json:"title"`
+					} `json:"thread"`
+				} `json:"structuredContent,omitempty"`
 			}
-			if json.Unmarshal([]byte(readOut), &readResp) == nil && readResp.Thread.Title != "" {
-				return readResp.Thread.Title, nil
+			if json.Unmarshal([]byte(readOut), &readResp) == nil {
+				if readResp.Thread.Title != "" {
+					return readResp.Thread.Title, nil
+				}
+				if readResp.StructuredContent != nil && readResp.StructuredContent.Thread.Title != "" {
+					return readResp.StructuredContent.Thread.Title, nil
+				}
 			}
 		}
+	}
+
+	if len(listResp.Threads) == 1 {
+		return listResp.Threads[0].Title, nil
 	}
 
 	return "", fmt.Errorf("current thread %q not found in thread list", listResp.CurrentThreadID)
@@ -310,7 +378,9 @@ func UpdateThreadTitlePrefix(ctx context.Context, emoji string) error {
 
 	currentTitle, err := GetCurrentThreadTitle(ctx)
 	if err != nil {
-		return err
+		// If getting the current title fails, fall back to "Review" as the base title
+		// so that the title update still happens instead of failing silently.
+		currentTitle = "Review"
 	}
 
 	newTitle := FormatThreadTitle(emoji, currentTitle)
