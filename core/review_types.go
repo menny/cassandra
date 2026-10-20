@@ -184,36 +184,56 @@ const (
 func DetermineVerdict(reviewText string) ReviewVerdict {
 	lines := strings.Split(reviewText, "\n")
 	nonEmptyCount := 0
-	for i := len(lines) - 1; i >= 0 && nonEmptyCount < 25; i-- {
+	for i := len(lines) - 1; i >= 0 && nonEmptyCount < 50; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		nonEmptyCount++
 
-		// Explicit emoji markers
-		if strings.Contains(line, "✅") && (strings.Contains(strings.ToLower(line), "approv") || strings.Contains(line, "Approved")) {
-			return VerdictApproved
-		}
-		if (strings.Contains(line, "❌") || strings.Contains(line, "❎")) && (strings.Contains(strings.ToLower(line), "reject") || strings.Contains(line, "Rejected")) {
-			return VerdictRejected
-		}
-		if strings.Contains(line, "💬") && (strings.Contains(strings.ToLower(line), "comment") || strings.Contains(line, "Comment")) {
-			return VerdictElse
-		}
-
-		// Bullet point, heading, or bold without emoji (e.g. "- Approved", "**Approved**", "Verdict: Approved")
-		clean := strings.Trim(line, "-*# \t`")
-		cleanLower := strings.ToLower(clean)
-		if strings.HasPrefix(cleanLower, "approved") || strings.HasPrefix(cleanLower, "verdict: approved") || strings.HasPrefix(cleanLower, "status: approved") {
-			return VerdictApproved
-		}
-		if strings.HasPrefix(cleanLower, "rejected") || strings.HasPrefix(cleanLower, "verdict: rejected") || strings.HasPrefix(cleanLower, "status: rejected") {
-			return VerdictRejected
-		}
-		if strings.HasPrefix(cleanLower, "comment") || strings.HasPrefix(cleanLower, "verdict: comment") || strings.HasPrefix(cleanLower, "status: comment") {
-			return VerdictElse
+		if v, ok := matchVerdictLine(line); ok {
+			return v
 		}
 	}
+
+	// Fallback scan across all lines from bottom up if not found in the trailing 50 lines.
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if v, ok := matchVerdictLine(line); ok {
+			return v
+		}
+	}
+
 	return VerdictElse
+}
+
+func matchVerdictLine(line string) (ReviewVerdict, bool) {
+	// Explicit emoji markers
+	if strings.Contains(line, "✅") && (strings.Contains(strings.ToLower(line), "approv") || strings.Contains(line, "Approved")) {
+		return VerdictApproved, true
+	}
+	if (strings.Contains(line, "❌") || strings.Contains(line, "❎")) && (strings.Contains(strings.ToLower(line), "reject") || strings.Contains(line, "Rejected")) {
+		return VerdictRejected, true
+	}
+	if strings.Contains(line, "💬") && (strings.Contains(strings.ToLower(line), "comment") || strings.Contains(line, "Comment")) {
+		return VerdictElse, true
+	}
+
+	// Bullet point, heading, or bold without emoji (e.g. "- Approved", "**Approved**", "Verdict: Approved")
+	clean := strings.Trim(line, "-*# \t`")
+	cleanLower := strings.ToLower(clean)
+	if strings.HasPrefix(cleanLower, "approved") || strings.HasPrefix(cleanLower, "verdict: approved") || strings.HasPrefix(cleanLower, "status: approved") {
+		return VerdictApproved, true
+	}
+	if strings.HasPrefix(cleanLower, "rejected") || strings.HasPrefix(cleanLower, "verdict: rejected") || strings.HasPrefix(cleanLower, "status: rejected") {
+		return VerdictRejected, true
+	}
+	if strings.HasPrefix(cleanLower, "comment") || strings.HasPrefix(cleanLower, "verdict: comment") || strings.HasPrefix(cleanLower, "status: comment") {
+		return VerdictElse, true
+	}
+
+	return VerdictElse, false
 }

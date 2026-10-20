@@ -224,4 +224,57 @@ esac
 		require.NoError(t, err)
 		require.Contains(t, string(logContent), "✅ Review Feature A")
 	})
+
+	t.Run("handles wrapped MCP tool result envelope", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mockScript := filepath.Join(tmpDir, "mock_mcp_node.sh")
+		scriptContent := `#!/bin/sh
+for arg in "$@"; do
+    case "$prev" in
+        "acp-mcp-call") tool="$arg" ;;
+    esac
+    prev="$arg"
+done
+
+case "$tool" in
+    "t3_thread_list")
+        echo '{"content":[{"type":"text","text":"..."}],"structuredContent":{"projectId":"p1","currentThreadId":"t1","threads":[{"threadId":"t1","title":"⏳ Review Reduce LunaServer"}]},"isError":false}'
+        ;;
+    "t3_thread_update")
+        echo "$*" >> ` + filepath.Join(tmpDir, "updated.log") + `
+        echo '{"content":[{"type":"text","text":"done"}],"structuredContent":{"title":"✳️ Review Reduce LunaServer"},"isError":false}'
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+`
+		require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+		title, err := GetCurrentThreadTitle(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "⏳ Review Reduce LunaServer", title)
+
+		err = UpdateThreadTitlePrefix(context.Background(), ReviewStateElse)
+		require.NoError(t, err)
+
+		logContent, err := os.ReadFile(filepath.Join(tmpDir, "updated.log"))
+		require.NoError(t, err)
+		require.Contains(t, string(logContent), "✳️ Review Reduce LunaServer")
+	})
+
+	t.Run("handles MCP error envelope properly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mockScript := filepath.Join(tmpDir, "mock_error_node.sh")
+		scriptContent := `#!/bin/sh
+echo '{"content":[{"type":"text","text":"rate limit exceeded"}],"isError":true}'
+`
+		require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+		_, err := callT3McpTool(context.Background(), "t3_thread_list", map[string]any{})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "rate limit exceeded")
+	})
 }
