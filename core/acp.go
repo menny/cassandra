@@ -651,14 +651,23 @@ func (r *acpReporter) LoadSession(ctx context.Context, req acp.LoadSessionReques
 
 	messages, err := store.LoadSession(ctx, string(req.SessionId))
 	if err != nil {
-		return acp.LoadSessionResponse{}, fmt.Errorf("failed to load session %q: %w", req.SessionId, err)
+		if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "is empty") {
+			// If the session does not exist on disk or has no messages yet (e.g. an initial turn that
+			// was interrupted, or a brand new thread where the client requests session/load),
+			// treat it as an uninitialized session rather than failing the turn.
+			messages = nil
+		} else {
+			return acp.LoadSessionResponse{}, fmt.Errorf("failed to load session %q: %w", req.SessionId, err)
+		}
 	}
+
+	hasHistory := len(messages) > 0
 
 	r.mu.Lock()
 	r.sessionID = req.SessionId
-	r.isLoadedSession = true
+	r.isLoadedSession = hasHistory
 	r.loadedMessages = messages
-	r.inPostReview = true
+	r.inPostReview = hasHistory
 	mode := r.currentMode
 	var modelName string
 	if r.cfg != nil {
@@ -675,17 +684,22 @@ func (r *acpReporter) LoadSession(ctx context.Context, req acp.LoadSessionReques
 	r.shutdownWg.Add(1)
 	r.gateWriter.arm(func() {
 		r.signalSessionReady()
-		r.signalFirstMessage("")
-		go func() {
+		if hasHistory {
+			r.signalFirstMessage("")
+			go func() {
+				defer r.shutdownWg.Done()
+				defer close(replayDone)
+				r.advancePlan(map[string]acp.PlanEntryStatus{
+					planStepContext:   acp.PlanEntryStatusCompleted,
+					planStepPreReview: acp.PlanEntryStatusCompleted,
+					planStepReview:    acp.PlanEntryStatusCompleted,
+				})
+				r.replayHistory(messages)
+			}()
+		} else {
 			defer r.shutdownWg.Done()
-			defer close(replayDone)
-			r.advancePlan(map[string]acp.PlanEntryStatus{
-				planStepContext:   acp.PlanEntryStatusCompleted,
-				planStepPreReview: acp.PlanEntryStatusCompleted,
-				planStepReview:    acp.PlanEntryStatusCompleted,
-			})
-			r.replayHistory(messages)
-		}()
+			close(replayDone)
+		}
 	})
 
 	return acp.LoadSessionResponse{

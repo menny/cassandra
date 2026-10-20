@@ -1364,7 +1364,34 @@ func TestACPReporter_LoadSession_Errors(t *testing.T) {
 		require.Contains(t, err.Error(), "sessionId is required")
 	})
 
-	t.Run("session not found", func(t *testing.T) {
+	t.Run("session not found initializes fresh session", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession, WithACPSessionStore(store))
+		defer cleanup()
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+		})
+		require.NoError(t, err)
+
+		loadResp, err := clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
+			SessionId:  "non_existent_session",
+			Cwd:        "/workspace",
+			McpServers: []acp.McpServer{},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, loadResp.Modes)
+
+		sessWaiter, ok := reporter.(SessionWaiter)
+		require.True(t, ok)
+		require.NoError(t, sessWaiter.WaitForSession(sessionCtx))
+		require.False(t, sessWaiter.IsLoadedSession())
+		require.Equal(t, "non_existent_session", sessWaiter.SessionID())
+	})
+
+	t.Run("invalid session ID returns error", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		store := NewSessionStore(tmpDir)
 
@@ -1377,11 +1404,10 @@ func TestACPReporter_LoadSession_Errors(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = clientConn.LoadSession(sessionCtx, acp.LoadSessionRequest{
-			SessionId:  "non_existent_session",
+			SessionId:  "../invalid/session",
 			Cwd:        "/workspace",
 			McpServers: []acp.McpServer{},
 		})
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to load session")
 	})
 }
