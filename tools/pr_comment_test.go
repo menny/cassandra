@@ -148,6 +148,44 @@ func TestPRCommentTool(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid path")
 	})
 
+	t.Run("security: rejects broken symlink", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		tmpDir := t.TempDir()
+		brokenSymlink := filepath.Join(tmpDir, "broken.go")
+		require.NoError(t, os.Symlink(filepath.Join(tmpDir, "nonexistent.go"), brokenSymlink))
+
+		r := NewRegistry()
+		registerPRCommentTool(r, tmpDir, "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_broken_symlink",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "broken symlink test", "repo": "owner/repo", "pr_number": 1, "path": "broken.go", "line": 1}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid path")
+	})
+
+	t.Run("security: rejects circular trampoline symlink", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "dummy-token")
+		tmpDir := t.TempDir()
+		trampoline := filepath.Join(tmpDir, "trampoline.go")
+		require.NoError(t, os.Symlink(trampoline, trampoline))
+
+		r := NewRegistry()
+		registerPRCommentTool(r, tmpDir, "")
+
+		tc := llm.ToolCall{
+			ID:        "tc_trampoline_symlink",
+			Name:      "post_pr_comment",
+			Arguments: `{"comment": "trampoline test", "repo": "owner/repo", "pr_number": 1, "path": "trampoline.go", "line": 1}`,
+		}
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid path")
+	})
+
 	t.Run("post top-level PR comment successfully", func(t *testing.T) {
 		t.Setenv("GITHUB_TOKEN", "dummy-token")
 

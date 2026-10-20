@@ -80,7 +80,7 @@ func resolvePRTarget(ctx context.Context, rootDir, metadataFile, repoArg string,
 	}
 
 	// If repo still missing, attempt git remote
-	if (owner == "" || repo == "") && rootDir != "" {
+	if owner == "" || repo == "" {
 		if out, gitErr := util.RunGit(ctx, rootDir, "remote", "get-url", "origin"); gitErr == nil {
 			if o, r, e := parseRepoSlug(string(out)); e == nil {
 				owner, repo = o, r
@@ -89,9 +89,11 @@ func resolvePRTarget(ctx context.Context, rootDir, metadataFile, repoArg string,
 	}
 
 	// If PR number still missing, attempt gh pr view
-	if prNumber == 0 && rootDir != "" {
+	if prNumber == 0 {
 		cmd := exec.CommandContext(ctx, "gh", "pr", "view", "--json", "number", "-q", ".number")
-		cmd.Dir = rootDir
+		if rootDir != "" {
+			cmd.Dir = rootDir
+		}
 		if out, ghErr := cmd.Output(); ghErr == nil {
 			if n, convErr := strconv.Atoi(strings.TrimSpace(string(out))); convErr == nil && n > 0 {
 				prNumber = n
@@ -172,8 +174,12 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 			return "", errors.New("'path' is required when 'start_line' is specified for an inline comment")
 		}
 
-		if args.Path != "" && rootDir != "" {
-			if _, err := util.ValidatePathInRoot(rootDir, args.Path); err != nil {
+		if args.Path != "" {
+			effectiveRoot := rootDir
+			if effectiveRoot == "" {
+				effectiveRoot = "."
+			}
+			if _, err := util.ValidatePathInRoot(effectiveRoot, args.Path); err != nil {
 				return "", fmt.Errorf("invalid path: %w", err)
 			}
 		}
@@ -193,7 +199,7 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 			if prErr == nil && pr != nil && pr.GetHead() != nil {
 				commitSHA = pr.GetHead().GetSHA()
 			}
-			if commitSHA == "" && rootDir != "" {
+			if commitSHA == "" {
 				if out, gitErr := util.RunGit(ctx, rootDir, "rev-parse", "HEAD"); gitErr == nil {
 					commitSHA = strings.TrimSpace(string(out))
 				}
