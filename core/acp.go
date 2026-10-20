@@ -19,6 +19,7 @@ import (
 	"github.com/coder/acp-go-sdk"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 const (
@@ -32,15 +33,23 @@ const (
 )
 
 var acpToolKinds = map[string]acp.ToolKind{
-	"read_file":      acp.ToolKindRead,
-	"list_directory": acp.ToolKindRead,
-	"grep_files":     acp.ToolKindSearch,
-	"glob_files":     acp.ToolKindSearch,
-	"wishlist_tool":  acp.ToolKindOther,
+	"read_file":                 acp.ToolKindRead,
+	"list_directory":            acp.ToolKindRead,
+	"grep_files":                acp.ToolKindSearch,
+	"glob_files":                acp.ToolKindSearch,
+	"wishlist_tool":             acp.ToolKindOther,
+	"link_pull_request":         acp.ToolKindOther,
+	"list_thread_pull_requests": acp.ToolKindOther,
+	"orchestrator_capabilities": acp.ToolKindOther,
+	"t3_thread_launch":          acp.ToolKindOther,
+	"post_pr_comment":           acp.ToolKindOther,
 }
 
-func availableACPModes() []acp.SessionMode {
+func availableACPModes(desc string) []acp.SessionMode {
 	reviewDesc := "Analyzing git diff, commit history, and repository context"
+	if desc != "" {
+		reviewDesc = desc
+	}
 	return []acp.SessionMode{
 		{
 			Id:          acpModeReview,
@@ -163,11 +172,13 @@ type acpReporter struct {
 	closeSessionOnce sync.Once
 	shutdownWg       sync.WaitGroup
 
-	cfg             *config.Config
-	targetDir       string
-	hasPreReview    bool
-	planStatuses    map[string]acp.PlanEntryStatus
-	cumulativeUsage llm.Usage
+	cfg                *config.Config
+	targetDir          string
+	hasPreReview       bool
+	planStatuses       map[string]acp.PlanEntryStatus
+	cumulativeUsage    llm.Usage
+	sessionTitle       string
+	sessionDescription string
 
 	closeOnce sync.Once
 }
@@ -468,6 +479,7 @@ func (r *acpReporter) NewSession(_ context.Context, _ acp.NewSessionRequest) (ac
 	if r.cfg != nil {
 		modelName = r.cfg.Model
 	}
+	desc := r.sessionDescription
 	r.mu.Unlock()
 
 	r.gateWriter.arm(r.signalSessionReady)
@@ -476,7 +488,7 @@ func (r *acpReporter) NewSession(_ context.Context, _ acp.NewSessionRequest) (ac
 		ConfigOptions: acpConfigOptions(modelName),
 		Modes: &acp.SessionModeState{
 			CurrentModeId:  mode,
-			AvailableModes: availableACPModes(),
+			AvailableModes: availableACPModes(desc),
 		},
 	}, nil
 }
@@ -831,15 +843,82 @@ func (r *acpReporter) ReportMCPStatus(name string, status string, err error) {
 	r.sendUpdate(acp.UpdateAgentThoughtText(fmt.Sprintf("[MCP] %s: %s\n", name, status)))
 }
 
+func resolveSessionDetails(ctx context.Context, targetDir string, cfg *config.Config) (string, string) {
+	if cfg != nil && cfg.MetadataJSONFile != "" {
+		if data, err := os.ReadFile(cfg.MetadataJSONFile); err == nil {
+			var pr PRMetadata
+			if err := json.Unmarshal(data, &pr); err == nil && pr.Title != "" {
+				title := fmt.Sprintf("Review %s", pr.Title)
+				var desc string
+				if pr.PRNumber > 0 {
+					if pr.Author != "" {
+						desc = fmt.Sprintf("Reviewing PR %d by %s", pr.PRNumber, pr.Author)
+					} else {
+						desc = fmt.Sprintf("Reviewing PR %d", pr.PRNumber)
+					}
+				} else if pr.Author != "" {
+					desc = fmt.Sprintf("Reviewing changes by %s", pr.Author)
+				}
+				return title, desc
+			}
+		}
+	}
+
+	branch := ""
+	if out, err := util.RunGit(ctx, targetDir, "branch", "--show-current"); err == nil {
+		branch = strings.TrimSpace(string(out))
+	}
+	if branch == "" {
+		if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+			b := strings.TrimSpace(string(out))
+			if b != "HEAD" {
+				branch = b
+			}
+		}
+	}
+	if branch == "" && cfg != nil && cfg.Head != "" && cfg.Head != "HEAD" {
+		branch = cfg.Head
+	}
+	if branch == "" {
+		branch = "HEAD"
+	}
+
+	title := fmt.Sprintf("Review %s", branch)
+
+	var sha, commitTitle string
+	if out, err := util.RunGit(ctx, targetDir, "rev-parse", "--short", "HEAD"); err == nil {
+		sha = strings.TrimSpace(string(out))
+	}
+	if out, err := util.RunGit(ctx, targetDir, "log", "-1", "--format=%s", "HEAD"); err == nil {
+		commitTitle = strings.TrimSpace(string(out))
+	}
+
+	var desc string
+	if sha != "" && commitTitle != "" {
+		desc = fmt.Sprintf("%s - %s", sha, commitTitle)
+	} else if sha != "" {
+		desc = sha
+	} else if commitTitle != "" {
+		desc = commitTitle
+	}
+
+	return title, desc
+}
+
 func (r *acpReporter) buildSessionInfo(files int, guidelines, model string) (string, map[string]any) {
 	r.mu.Lock()
 	cfg := r.cfg
 	targetDir := r.targetDir
+	title := r.sessionTitle
+	desc := r.sessionDescription
 	r.mu.Unlock()
 
 	meta := map[string]any{
 		"guidelines": guidelines,
 		"model":      model,
+	}
+	if desc != "" {
+		meta["description"] = desc
 	}
 	detail := model
 	if files >= 0 {
@@ -850,16 +929,18 @@ func (r *acpReporter) buildSessionInfo(files int, guidelines, model string) (str
 		meta["targetDir"] = targetDir
 	}
 
-	title := fmt.Sprintf("Code Review (%s)", detail)
 	if cfg != nil {
 		if cfg.Provider != "" {
 			meta["provider"] = cfg.Provider
 		}
 		if cfg.Base != "" && cfg.Head != "" {
-			title = fmt.Sprintf("Code Review: %s..%s (%s)", cfg.Base, cfg.Head, detail)
 			meta["base"] = cfg.Base
 			meta["head"] = cfg.Head
 		}
+	}
+
+	if title == "" {
+		title = fmt.Sprintf("Code Review (%s)", detail)
 	}
 	return title, meta
 }
@@ -874,10 +955,14 @@ func (r *acpReporter) ReportConfig(cfg *config.Config, targetDir string) {
 		return
 	}
 
+	title, desc := resolveSessionDetails(r.ctx, targetDir, cfg)
+
 	r.mu.Lock()
 	r.cfg = cfg
 	r.targetDir = targetDir
 	r.hasPreReview = cfg.PreReviewPromptFile != ""
+	r.sessionTitle = title
+	r.sessionDescription = desc
 	r.mu.Unlock()
 
 	title, meta := r.buildSessionInfo(-1, cfg.MainGuidelines, cfg.Model)

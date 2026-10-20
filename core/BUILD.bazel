@@ -20,6 +20,7 @@ go_library(
         "//llm/factory",
         "//tools",
         "//tools/mcp",
+        "//util",
         "@com_github_charmbracelet_bubbles//spinner",
         "@com_github_charmbracelet_bubbles//viewport",
         "@com_github_charmbracelet_bubbletea//:bubbletea",
@@ -48,6 +49,8 @@ go_test(
     deps = [
         "//core/config",
         "//llm",
+        "//tools",
+        "//util",
         "@com_github_coder_acp_go_sdk//:acp-go-sdk",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",

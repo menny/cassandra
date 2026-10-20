@@ -76,11 +76,14 @@ type PromptSummary struct {
 //  3. <supplemental_guideline>  — semi-static, additive guidelines
 //  4. <approval_evaluation_guidelines> — semi-static
 //  5. <personal_review_guidelines>     — semi-static, optional
+//  6. ask_developer guidelines         — semi-static, optional
+//  7. <t3_thread_launch_guidelines>    — semi-static, optional (T3 Code sessions only)
+//  8. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
 //
 // Dynamic (Zone 3):
-//  6. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  7. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool) (stable, dynamic string, summary PromptSummary, err error) {
+//  9. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  10. <reviewer_context>       — dynamic, varies per PR (REVIEWERS.md files)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, currentModel string) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -110,6 +113,51 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 	// Zone 2: semi-static, config-driven
 	if allowAskDeveloper {
 		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. If the tool returns a timeout message, do your best to assume the answer and document your assumption.\n"
+	}
+
+	if allowT3ThreadLaunch {
+		currentModelText := ""
+		if currentModel != "" {
+			currentModelText = fmt.Sprintf("Your current active model is `%s`.\n", currentModel)
+		}
+		stable += fmt.Sprintf("\n<t3_thread_launch_guidelines>\n"+
+			"You are running inside a T3 Code session and have access to the `t3_thread_launch` and `orchestrator_capabilities` tools.\n%s\n"+
+			"1. **When to use**:\n"+
+			"   - Use `t3_thread_launch` when explicitly asked by the user to fix issues or create a fix session/thread.\n"+
+			"   - Proactively offer to spawn a fix session when it is clear the user wants review findings or code issues addressed. Do not spawn it without user confirmation unless explicitly instructed.\n\n"+
+			"2. **Model and Provider Selection Logic**:\n"+
+			"   - Before launching a thread, call `orchestrator_capabilities` to inspect the available providers and models.\n"+
+			"   - Identify your current active model. Look through the `providers` list in `orchestrator_capabilities` to find a provider whose `models` contains your active model, or matches `inheritedProviderInstanceId`.\n"+
+			"   - Use that provider's `providerInstanceId` as `modelSelection.instanceId`.\n"+
+			"   - Pick an appropriate model from that provider instance's available options for `modelSelection.model`, choosing as light a model as possible suitable for the task (e.g., flash/haiku tier for straightforward code fixes).\n"+
+			"   - If no provider matches, fall back to `inheritedProviderInstanceId` / `inheritedModel` or omit `modelSelection` to inherit current session settings.\n\n"+
+			"3. **Spawned Thread Message & Context**:\n"+
+			"   - The `message` parameter must contain comprehensive initial instructions for the fixing agent:\n"+
+			"     a) Brief context of the review and files affected.\n"+
+			"     b) The user's goals, directions, and specific items to fix.\n"+
+			"     c) Technical guidelines and constraints necessary to complete the fix accurately.\n\n"+
+			"4. **Thread Title**:\n"+
+			"   - The thread `title` must strictly follow the format: \"Review Fix [short description]\" (e.g., \"Review Fix Refactor Auth Token Validation\").\n\n"+
+			"5. **Referencing the Spawned Thread**:\n"+
+			"   - When presenting the launched thread to the user, link it using markdown: `[Review Fix ...](t3-thread://v1/<threadId>)` using the exact `threadId` returned by `t3_thread_launch`.\n"+
+			"</t3_thread_launch_guidelines>\n", currentModelText)
+	}
+
+	// Zone 2: PR comment guidelines (ACP sessions only)
+	if allowPRComment {
+		stable += "\n<pr_comment_guidelines>\n" +
+			"You have access to the `post_pr_comment` tool to publish comments on a GitHub pull request.\n\n" +
+			"1. **When to use**:\n" +
+			"   - Use `post_pr_comment` ONLY when explicitly asked or confirmed by the user (e.g., \"post that comment\", \"add an inline note on line 42\").\n" +
+			"   - Do NOT post comments automatically or unprompted.\n\n" +
+			"2. **Proactive suggestions**:\n" +
+			"   - When you identify important findings, architectural questions, or suggested improvements during review or discussion, proactively offer to post them as comments:\n" +
+			"     - \"Would you like me to post this finding as an inline comment on `path/to/file.go:L30-L35`?\"\n" +
+			"     - \"Would you like me to post this summary as a PR comment?\"\n" +
+			"   - Wait for the user's explicit consent before calling the tool.\n\n" +
+			"3. **Strict scope**:\n" +
+			"   - This tool ONLY posts comments (top-level PR discussion comments or inline line/range comments). It cannot approve, reject, or request changes on a pull request.\n" +
+			"</pr_comment_guidelines>\n"
 	}
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.
