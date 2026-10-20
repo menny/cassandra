@@ -348,6 +348,11 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	if len(changedFiles) == 0 {
+		if tools.IsT3Session() {
+			if err := tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStateElse); err != nil {
+				stderr.Printf("Warning: failed to update thread title: %v\n", err)
+			}
+		}
 		reporter.ReportNoChanges()
 		if cfg.InteractivePostReview {
 			if cfg.Render != "acp" {
@@ -385,8 +390,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 	}
 
+	if tools.IsT3Session() {
+		if err := tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStatePending); err != nil {
+			stderr.Printf("Warning: failed to update thread title: %v\n", err)
+		}
+	}
+
 	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
+		if tools.IsT3Session() {
+			_ = tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStateElse)
+		}
 		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
 			return nil
 		}
@@ -410,6 +424,20 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return err
 	}
 
+	verdict := core.DetermineVerdict(result)
+	if tools.IsT3Session() {
+		emoji := tools.ReviewStateElse
+		switch verdict {
+		case core.VerdictApproved:
+			emoji = tools.ReviewStateApproved
+		case core.VerdictRejected:
+			emoji = tools.ReviewStateRejected
+		}
+		if err := tools.UpdateThreadTitlePrefix(ctx, emoji); err != nil {
+			stderr.Printf("Warning: failed to update thread title: %v\n", err)
+		}
+	}
+
 	if cfg.ReviewOutputFile != "" {
 		if err := util.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
 			return fmt.Errorf("failed to write review to %s: %w", cfg.ReviewOutputFile, err)
@@ -425,6 +453,17 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		})
 		if err != nil {
 			return fmt.Errorf("structured extraction failed: %w", err)
+		}
+
+		if structured != nil && tools.IsT3Session() {
+			action := strings.ToUpper(strings.TrimSpace(structured.Approval.Action))
+			emoji := tools.ReviewStateElse
+			if action == "APPROVE" || structured.Approval.Approved {
+				emoji = tools.ReviewStateApproved
+			} else if action == "REQUEST_CHANGES" {
+				emoji = tools.ReviewStateRejected
+			}
+			_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
 		}
 
 		structured.RawFreeText = result
