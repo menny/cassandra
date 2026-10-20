@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "godoc": {
-      "command": "bazel",
+      "command": "bazelisk",
       "args": [
         "run",
         "--noshow_progress",

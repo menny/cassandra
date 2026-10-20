@@ -117,9 +117,17 @@ func (m *Manager) registerServer(
 	var transport mcp.Transport
 
 	if cfg.Command != "" {
+		// Prefer bazelisk over bazel if available in PATH to avoid host wrapper collisions.
+		command := cfg.Command
+		if command == "bazel" {
+			if bazeliskPath, err := exec.LookPath("bazelisk"); err == nil && bazeliskPath != "" {
+				command = bazeliskPath
+			}
+		}
+
 		// Use CommandContext to ensure that the subprocess is reaped if the
 		// main application context is canceled.
-		cmd := exec.CommandContext(ctx, cfg.Command, cfg.Args...)
+		cmd := exec.CommandContext(ctx, command, cfg.Args...)
 
 		// Ensure the command runs in the workspace root or the process's current CWD.
 		if cwd, err := os.Getwd(); err == nil {

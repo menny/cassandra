@@ -111,7 +111,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 				mu.Unlock()
 			},
 		); err != nil {
-			return nil, fmt.Errorf("failed to register MCP servers: %w", err)
+			reporter.ReportWarning("Failed to register MCP servers; proceeding without them", err)
 		}
 	}
 
