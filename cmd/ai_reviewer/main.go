@@ -388,6 +388,13 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
 			return nil
 		}
+		if server, ok := reporter.(core.PostReviewServer); ok && acpMode {
+			_ = server.SignalReviewFailed(err)
+			if postErr := reviewer.RunInteractivePostReview(sessionCtx); postErr != nil {
+				return postErr
+			}
+			return nil
+		}
 		return fmt.Errorf("review failed: %w", err)
 	}
 

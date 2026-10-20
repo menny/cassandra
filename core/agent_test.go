@@ -339,6 +339,22 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		}
 	})
 
+	t.Run("truncates oversized tool result", func(t *testing.T) {
+		d := newMockDispatcher()
+		huge := strings.Repeat("x", MaxToolResultBytes+1000)
+		d.handlers["huge"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return huge, nil }
+
+		agent := NewAgent(nil, d, WithStderr(io.Discard))
+		msg := agent.executeToolCalls(context.Background(), []llm.ToolCall{{ID: "id1", Name: "huge"}})
+
+		if len(msg.ToolResults) != 1 {
+			t.Fatal("expected 1 result")
+		}
+		if !strings.Contains(msg.ToolResults[0].Content, "Tool output truncated") {
+			t.Errorf("expected truncation warning in content, got: %s", msg.ToolResults[0].Content)
+		}
+	})
+
 	t.Run("context propagation", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // cancel immediately

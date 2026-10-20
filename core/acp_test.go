@@ -1321,6 +1321,53 @@ func TestACPReporter_LoadSession_Success(t *testing.T) {
 	require.Equal(t, "What about performance?", <-chatTurnHandled)
 }
 
+func TestACPReporter_SignalReviewFailed(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	server, ok := reporter.(PostReviewServer)
+	require.True(t, ok)
+
+	promptDone := make(chan struct{})
+	var promptResp acp.PromptResponse
+	var promptErr error
+	go func() {
+		defer close(promptDone)
+		promptResp, promptErr = clientConn.Prompt(sessionCtx, acp.PromptRequest{
+			SessionId: newResp.SessionId,
+			Prompt: []acp.ContentBlock{
+				acp.TextBlock("start review"),
+			},
+		})
+	}()
+
+	testErr := errors.New("simulated context overflow")
+	require.NoError(t, server.SignalReviewFailed(testErr))
+
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Prompt to complete after SignalReviewFailed")
+	}
+
+	require.NoError(t, promptErr)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+}
+
 func TestACPReporter_LoadSession_Errors(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()

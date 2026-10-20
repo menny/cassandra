@@ -186,6 +186,35 @@ func TestLocalReadFile_Errors(t *testing.T) {
 	})
 }
 
+func TestLocalGlobFiles_Truncation(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := NewRegistry()
+	registerLocalGlobFiles(r, tmpDir)
+
+	for i := 0; i < 300; i++ {
+		fname := filepath.Join(tmpDir, fmt.Sprintf("file_%03d.txt", i))
+		if err := os.WriteFile(fname, []byte("ok"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	args, _ := json.Marshal(map[string]any{"directory": ".", "query": ".txt"})
+	result, err := r.HandleCall(context.Background(), llm.ToolCall{
+		Name:      "glob_files",
+		Arguments: string(args),
+	})
+	if err != nil {
+		t.Fatalf("expected success, got error: %v", err)
+	}
+
+	if !strings.Contains(result, "Results truncated") {
+		t.Errorf("expected truncation warning in result, got: %s", result)
+	}
+	if !strings.Contains(result, "Showing first 250 of 300 matches") {
+		t.Errorf("expected 250 of 300 matches reported, got: %s", result)
+	}
+}
+
 func TestLocalGlobFiles_Errors(t *testing.T) {
 	r := NewRegistry()
 	registerLocalGlobFiles(r, "")

@@ -183,15 +183,17 @@ type acpReporter struct {
 	isLoadedSession bool
 	loadedMessages  []llm.Message
 	replayDone      chan struct{}
+	reviewErr       error
 
 	closeOnce sync.Once
 }
 
 var (
-	_ Reporter        = (*acpReporter)(nil)
-	_ acp.Agent       = (*acpReporter)(nil)
-	_ acp.AgentLoader = (*acpReporter)(nil)
-	_ SessionWaiter   = (*acpReporter)(nil)
+	_ Reporter         = (*acpReporter)(nil)
+	_ acp.Agent        = (*acpReporter)(nil)
+	_ acp.AgentLoader  = (*acpReporter)(nil)
+	_ SessionWaiter    = (*acpReporter)(nil)
+	_ PostReviewServer = (*acpReporter)(nil)
 )
 
 // ACPOption configures an acpReporter.
@@ -352,6 +354,25 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 	case <-r.conn.Done():
 		return nil
 	}
+}
+
+// SignalReviewFailed notifies ACP that the initial review phase failed,
+// advances the execution plan to mark review steps as failed, sends an error
+// message to the user, and unblocks any waiting session/prompt turns.
+func (r *acpReporter) SignalReviewFailed(err error) error {
+	r.mu.Lock()
+	r.reviewErr = err
+	r.mu.Unlock()
+
+	r.advancePlan(map[string]acp.PlanEntryStatus{
+		planStepContext:   acp.PlanEntryStatusCompleted,
+		planStepPreReview: acp.PlanEntryStatusCompleted,
+		planStepReview:    acp.PlanEntryStatusCompleted,
+	})
+
+	r.sendAgentMessage(fmt.Sprintf("❌ **Code review failed**: %v", err))
+	r.signalReviewReady()
+	return nil
 }
 
 func (r *acpReporter) sendUpdate(update acp.SessionUpdate) {
@@ -558,6 +579,13 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	case <-r.conn.Done():
 		return acp.PromptResponse{}, errors.New("ACP connection closed")
+	}
+
+	r.mu.Lock()
+	reviewErr := r.reviewErr
+	r.mu.Unlock()
+	if reviewErr != nil {
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 
 	r.mu.Lock()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 const (
@@ -24,6 +25,9 @@ const (
 	// MaxToolConcurrency is the maximum number of tools allowed to run
 	// in parallel in a single turn.
 	MaxToolConcurrency = 8
+	// MaxToolResultBytes is the hard upper bound for any individual tool result
+	// to prevent context window overflow on large outputs.
+	MaxToolResultBytes = 50000
 )
 
 // CalculateMaxIterations returns a sensible iteration cap based on the number
@@ -82,6 +86,7 @@ type Reporter interface {
 type PostReviewServer interface {
 	WaitForFirstMessage(ctx context.Context) (string, error)
 	ServePostReview(ctx context.Context, handler func(ctx context.Context, query string) error) error
+	SignalReviewFailed(err error) error
 }
 
 // SessionWaiter is an optional interface implemented by reporters (such as ACP)
@@ -463,6 +468,10 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 				result = fmt.Sprintf("error: %v", toolErr)
 			} else {
 				a.reporter.ReportToolStatus(tc, "completed", nil)
+			}
+
+			if len(result) > MaxToolResultBytes {
+				result = util.TruncateString(result, MaxToolResultBytes) + fmt.Sprintf("\n\n[Warning: Tool output truncated to %d bytes to protect context window; please narrow down your query]", MaxToolResultBytes)
 			}
 
 			toolMsg.ToolResults[i] = llm.ToolResult{
