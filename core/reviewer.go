@@ -37,6 +37,23 @@ type Reviewer struct {
 	PreReviewMetrics         *SessionMetrics
 	CodeReviewMetrics        *SessionMetrics
 	DiscussionMetrics        *SessionMetrics
+
+	verdictMu      sync.RWMutex
+	currentVerdict ReviewVerdict
+}
+
+// SetVerdict sets the current review verdict in a thread-safe manner.
+func (r *Reviewer) SetVerdict(v ReviewVerdict) {
+	r.verdictMu.Lock()
+	defer r.verdictMu.Unlock()
+	r.currentVerdict = v
+}
+
+// GetVerdict returns the current review verdict in a thread-safe manner.
+func (r *Reviewer) GetVerdict() ReviewVerdict {
+	r.verdictMu.RLock()
+	defer r.verdictMu.RUnlock()
+	return r.currentVerdict
 }
 
 func allowAskDeveloper(cfg *config.Config) bool {
@@ -148,7 +165,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
 
-	return &Reviewer{
+	rev := &Reviewer{
 		Agent:                    NewAgent(client, registry, WithReporter(reporter)),
 		Config:                   cfg,
 		RootDir:                  targetDir,
@@ -158,7 +175,12 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		ApprovalEvaluationPrompt: approvalEvaluationPrompt,
 		mcpManager:               mcpManager,
 		llmFactory:               factory.New,
-	}, nil
+	}
+	registry.SetVerdictChangeListener(func(ctx context.Context, verdict string, rationale string) error {
+		rev.SetVerdict(ReviewVerdict(verdict))
+		return nil
+	})
+	return rev, nil
 }
 
 // Close releases resources (like MCP server connections).
@@ -284,6 +306,7 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	if err != nil {
 		return "", err
 	}
+	r.SetVerdict(DetermineVerdict(reviewResult))
 	return reviewResult, nil
 }
 
@@ -291,7 +314,10 @@ const postReviewSystemInstruction = "You have completed the automated code revie
 	"You are now in an interactive post-review chat phase. " +
 	"Transition purely into a conversational assistant. Answer the developer's questions, " +
 	"defend your findings, or admit mistakes based on the user's input. " +
-	"Do NOT attempt to rewrite the code review or output a new structured code review payload."
+	"Do NOT attempt to rewrite the code review or output a new structured code review payload. " +
+	"If the developer's explanations, answers, or code modifications resolve previous blocking issues " +
+	"or introduce new blockers such that your overall review decision changes, you MUST call the " +
+	"`update_review_verdict` tool to formally update your verdict ('approved', 'rejected', or 'comment') with your rationale."
 
 type (
 	replStdinKey  struct{}

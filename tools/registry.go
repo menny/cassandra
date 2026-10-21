@@ -10,9 +10,13 @@ import (
 
 type ToolHandler func(ctx context.Context, tc llm.ToolCall) (string, error)
 
+// VerdictChangeListener is invoked whenever the review verdict is updated via update_review_verdict.
+type VerdictChangeListener func(ctx context.Context, verdict string, rationale string) error
+
 type Registry struct {
-	tools    []llm.ToolDef
-	handlers map[string]ToolHandler
+	tools           []llm.ToolDef
+	handlers        map[string]ToolHandler
+	verdictListener VerdictChangeListener
 }
 
 func NewRegistry() *Registry {
@@ -25,8 +29,21 @@ func (r *Registry) ToTools() []llm.ToolDef {
 	return r.tools
 }
 
+func (r *Registry) SetVerdictChangeListener(l VerdictChangeListener) {
+	r.verdictListener = l
+}
+
 func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
-	r.tools = append(r.tools, def)
+	if _, exists := r.handlers[def.Name]; exists {
+		for i, existing := range r.tools {
+			if existing.Name == def.Name {
+				r.tools[i] = def
+				break
+			}
+		}
+	} else {
+		r.tools = append(r.tools, def)
+	}
 	r.handlers[def.Name] = handler
 }
 
@@ -74,6 +91,7 @@ func RegisterLocalTools(r *Registry, root string, ignoredLockFiles []string, wis
 	registerLocalGrepFiles(r, root, ignoredLockFiles)
 	registerWishlistTool(r, wishlistDir)
 	registerEmitReviewerState(r)
+	registerUpdateReviewVerdict(r)
 	registerT3Tools(r)
 	if allowPRComment {
 		registerPRCommentTool(r, root, metaFile)

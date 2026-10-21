@@ -425,6 +425,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	verdict := core.DetermineVerdict(result)
+	reviewer.SetVerdict(verdict)
 	if tools.IsT3Session() {
 		emoji := tools.ReviewStateElse
 		switch verdict {
@@ -455,15 +456,21 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return fmt.Errorf("structured extraction failed: %w", err)
 		}
 
-		if structured != nil && tools.IsT3Session() {
+		if structured != nil {
 			action := strings.ToUpper(strings.TrimSpace(structured.Approval.Action))
+			verdict := core.VerdictElse
 			emoji := tools.ReviewStateElse
 			if action == "APPROVE" || structured.Approval.Approved {
 				emoji = tools.ReviewStateApproved
+				verdict = core.VerdictApproved
 			} else if action == "REQUEST_CHANGES" {
 				emoji = tools.ReviewStateRejected
+				verdict = core.VerdictRejected
 			}
-			_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
+			reviewer.SetVerdict(verdict)
+			if tools.IsT3Session() {
+				_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
+			}
 		}
 
 		structured.RawFreeText = result
