@@ -186,6 +186,34 @@ func TestThreadTitlePrefixUpdates(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("supports threads with id key instead of threadId", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		mockScript := filepath.Join(tmpDir, "mock_node_id.sh")
+		scriptContent := `#!/bin/sh
+for arg in "$@"; do
+    case "$prev" in
+        "acp-mcp-call") tool="$arg" ;;
+    esac
+    prev="$arg"
+done
+
+case "$tool" in
+    "t3_thread_list")
+        echo '{"currentThreadId":"t2","threads":[{"id":"t1","title":"Other"},{"id":"t2","title":"⏳ Review Thread 2"}]}'
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+`
+		require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+		title, err := GetCurrentThreadTitle(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "⏳ Review Thread 2", title)
+	})
+
 	t.Run("inside T3 session updates title", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		mockScript := filepath.Join(tmpDir, "mock_node.sh")

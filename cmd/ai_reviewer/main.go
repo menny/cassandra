@@ -460,12 +460,12 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			action := strings.ToUpper(strings.TrimSpace(structured.Approval.Action))
 			verdict := core.VerdictElse
 			emoji := tools.ReviewStateElse
-			if action == "APPROVE" || structured.Approval.Approved {
-				emoji = tools.ReviewStateApproved
-				verdict = core.VerdictApproved
-			} else if action == "REQUEST_CHANGES" {
+			if action == "REQUEST_CHANGES" {
 				emoji = tools.ReviewStateRejected
 				verdict = core.VerdictRejected
+			} else if action == "APPROVE" || (action == "" && structured.Approval.Approved) {
+				emoji = tools.ReviewStateApproved
+				verdict = core.VerdictApproved
 			}
 			reviewer.SetVerdict(verdict)
 			if tools.IsT3Session() {
