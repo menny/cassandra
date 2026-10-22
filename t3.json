@@ -1,0 +1,32 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "iconPath": "assets/icon.svg",
+  "defaultThreadEnvMode": "local",
+  "scripts": [
+    {
+      "name": "Format",
+      "command": "bazelisk run //:format",
+      "icon": "lint"
+    },
+    {
+      "name": "Test All",
+      "command": "bazelisk test //...",
+      "icon": "test"
+    },
+    {
+      "name": "Lint",
+      "command": "bazelisk run @rules_go//go -- run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5 run ./...",
+      "icon": "lint"
+    },
+    {
+      "name": "Build Cassandra",
+      "command": "bazelisk build //cmd/ai_reviewer:ai_reviewer",
+      "icon": "build"
+    },
+    {
+      "name": "Build GitHub Tool",
+      "command": "bazelisk build //cmd/github:github",
+      "icon": "build"
+    }
+  ]
+}
