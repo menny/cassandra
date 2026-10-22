@@ -124,6 +124,24 @@ Great job on this implementation!
 			expected: VerdictApproved,
 		},
 		{
+			name: "verdict bold prefix with formatting",
+			input: `Looks good to me.
+**Verdict**: Approved`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "verdict bold status with inner formatting",
+			input: `Review finished.
+Verdict: **Approved**`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "verdict bold rejected with formatting",
+			input: `Blocker found.
+**Verdict**: Rejected`,
+			expected: VerdictRejected,
+		},
+		{
 			name: "explicit rejected with red x",
 			input: `There is a security vulnerability in line 42.
 - ❌ Rejected`,

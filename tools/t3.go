@@ -302,18 +302,18 @@ func GetCurrentThreadTitle(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	type threadItem struct {
+		ThreadID string `json:"threadId"`
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+	}
+
 	var listResp struct {
-		CurrentThreadID string `json:"currentThreadId"`
-		Threads         []struct {
-			ThreadID string `json:"threadId"`
-			Title    string `json:"title"`
-		} `json:"threads"`
+		CurrentThreadID   string       `json:"currentThreadId"`
+		Threads           []threadItem `json:"threads"`
 		StructuredContent *struct {
-			CurrentThreadID string `json:"currentThreadId"`
-			Threads         []struct {
-				ThreadID string `json:"threadId"`
-				Title    string `json:"title"`
-			} `json:"threads"`
+			CurrentThreadID string       `json:"currentThreadId"`
+			Threads         []threadItem `json:"threads"`
 		} `json:"structuredContent,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(out), &listResp); err != nil {
@@ -330,7 +330,7 @@ func GetCurrentThreadTitle(ctx context.Context) (string, error) {
 	}
 
 	for _, th := range listResp.Threads {
-		if th.ThreadID == listResp.CurrentThreadID {
+		if (th.ThreadID != "" && th.ThreadID == listResp.CurrentThreadID) || (th.ID != "" && th.ID == listResp.CurrentThreadID) {
 			return th.Title, nil
 		}
 	}
