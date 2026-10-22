@@ -67,6 +67,33 @@ func TestUpdateReviewVerdict_ValidTransitions(t *testing.T) {
 			expectListenerR: "Critical security leak unpatched.",
 		},
 		{
+			name:            "not approved normalized to rejected",
+			verdictInput:    "not approved",
+			rationaleInput:  "Author did not address null pointer check.",
+			expectedVerdict: "rejected",
+			expectedEmoji:   ReviewStateRejected,
+			expectListenerV: "rejected",
+			expectListenerR: "Author did not address null pointer check.",
+		},
+		{
+			name:            "disapproved normalized to rejected",
+			verdictInput:    "disapproved",
+			rationaleInput:  "Breaking changes without migration.",
+			expectedVerdict: "rejected",
+			expectedEmoji:   ReviewStateRejected,
+			expectListenerV: "rejected",
+			expectListenerR: "Breaking changes without migration.",
+		},
+		{
+			name:            "request_changes normalized to rejected",
+			verdictInput:    "request_changes",
+			rationaleInput:  "Failing integration tests.",
+			expectedVerdict: "rejected",
+			expectedEmoji:   ReviewStateRejected,
+			expectListenerV: "rejected",
+			expectListenerR: "Failing integration tests.",
+		},
+		{
 			name:            "comment lowercase",
 			verdictInput:    "comment",
 			rationaleInput:  "Waiting for architectural clarification on caching.",
@@ -162,6 +189,27 @@ func TestUpdateReviewVerdict_ValidationErrors(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid verdict")
 		require.Contains(t, err.Error(), "must be one of 'approved', 'rejected', or 'comment'")
+	})
+
+	t.Run("conditional prose rejected as invalid verdict", func(t *testing.T) {
+		r := NewRegistry()
+		registerUpdateReviewVerdict(r)
+
+		argsBytes, err := json.Marshal(map[string]any{
+			"verdict":   "approved after fixing tests",
+			"rationale": "will approve later",
+		})
+		require.NoError(t, err)
+
+		tc := llm.ToolCall{
+			ID:        "call_err3",
+			Name:      "update_review_verdict",
+			Arguments: string(argsBytes),
+		}
+
+		_, err = r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid verdict")
 	})
 }
 

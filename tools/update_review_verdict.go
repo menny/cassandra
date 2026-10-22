@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/menny/cassandra/llm"
@@ -14,14 +15,43 @@ type updateReviewVerdictArgs struct {
 	Rationale string `json:"rationale"`
 }
 
+var (
+	verdictStripPrefixRegex = regexp.MustCompile(`^[⏳✅❎❌💬✳️✳\s*_\x60#~-]+`)
+	verdictStripSuffixRegex = regexp.MustCompile(`[.,:;!*_\x60#~]+$`)
+)
+
 func normalizeVerdict(raw string) (normalized string, emoji string, err error) {
-	clean := strings.ToLower(strings.TrimSpace(raw))
-	switch {
-	case strings.Contains(clean, "approv") || strings.Contains(raw, "✅"):
-		return "approved", ReviewStateApproved, nil
-	case strings.Contains(clean, "reject") || strings.Contains(raw, "❌") || strings.Contains(raw, "❎"):
+	trimmed := strings.TrimSpace(raw)
+	hasApproveMarker := strings.Contains(trimmed, "✅")
+	hasRejectMarker := strings.Contains(trimmed, "❌") || strings.Contains(trimmed, "❎")
+	hasCommentMarker := strings.Contains(trimmed, "💬") || strings.Contains(trimmed, "✳️") || strings.Contains(trimmed, "✳")
+
+	clean := strings.ToLower(trimmed)
+	clean = verdictStripPrefixRegex.ReplaceAllString(clean, "")
+	clean = verdictStripSuffixRegex.ReplaceAllString(clean, "")
+	clean = strings.TrimSpace(clean)
+
+	isNegatedApproval := strings.HasPrefix(clean, "not ") ||
+		strings.Contains(clean, " not ") ||
+		strings.HasPrefix(clean, "un") ||
+		strings.HasPrefix(clean, "dis") ||
+		strings.HasPrefix(clean, "non-") ||
+		strings.HasPrefix(clean, "no ") ||
+		strings.Contains(clean, "cannot") ||
+		strings.Contains(clean, "can't") ||
+		strings.Contains(clean, "wont") ||
+		strings.Contains(clean, "won't")
+
+	if isNegatedApproval && (strings.Contains(clean, "approv") || strings.Contains(clean, "accept") || strings.Contains(clean, "lgtm")) {
 		return "rejected", ReviewStateRejected, nil
-	case strings.Contains(clean, "comment") || strings.Contains(clean, "else") || strings.Contains(raw, "✳️") || strings.Contains(raw, "💬"):
+	}
+
+	switch {
+	case !isNegatedApproval && !hasRejectMarker && (clean == "approved" || clean == "approve" || clean == "accept" || clean == "accepted" || clean == "lgtm" || (clean == "" && hasApproveMarker)):
+		return "approved", ReviewStateApproved, nil
+	case clean == "rejected" || clean == "reject" || clean == "request_changes" || clean == "request changes" || clean == "changes_requested" || clean == "changes requested" || (clean == "" && hasRejectMarker):
+		return "rejected", ReviewStateRejected, nil
+	case clean == "comment" || clean == "comments" || clean == "else" || clean == "neutral" || clean == "discussion" || clean == "advisory" || (clean == "" && hasCommentMarker):
 		return "comment", ReviewStateElse, nil
 	default:
 		return "", "", fmt.Errorf("invalid verdict %q: must be one of 'approved', 'rejected', or 'comment'", raw)
@@ -61,22 +91,19 @@ func registerUpdateReviewVerdict(r *Registry) {
 			return "", err
 		}
 
-		var titleWarning string
-		if IsT3Session() {
-			if titleErr := UpdateThreadTitlePrefix(ctx, emoji); titleErr != nil {
-				titleWarning = fmt.Sprintf(" (warning: failed to update thread title prefix: %v)", titleErr)
-			}
-		}
-
 		if r.verdictListener != nil {
-			if listenerErr := r.verdictListener(ctx, normalized, args.Rationale); listenerErr != nil {
-				return "", fmt.Errorf("failed to notify verdict change listener: %w", listenerErr)
+			if err := r.verdictListener(ctx, normalized, args.Rationale); err != nil {
+				return "", fmt.Errorf("failed to notify verdict listener: %w", err)
 			}
 		}
 
 		if IsT3Session() {
-			return fmt.Sprintf("Review verdict successfully updated to %q (%s)%s. Rationale: %s", normalized, emoji, titleWarning, args.Rationale), nil
+			if err := UpdateThreadTitlePrefix(ctx, emoji); err != nil {
+				// Non-fatal: title update failure shouldn't abort the tool execution.
+				return fmt.Sprintf("Updated verdict to %q (%s), but failed to update thread title prefix: %v", normalized, emoji, err), nil
+			}
 		}
-		return fmt.Sprintf("Review verdict successfully updated to %q. Rationale: %s", normalized, args.Rationale), nil
+
+		return fmt.Sprintf("Successfully updated review verdict to %q (%s). Rationale: %s", normalized, emoji, args.Rationale), nil
 	})
 }

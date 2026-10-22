@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/menny/cassandra/llm"
@@ -260,26 +261,13 @@ const (
 	ReviewStateElse = "✳️"
 )
 
+var reviewStatusPrefixRegex = regexp.MustCompile(`^(?:(?:⏳|✅|❎|❌|💬|✳️|✳)\s*)+`)
+
 // CleanThreadTitle strips existing review status emoji prefixes (and following spaces)
 // from a thread title.
 func CleanThreadTitle(title string) string {
 	title = strings.TrimSpace(title)
-	prefixes := []string{
-		"⏳", "✅", "❎", "✳️", "✳", "❌", "💬",
-	}
-	changed := true
-	for changed {
-		changed = false
-		trimmed := strings.TrimSpace(title)
-		for _, p := range prefixes {
-			if strings.HasPrefix(trimmed, p) {
-				title = strings.TrimSpace(strings.TrimPrefix(trimmed, p))
-				changed = true
-				break
-			}
-		}
-	}
-	return title
+	return strings.TrimSpace(reviewStatusPrefixRegex.ReplaceAllString(title, ""))
 }
 
 // FormatThreadTitle formats a thread title with the specified review status emoji prefix.

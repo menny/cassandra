@@ -467,9 +467,11 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 				emoji = tools.ReviewStateApproved
 				verdict = core.VerdictApproved
 			}
-			reviewer.SetVerdict(verdict)
-			if tools.IsT3Session() {
-				_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
+			if verdict != reviewer.GetVerdict() {
+				reviewer.SetVerdict(verdict)
+				if tools.IsT3Session() {
+					_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
+				}
 			}
 		}
 
