@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -608,4 +610,57 @@ func TestReviewer_ExecutePostReviewTurn_RollbackHistoryOnError(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, initialLen, len(reviewer.Agent.history), "history should roll back to pre-turn length on error")
 	require.Equal(t, llm.RoleAssistant, reviewer.Agent.history[len(reviewer.Agent.history)-1].Role)
+}
+
+func TestReviewer_PostReview_UpdateReviewVerdict(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Render = "markdown"
+
+	registry := tools.NewRegistry()
+	tools.RegisterLocalTools(registry, t.TempDir(), nil, "", false, false, nil)
+
+	argsBytes, err := json.Marshal(map[string]any{
+		"verdict":   "approved",
+		"rationale": "Author explained why the edge case is already handled.",
+	})
+	require.NoError(t, err)
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{
+				ToolCalls: []llm.ToolCall{
+					{
+						ID:        "call_1",
+						Name:      "update_review_verdict",
+						Arguments: string(argsBytes),
+					},
+				},
+			},
+			{
+				Text: "I have updated the review verdict to Approved based on your explanation.",
+			},
+		},
+	}
+
+	spy := &spyReporter{}
+	reviewer := &Reviewer{
+		Agent:  NewAgent(lm, registry, WithReporter(spy)),
+		Config: cfg,
+	}
+	registry.SetVerdictChangeListener(func(ctx context.Context, verdict string, rationale string) error {
+		reviewer.SetVerdict(ReviewVerdict(verdict))
+		return nil
+	})
+
+	reviewer.SetVerdict(VerdictRejected)
+	require.Equal(t, VerdictRejected, reviewer.GetVerdict())
+
+	reviewer.Agent.history = []llm.Message{
+		{Role: llm.RoleSystem, Text: "system prompt"},
+		{Role: llm.RoleAssistant, Text: "automated review with ❌ Rejected"},
+	}
+
+	err = reviewer.executePostReviewTurn(context.Background(), "The edge case is handled upstream in caller.go:10", 5, nil)
+	require.NoError(t, err)
+	require.Equal(t, VerdictApproved, reviewer.GetVerdict())
 }
