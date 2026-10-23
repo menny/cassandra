@@ -282,7 +282,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			reviewer.SetSession(sessionStore, sessWaiter.SessionID())
 		}
 		if sessWaiter.IsLoadedSession() {
-			reviewer.Agent.SetHistory(sessWaiter.LoadedMessages())
+			reviewer.SetHistory(sessWaiter.LoadedMessages())
 			if err := reviewer.RunInteractivePostReview(sessionCtx); err != nil {
 				if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
 					return nil
@@ -292,7 +292,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			return nil
 		}
 	} else {
-		reviewer.SetSession(sessionStore, uuid.NewString())
+		sid := uuid.NewString()
+		reviewer.SetSession(sessionStore, sid)
+		stderr.Printf("Session ID: %s\n", sid)
 	}
 
 	var diffOutput string
@@ -391,6 +393,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if server, ok := reporter.(core.PostReviewServer); ok && acpMode {
 			_ = server.SignalReviewFailed(err)
 			if postErr := reviewer.RunInteractivePostReview(sessionCtx); postErr != nil {
+				if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
+					return nil
+				}
 				return postErr
 			}
 			return nil

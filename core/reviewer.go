@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -172,6 +173,13 @@ func (r *Reviewer) Close() error {
 func (r *Reviewer) SetSession(store SessionStore, sessionID string) {
 	if r.Agent != nil {
 		r.Agent.SetSession(store, sessionID)
+	}
+}
+
+// SetHistory sets the conversation history on the Reviewer's Agent.
+func (r *Reviewer) SetHistory(history []llm.Message) {
+	if r.Agent != nil {
+		r.Agent.SetHistory(history)
 	}
 }
 
@@ -406,14 +414,9 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 	r.Agent.ResetMetrics()
 
 	// Append system instruction indicating conversational post-review phase if not already present
-	hasPostReviewSys := false
-	for _, msg := range r.Agent.history {
-		if msg.Role == llm.RoleSystem && msg.Text == postReviewSystemInstruction {
-			hasPostReviewSys = true
-			break
-		}
-	}
-	if !hasPostReviewSys {
+	if !slices.ContainsFunc(r.Agent.history, func(msg llm.Message) bool {
+		return msg.Role == llm.RoleSystem && msg.Text == postReviewSystemInstruction
+	}) {
 		postMsg := llm.Message{
 			Role: llm.RoleSystem,
 			Text: postReviewSystemInstruction,

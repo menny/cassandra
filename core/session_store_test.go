@@ -156,6 +156,7 @@ func TestConcreteSessionStore_LoadErrors(t *testing.T) {
 	t.Run("session not found", func(t *testing.T) {
 		_, err := store.LoadSession(ctx, "nonexistent")
 		require.Error(t, err)
+		require.ErrorIs(t, err, ErrSessionNotFound)
 		require.Contains(t, err.Error(), "not found")
 	})
 
@@ -166,6 +167,7 @@ func TestConcreteSessionStore_LoadErrors(t *testing.T) {
 
 		_, err := store.LoadSession(ctx, "empty_sess")
 		require.Error(t, err)
+		require.ErrorIs(t, err, ErrSessionEmpty)
 		require.Contains(t, err.Error(), "is empty")
 	})
 

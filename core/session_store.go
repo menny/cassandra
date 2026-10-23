@@ -23,6 +23,13 @@ const (
 	maxLineBufferSize = 10 * 1024 * 1024 // 10 MB per JSON line
 )
 
+var (
+	// ErrSessionNotFound is returned when the session directory or messages file does not exist.
+	ErrSessionNotFound = errors.New("session not found")
+	// ErrSessionEmpty is returned when the session messages file contains no valid messages.
+	ErrSessionEmpty = errors.New("session is empty")
+)
+
 // SessionStore manages persisting and loading conversation sessions.
 type SessionStore interface {
 	// AppendMessages appends messages to the session's messages.jsonl.
@@ -49,17 +56,23 @@ func NewSessionStore(configFolder string) SessionStore {
 	return NewConcreteSessionStore(expanded)
 }
 
-// ConcreteSessionStore persists session messages to <baseDir>/sessions/<sessionID>/messages.jsonl.
+// ConcreteSessionStore persists session conversation history as JSONL under configFolder/sessions/<session-id>/messages.jsonl.
 type ConcreteSessionStore struct {
-	mu      sync.Mutex
 	baseDir string
+	mu      sync.Mutex
 }
 
-// NewConcreteSessionStore creates a ConcreteSessionStore persisting to <baseDir>/sessions/<sessionID>/messages.jsonl.
+// NewConcreteSessionStore creates a ConcreteSessionStore rooted at baseDir.
 func NewConcreteSessionStore(baseDir string) *ConcreteSessionStore {
-	return &ConcreteSessionStore{
-		baseDir: filepath.Clean(baseDir),
-	}
+	return &ConcreteSessionStore{baseDir: baseDir}
+}
+
+func (s *ConcreteSessionStore) sessionDir(sessionID string) string {
+	return filepath.Join(s.baseDir, "sessions", sessionID)
+}
+
+func (s *ConcreteSessionStore) messagesFilePath(sessionID string) string {
+	return filepath.Join(s.sessionDir(sessionID), messagesFileName)
 }
 
 func (s *ConcreteSessionStore) validateSessionID(sessionID string) error {
@@ -76,21 +89,13 @@ func (s *ConcreteSessionStore) validateSessionID(sessionID string) error {
 	return nil
 }
 
-func (s *ConcreteSessionStore) sessionDir(sessionID string) string {
-	return filepath.Join(s.baseDir, "sessions", strings.TrimSpace(sessionID))
-}
-
-func (s *ConcreteSessionStore) messagesFilePath(sessionID string) string {
-	return filepath.Join(s.sessionDir(sessionID), messagesFileName)
-}
-
 func (s *ConcreteSessionStore) AppendMessages(ctx context.Context, sessionID string, msgs ...llm.Message) error {
 	sessionID = strings.TrimSpace(sessionID)
-	if len(msgs) == 0 {
-		return nil
-	}
 	if err := s.validateSessionID(sessionID); err != nil {
 		return err
+	}
+	if len(msgs) == 0 {
+		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -101,40 +106,28 @@ func (s *ConcreteSessionStore) AppendMessages(ctx context.Context, sessionID str
 
 	dir := s.sessionDir(sessionID)
 	if err := os.MkdirAll(dir, sessionDirPerm); err != nil {
-		return fmt.Errorf("creating session directory %s: %w", dir, err)
-	}
-	// Explicitly ensure directory permissions match sessionDirPerm even if umask modified it
-	if err := os.Chmod(dir, sessionDirPerm); err != nil {
-		return fmt.Errorf("chmod session directory %s: %w", dir, err)
+		return fmt.Errorf("failed to create session directory %s: %w", dir, err)
 	}
 
 	filePath := s.messagesFilePath(sessionID)
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, sessionFilePerm)
 	if err != nil {
-		return fmt.Errorf("opening session file %s: %w", filePath, err)
+		return fmt.Errorf("failed to open session file %s: %w", filePath, err)
 	}
 	defer f.Close()
 
-	// Explicitly ensure file permissions match sessionFilePerm even if umask modified it
-	if err := f.Chmod(sessionFilePerm); err != nil {
-		return fmt.Errorf("chmod session file %s: %w", filePath, err)
-	}
-
 	var buf bytes.Buffer
-	for i, msg := range msgs {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		data, err := json.Marshal(msg)
+	for _, m := range msgs {
+		data, err := json.Marshal(m)
 		if err != nil {
-			return fmt.Errorf("marshaling message %d for session %s: %w", i, sessionID, err)
+			return fmt.Errorf("failed to marshal message: %w", err)
 		}
 		buf.Write(data)
 		buf.WriteByte('\n')
 	}
 
 	if _, err := f.Write(buf.Bytes()); err != nil {
-		return fmt.Errorf("writing messages to %s: %w", filePath, err)
+		return fmt.Errorf("failed to write messages to %s: %w", filePath, err)
 	}
 	return nil
 }
@@ -155,7 +148,7 @@ func (s *ConcreteSessionStore) LoadSession(ctx context.Context, sessionID string
 	f, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("session %q not found: %w", sessionID, err)
+			return nil, fmt.Errorf("session %q: %w: %w", sessionID, ErrSessionNotFound, err)
 		}
 		return nil, fmt.Errorf("failed to open session file: %w", err)
 	}
@@ -186,7 +179,7 @@ func (s *ConcreteSessionStore) LoadSession(ctx context.Context, sessionID string
 		return nil, fmt.Errorf("reading session %q: %w", sessionID, err)
 	}
 	if len(messages) == 0 {
-		return nil, fmt.Errorf("session %q is empty", sessionID)
+		return nil, fmt.Errorf("session %q: %w", sessionID, ErrSessionEmpty)
 	}
 	return messages, nil
 }
@@ -203,10 +196,9 @@ func (s *ConcreteSessionStore) SessionExists(sessionID string) bool {
 	return err == nil && !fi.IsDir() && fi.Size() > 0
 }
 
-// NoopSessionStore is a SessionStore that does not persist anything.
+// NoopSessionStore is a no-op SessionStore used when configFolder is unset.
 type NoopSessionStore struct{}
 
-// NewNoopSessionStore returns a NoopSessionStore that does not persist anything.
 func NewNoopSessionStore() *NoopSessionStore {
 	return &NoopSessionStore{}
 }

@@ -679,7 +679,7 @@ func (r *acpReporter) LoadSession(ctx context.Context, req acp.LoadSessionReques
 
 	messages, err := store.LoadSession(ctx, string(req.SessionId))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "is empty") {
+		if errors.Is(err, ErrSessionNotFound) || errors.Is(err, ErrSessionEmpty) || errors.Is(err, os.ErrNotExist) {
 			// If the session does not exist on disk or has no messages yet (e.g. an initial turn that
 			// was interrupted, or a brand new thread where the client requests session/load),
 			// treat it as an uninitialized session rather than failing the turn.
