@@ -48,6 +48,7 @@ type Config struct {
 	Render                       string         `mapstructure:"render"`
 	InteractivePostReview        bool           `mapstructure:"interactive-post-review"`
 	WaitForMessage               bool           `mapstructure:"-"`
+	CassandraConfigFolder        string         `mapstructure:"cassandra-config-folder"`
 }
 
 // NewDefaultConfig returns a Config with default values populated.
@@ -61,6 +62,7 @@ func NewDefaultConfig() *Config {
 		Render:                "raw",
 		AllowAskDeveloper:     false,
 		InteractivePostReview: false,
+		CassandraConfigFolder: "~/.cassandra",
 	}
 }
 
@@ -78,6 +80,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("allow-ask-developer", false)
 	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
+	v.SetDefault("cassandra-config-folder", "~/.cassandra")
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)
@@ -95,6 +98,10 @@ func Load(configFile string) (*Config, error) {
 		if !errors.As(err, &notFound) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
+	}
+
+	if v.IsSet("cassandraConfigFolder") {
+		v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 	}
 
 	cfg := &Config{}

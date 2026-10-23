@@ -12,6 +12,7 @@ import (
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/util"
 )
 
 const (
@@ -24,6 +25,9 @@ const (
 	// MaxToolConcurrency is the maximum number of tools allowed to run
 	// in parallel in a single turn.
 	MaxToolConcurrency = 8
+	// MaxToolResultBytes is the hard upper bound for any individual tool result
+	// to prevent context window overflow on large outputs.
+	MaxToolResultBytes = 50000
 )
 
 // CalculateMaxIterations returns a sensible iteration cap based on the number
@@ -82,6 +86,16 @@ type Reporter interface {
 type PostReviewServer interface {
 	WaitForFirstMessage(ctx context.Context) (string, error)
 	ServePostReview(ctx context.Context, handler func(ctx context.Context, query string) error) error
+	SignalReviewFailed(err error) error
+}
+
+// SessionWaiter is an optional interface implemented by reporters (such as ACP)
+// that wait for a session handshake (new or load) before proceeding.
+type SessionWaiter interface {
+	WaitForSession(ctx context.Context) error
+	IsLoadedSession() bool
+	LoadedMessages() []llm.Message
+	SessionID() string
 }
 
 // AgentOption configures an Agent.
@@ -105,17 +119,27 @@ func WithReporter(r Reporter) AgentOption {
 	}
 }
 
+// WithSessionStore configures the Agent to persist conversation messages to the given SessionStore.
+func WithSessionStore(store SessionStore, sessionID string) AgentOption {
+	return func(a *Agent) {
+		a.sessionStore = store
+		a.sessionID = sessionID
+	}
+}
+
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
-	llm        llm.Model
-	registry   ToolDispatcher
-	reporter   Reporter
-	totalUsage llm.Usage
-	toolCalls  map[string]int
-	iterations int
-	stderr     io.Writer
-	history    []llm.Message
-	Stage      string
+	llm          llm.Model
+	registry     ToolDispatcher
+	reporter     Reporter
+	totalUsage   llm.Usage
+	toolCalls    map[string]int
+	iterations   int
+	stderr       io.Writer
+	history      []llm.Message
+	Stage        string
+	sessionStore SessionStore
+	sessionID    string
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -133,6 +157,25 @@ func NewAgent(model llm.Model, registry ToolDispatcher, opts ...AgentOption) *Ag
 		o(a)
 	}
 	return a
+}
+
+// SetSession sets or updates the SessionStore and session ID on the Agent.
+func (a *Agent) SetSession(store SessionStore, sessionID string) {
+	a.sessionStore = store
+	a.sessionID = sessionID
+}
+
+// History returns a copy of the Agent's conversation history.
+func (a *Agent) History() []llm.Message {
+	res := make([]llm.Message, len(a.history))
+	copy(res, a.history)
+	return res
+}
+
+// SetHistory replaces the Agent's conversation history.
+func (a *Agent) SetHistory(msgs []llm.Message) {
+	a.history = make([]llm.Message, len(msgs))
+	copy(a.history, msgs)
 }
 
 // Reporter returns the Agent's reporter.
@@ -239,10 +282,15 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 				Text: resp.Text,
 			})
 			a.history = messages
+			if a.Stage != "Pre-Review Summary" && a.sessionStore != nil && a.sessionID != "" {
+				if storeErr := a.sessionStore.AppendMessages(ctx, a.sessionID, messages...); storeErr != nil {
+					a.reporter.ReportWarning("Failed to persist review messages", storeErr)
+				}
+			}
 			return resp.Text, nil
 		}
 
-		// ── Handle tool calls ──────────────────────────────────────────────────
+		// ── Handle tool calls ────────────────────────────────────────────────────────
 
 		// Append the assistant's tool-call turn to history.
 		messages = append(messages, llm.Message{
@@ -422,6 +470,10 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 				a.reporter.ReportToolStatus(tc, "completed", nil)
 			}
 
+			if len(result) > MaxToolResultBytes {
+				result = util.TruncateString(result, MaxToolResultBytes) + fmt.Sprintf("\n\n[Warning: Tool output truncated to %d bytes to protect context window; please narrow down your query]", MaxToolResultBytes)
+			}
+
 			toolMsg.ToolResults[i] = llm.ToolResult{
 				ToolCallID: tc.ID,
 				Name:       tc.Name,
@@ -435,7 +487,7 @@ func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) 
 }
 
 func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, maxIterations, maxTokens int) (string, error) {
-	// ── Cap reached ─────────────────────────────────────────────────────────
+	// ── Cap reached ─────────────────────────────────────────────────────────────
 	capMsg := fmt.Sprintf(
 		"[SYSTEM] The maximum number of tool-call iterations (%d) has been reached. "+
 			"You MUST now produce your final code review unconditionally, based on everything "+
@@ -469,6 +521,11 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 		Text: resp.Text,
 	})
 	a.history = messages
+	if a.Stage != "Pre-Review Summary" && a.sessionStore != nil && a.sessionID != "" {
+		if storeErr := a.sessionStore.AppendMessages(ctx, a.sessionID, messages...); storeErr != nil {
+			a.reporter.ReportWarning("Failed to persist review messages", storeErr)
+		}
+	}
 	return resp.Text, nil
 }
 
@@ -487,6 +544,10 @@ func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIteration
 	defer func() {
 		if err != nil {
 			a.history = a.history[:origHistoryLen]
+		} else if a.sessionStore != nil && a.sessionID != "" && len(a.history) > origHistoryLen {
+			if storeErr := a.sessionStore.AppendMessages(ctx, a.sessionID, a.history[origHistoryLen:]...); storeErr != nil {
+				a.reporter.ReportWarning("Failed to persist chat messages", storeErr)
+			}
 		}
 	}()
 
