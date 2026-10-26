@@ -108,6 +108,7 @@ func (s *ConcreteSessionStore) AppendMessages(ctx context.Context, sessionID str
 	if err := os.MkdirAll(dir, sessionDirPerm); err != nil {
 		return fmt.Errorf("failed to create session directory %s: %w", dir, err)
 	}
+	_ = os.Chmod(dir, sessionDirPerm)
 
 	filePath := s.messagesFilePath(sessionID)
 	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, sessionFilePerm)
@@ -115,6 +116,7 @@ func (s *ConcreteSessionStore) AppendMessages(ctx context.Context, sessionID str
 		return fmt.Errorf("failed to open session file %s: %w", filePath, err)
 	}
 	defer f.Close()
+	_ = f.Chmod(sessionFilePerm)
 
 	var buf bytes.Buffer
 	for _, m := range msgs {

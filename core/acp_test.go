@@ -1366,6 +1366,78 @@ func TestACPReporter_SignalReviewFailed(t *testing.T) {
 
 	require.NoError(t, promptErr)
 	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+
+	// Verify follow-up interactive post-review works after review failure (reviewErr does not stick)
+	chatHandled := make(chan string, 1)
+	go func() {
+		_ = server.ServePostReview(sessionCtx, func(_ context.Context, query string) error {
+			chatHandled <- query
+			return nil
+		})
+	}()
+
+	followUpResp, followUpErr := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Why did it fail?"),
+		},
+	})
+	require.NoError(t, followUpErr)
+	require.Equal(t, acp.StopReasonEndTurn, followUpResp.StopReason)
+	select {
+	case query := <-chatHandled:
+		require.Equal(t, "Why did it fail?", query)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for follow-up Prompt to be handled in post-review")
+	}
+}
+
+func TestACPReporter_SignalReviewFailed_PostReviewChat(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+	defer cleanup()
+
+	_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+		ProtocolVersion: acp.ProtocolVersionNumber,
+	})
+	require.NoError(t, err)
+
+	newResp, err := clientConn.NewSession(sessionCtx, acp.NewSessionRequest{
+		Cwd:        "/workspace",
+		McpServers: []acp.McpServer{},
+	})
+	require.NoError(t, err)
+
+	server, ok := reporter.(PostReviewServer)
+	require.True(t, ok)
+
+	testErr := errors.New("simulated context overflow")
+	require.NoError(t, server.SignalReviewFailed(testErr))
+
+	chatHandled := make(chan string, 1)
+	go func() {
+		_ = server.ServePostReview(sessionCtx, func(_ context.Context, query string) error {
+			chatHandled <- query
+			return nil
+		})
+	}()
+
+	promptResp, promptErr := clientConn.Prompt(sessionCtx, acp.PromptRequest{
+		SessionId: newResp.SessionId,
+		Prompt: []acp.ContentBlock{
+			acp.TextBlock("Can we try with fewer files?"),
+		},
+	})
+	require.NoError(t, promptErr)
+	require.Equal(t, acp.StopReasonEndTurn, promptResp.StopReason)
+	select {
+	case query := <-chatHandled:
+		require.Equal(t, "Can we try with fewer files?", query)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for Prompt to be handled in post-review after SignalReviewFailed")
+	}
 }
 
 func TestACPReporter_LoadSession_Errors(t *testing.T) {

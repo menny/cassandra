@@ -338,6 +338,9 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 	r.mu.Lock()
 	r.promptHandler = handler
 	r.inPostReview = true
+	if r.activeCancel == nil {
+		r.reviewErr = nil
+	}
 	r.mu.Unlock()
 
 	r.advancePlan(map[string]acp.PlanEntryStatus{
@@ -572,19 +575,32 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	cleanInput := strings.TrimSpace(query)
 	isFirstMessage := r.signalFirstMessage(cleanInput)
 
-	// Wait for the initial review to complete and the post-review handler to be ready.
+	reviewAlreadyReady := false
 	select {
 	case <-r.reviewReady:
-	case <-turnCtx.Done():
-		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
-	case <-r.conn.Done():
-		return acp.PromptResponse{}, errors.New("ACP connection closed")
+		reviewAlreadyReady = true
+	default:
+	}
+
+	// Wait for the initial review to complete and the post-review handler to be ready.
+	if !reviewAlreadyReady {
+		select {
+		case <-r.reviewReady:
+		case <-turnCtx.Done():
+			return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+		case <-r.conn.Done():
+			return acp.PromptResponse{}, errors.New("ACP connection closed")
+		}
 	}
 
 	r.mu.Lock()
 	reviewErr := r.reviewErr
+	r.reviewErr = nil
 	r.mu.Unlock()
-	if reviewErr != nil {
+
+	// Only complete the turn that was actively awaiting the initial review if it failed.
+	// Subsequent turns or turns arriving after ServePostReview is registered must proceed to the handler.
+	if !reviewAlreadyReady && reviewErr != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 

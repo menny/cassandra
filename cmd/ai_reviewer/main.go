@@ -396,7 +396,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 				if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
 					return nil
 				}
-				return postErr
+				return fmt.Errorf("interactive post-review failed: %w", postErr)
 			}
 			return nil
 		}
