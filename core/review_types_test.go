@@ -6,89 +6,198 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFileReview_ParseLines(t *testing.T) {
+func TestDetermineVerdict(t *testing.T) {
 	tests := []struct {
-		name      string
-		lines     string
-		wantStart int
-		wantEnd   int
-		wantErr   bool
+		name     string
+		input    string
+		expected ReviewVerdict
 	}{
 		{
-			name:      "empty string",
-			lines:     "",
-			wantStart: 0,
-			wantEnd:   0,
-			wantErr:   false,
+			name:     "empty review",
+			input:    "",
+			expected: VerdictElse,
 		},
 		{
-			name:      "single line",
-			lines:     "42",
-			wantStart: 42,
-			wantEnd:   42,
-			wantErr:   false,
+			name: "explicit approved with emoji",
+			input: `Here is the review.
+Great job on this implementation!
+- ✅ Approved`,
+			expected: VerdictApproved,
 		},
 		{
-			name:      "single line with whitespace",
-			lines:     " 42 ",
-			wantStart: 42,
-			wantEnd:   42,
-			wantErr:   false,
+			name: "approved without bullet point",
+			input: `Looks great!
+✅ Approved`,
+			expected: VerdictApproved,
 		},
 		{
-			name:      "valid range",
-			lines:     "10-20",
-			wantStart: 10,
-			wantEnd:   20,
-			wantErr:   false,
+			name: "bold approved",
+			input: `Looks good to me.
+**Approved**`,
+			expected: VerdictApproved,
 		},
 		{
-			name:      "valid range with whitespace",
-			lines:     " 10 - 20 ",
-			wantStart: 10,
-			wantEnd:   20,
-			wantErr:   false,
+			name: "verdict bold prefix with formatting",
+			input: `Looks good to me.
+**Verdict**: Approved`,
+			expected: VerdictApproved,
 		},
 		{
-			name:      "inverted range",
-			lines:     "20-10",
-			wantStart: 10,
-			wantEnd:   20,
-			wantErr:   false,
+			name: "verdict bold status with inner formatting",
+			input: `Review finished.
+Verdict: **Approved**`,
+			expected: VerdictApproved,
 		},
 		{
-			name:    "invalid single line",
-			lines:   "abc",
-			wantErr: true,
+			name: "verdict bold rejected with formatting",
+			input: `Blocker found.
+**Verdict**: Rejected`,
+			expected: VerdictRejected,
 		},
 		{
-			name:    "invalid range start",
-			lines:   "abc-20",
-			wantErr: true,
+			name: "explicit rejected with red x",
+			input: `There is a security vulnerability in line 42.
+- ❌ Rejected`,
+			expected: VerdictRejected,
 		},
 		{
-			name:    "invalid range end",
-			lines:   "10-abc",
-			wantErr: true,
+			name: "explicit rejected with green box x",
+			input: `Critical bug must be resolved.
+- ❎ Rejected`,
+			expected: VerdictRejected,
 		},
 		{
-			name:    "too many hyphens",
-			lines:   "10-20-30",
-			wantErr: true,
+			name: "bold rejected",
+			input: `Major design issues found.
+**Rejected**`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "explicit comment with emoji",
+			input: `Non-blocking observations only.
+- 💬 Comment`,
+			expected: VerdictElse,
+		},
+		{
+			name: "bold comment",
+			input: `Just some thoughts.
+**Comment**`,
+			expected: VerdictElse,
+		},
+		{
+			name: "historical mention earlier does not override closing rejection",
+			input: `This feature was previously approved in PR 42.
+However, recent changes break the build.
+- ❌ Rejected`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "historical rejection earlier does not override closing approval",
+			input: `I previously rejected this approach, but after your changes it works well.
+- ✅ Approved`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "explicit negation with emoji should not approve",
+			input: `Critical blockers remain unaddressed.
+- ✅ NOT approved`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "disapproved with bold header",
+			input: `Architecture breaks API contract.
+**Verdict**: Disapproved`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "unapproved with bullet",
+			input: `Please address the comments first.
+- Unapproved`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "request changes verdict",
+			input: `Tests are failing.
+**Verdict**: Request Changes`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "changes requested verdict",
+			input: `Missing regression tests.
+Status: Changes Requested`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "descriptive prose mentioning approved after fixes does not false-approve",
+			input: `Great work on the refactor.
+Approved after these 5 critical bugs are fixed.`,
+			expected: VerdictElse,
+		},
+		{
+			name:     "descriptive prose saying I have not approved does not false-approve",
+			input:    `I have not approved this PR yet because CI is broken.`,
+			expected: VerdictElse,
+		},
+		{
+			name: "canonical reviewer prompt approved with em-dash and no blockers",
+			input: `Code looks clean and adheres to standards.
+- ✅ Approved — no blocking items (as defined by the guidelines' grading system)`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "approved with em-dash and no blockers short note",
+			input: `Implementation looks solid.
+- ✅ Approved — no blockers`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "verdict colon approved with parenthesis rationale",
+			input: `LGTM.
+Verdict: Approved (no issues)`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "canonical reviewer prompt rejected with em-dash",
+			input: `Critical issues found.
+- ❌ Rejected — one or more blocking items must be resolved first`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "canonical reviewer prompt comment with em-dash",
+			input: `Only minor questions.
+- 💬 Comment — you are uncertain or have only non-blocking suggestions (see <approval_evaluation_guidelines>)`,
+			expected: VerdictElse,
+		},
+		{
+			name: "full concluding verdict section with header and em-dash",
+			input: `### Concluding Verdict
+Every review MUST end with a final verdict section.
+- ✅ Approved — no blockers found.`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "approved with colon delimiter without leading space",
+			input: `Changes look good.
+- ✅ Approved: great job`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "rejected with colon delimiter without leading space",
+			input: `Changes cannot be merged.
+- ❌ Rejected: blocking security issues found`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "verdict label with approved and trailing colon delimiter",
+			input: `All checks passed.
+Verdict: Approved: ready to deploy`,
+			expected: VerdictApproved,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fr := &FileReview{Lines: tt.lines}
-			gotStart, gotEnd, err := fr.ParseLines()
-			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.wantStart, gotStart)
-				assert.Equal(t, tt.wantEnd, gotEnd)
-			}
+			assert.Equal(t, tt.expected, DetermineVerdict(tt.input))
 		})
 	}
 }

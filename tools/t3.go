@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/menny/cassandra/llm"
@@ -45,6 +46,44 @@ func callT3McpTool(ctx context.Context, tool string, args any) (string, error) {
 		return "", fmt.Errorf("calling T3 MCP tool %q failed: %w (output: %s)", tool, err, string(out))
 	}
 	result := string(out)
+
+	// Unpack standard MCP tool call envelope if present.
+	var env struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		IsError           bool            `json:"isError"`
+	}
+	if err := json.Unmarshal(out, &env); err == nil && (len(env.Content) > 0 || len(env.StructuredContent) > 0 || env.IsError) {
+		if env.IsError {
+			var errMsgs []string
+			for _, c := range env.Content {
+				if c.Text != "" {
+					errMsgs = append(errMsgs, c.Text)
+				}
+			}
+			if len(errMsgs) > 0 {
+				return "", fmt.Errorf("calling T3 MCP tool %q failed: %s", tool, strings.Join(errMsgs, "; "))
+			}
+			return "", fmt.Errorf("calling T3 MCP tool %q failed", tool)
+		}
+		if len(env.StructuredContent) > 0 && string(env.StructuredContent) != "null" {
+			result = string(env.StructuredContent)
+		} else if len(env.Content) > 0 {
+			var texts []string
+			for _, c := range env.Content {
+				if c.Text != "" {
+					texts = append(texts, c.Text)
+				}
+			}
+			if len(texts) > 0 {
+				result = strings.Join(texts, "\n")
+			}
+		}
+	}
+
 	if len(result) > maxT3ToolOutputBytes {
 		result = result[:maxT3ToolOutputBytes] + "\n... (truncated)"
 	}
@@ -209,4 +248,137 @@ func registerT3Tools(r *Registry) {
 		}
 		return callT3McpTool(ctx, "t3_thread_launch", args)
 	})
+}
+
+const (
+	// ReviewStatePending indicates that the review or pre-review is in progress.
+	ReviewStatePending = "⏳"
+	// ReviewStateApproved indicates that the review concluded with an approval.
+	ReviewStateApproved = "✅"
+	// ReviewStateRejected indicates that the review concluded with a rejection.
+	ReviewStateRejected = "❎"
+	// ReviewStateElse indicates non-blocking feedback, uncertain outcome, or general completion.
+	ReviewStateElse = "✳️"
+)
+
+var reviewStatusPrefixRegex = regexp.MustCompile(`^(?:(?:⏳|✅|❎|❌|💬|✳️|✳)\s*)+`)
+
+// CleanThreadTitle strips existing review status emoji prefixes (and following spaces)
+// from a thread title.
+func CleanThreadTitle(title string) string {
+	title = strings.TrimSpace(title)
+	return strings.TrimSpace(reviewStatusPrefixRegex.ReplaceAllString(title, ""))
+}
+
+// FormatThreadTitle formats a thread title with the specified review status emoji prefix.
+func FormatThreadTitle(emoji, baseTitle string) string {
+	clean := CleanThreadTitle(baseTitle)
+	if clean == "" {
+		clean = "Review"
+	}
+	return fmt.Sprintf("%s %s", emoji, clean)
+}
+
+// GetCurrentThreadTitle returns the title of the current T3 thread if running in a T3 session.
+func GetCurrentThreadTitle(ctx context.Context) (string, error) {
+	if !IsT3Session() {
+		return "", fmt.Errorf("not in a T3 Code session")
+	}
+
+	out, err := callT3McpTool(ctx, "t3_thread_list", map[string]any{"limit": 50})
+	if err != nil {
+		return "", err
+	}
+
+	type threadItem struct {
+		ThreadID string `json:"threadId"`
+		ID       string `json:"id"`
+		Title    string `json:"title"`
+	}
+
+	var listResp struct {
+		CurrentThreadID   string       `json:"currentThreadId"`
+		Threads           []threadItem `json:"threads"`
+		StructuredContent *struct {
+			CurrentThreadID string       `json:"currentThreadId"`
+			Threads         []threadItem `json:"threads"`
+		} `json:"structuredContent,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(out), &listResp); err != nil {
+		return "", fmt.Errorf("failed to parse t3_thread_list response: %w", err)
+	}
+
+	if listResp.StructuredContent != nil {
+		if listResp.CurrentThreadID == "" {
+			listResp.CurrentThreadID = listResp.StructuredContent.CurrentThreadID
+		}
+		if len(listResp.Threads) == 0 {
+			listResp.Threads = listResp.StructuredContent.Threads
+		}
+	}
+
+	for _, th := range listResp.Threads {
+		if (th.ThreadID != "" && th.ThreadID == listResp.CurrentThreadID) || (th.ID != "" && th.ID == listResp.CurrentThreadID) {
+			return th.Title, nil
+		}
+	}
+
+	if listResp.CurrentThreadID != "" {
+		readOut, err := callT3McpTool(ctx, "t3_thread_read", map[string]any{
+			"threadId": listResp.CurrentThreadID,
+			"limit":    1,
+		})
+		if err == nil {
+			var readResp struct {
+				Thread struct {
+					Title string `json:"title"`
+				} `json:"thread"`
+				StructuredContent *struct {
+					Thread struct {
+						Title string `json:"title"`
+					} `json:"thread"`
+				} `json:"structuredContent,omitempty"`
+			}
+			if json.Unmarshal([]byte(readOut), &readResp) == nil {
+				if readResp.Thread.Title != "" {
+					return readResp.Thread.Title, nil
+				}
+				if readResp.StructuredContent != nil && readResp.StructuredContent.Thread.Title != "" {
+					return readResp.StructuredContent.Thread.Title, nil
+				}
+			}
+		}
+	}
+
+	if len(listResp.Threads) == 1 {
+		return listResp.Threads[0].Title, nil
+	}
+
+	return "", fmt.Errorf("current thread %q not found in thread list", listResp.CurrentThreadID)
+}
+
+// UpdateThreadTitlePrefix updates the current T3 thread title with the specified review status emoji prefix.
+// If not in a T3 session, it is a no-op and returns nil.
+func UpdateThreadTitlePrefix(ctx context.Context, emoji string) error {
+	if !IsT3Session() {
+		return nil
+	}
+
+	currentTitle, err := GetCurrentThreadTitle(ctx)
+	if err != nil {
+		// If getting the current title fails, fall back to "Review" as the base title
+		// so that the title update still happens instead of failing silently.
+		currentTitle = "Review"
+	}
+
+	newTitle := FormatThreadTitle(emoji, currentTitle)
+	if newTitle == currentTitle {
+		return nil
+	}
+
+	_, err = callT3McpTool(ctx, "t3_thread_update", map[string]any{
+		"action": "rename",
+		"title":  newTitle,
+	})
+	return err
 }

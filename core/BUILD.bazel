@@ -52,6 +52,7 @@ go_test(
     deps = [
         "//core/config",
         "//llm",
+        "//tools",
         "@com_github_coder_acp_go_sdk//:acp-go-sdk",
         "@com_github_google_uuid//:uuid",
         "@com_github_stretchr_testify//assert",
