@@ -138,6 +138,43 @@ Approved after these 5 critical bugs are fixed.`,
 			input:    `I have not approved this PR yet because CI is broken.`,
 			expected: VerdictElse,
 		},
+		{
+			name: "canonical reviewer prompt approved with em-dash and no blockers",
+			input: `Code looks clean and adheres to standards.
+- ✅ Approved — no blocking items (as defined by the guidelines' grading system)`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "approved with em-dash and no blockers short note",
+			input: `Implementation looks solid.
+- ✅ Approved — no blockers`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "verdict colon approved with parenthesis rationale",
+			input: `LGTM.
+Verdict: Approved (no issues)`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "canonical reviewer prompt rejected with em-dash",
+			input: `Critical issues found.
+- ❌ Rejected — one or more blocking items must be resolved first`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "canonical reviewer prompt comment with em-dash",
+			input: `Only minor questions.
+- 💬 Comment — you are uncertain or have only non-blocking suggestions (see <approval_evaluation_guidelines>)`,
+			expected: VerdictElse,
+		},
+		{
+			name: "full concluding verdict section with header and em-dash",
+			input: `### Concluding Verdict
+Every review MUST end with a final verdict section.
+- ✅ Approved — no blockers found.`,
+			expected: VerdictApproved,
+		},
 	}
 
 	for _, tt := range tests {

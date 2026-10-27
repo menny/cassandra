@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -198,16 +199,45 @@ func DetermineVerdict(reviewText string) ReviewVerdict {
 	return VerdictComment
 }
 
+var (
+	listPrefixRegex   = regexp.MustCompile(`^(\s*[-*+>]|\s*#+)\s*`)
+	verdictLabelRegex = regexp.MustCompile(`(?i)^\*{0,2}(?:overall\s+|final\s+|review\s+)?(?:verdict|status)\*{0,2}\s*:\s*`)
+	verdictDelims     = []string{"—", "–", "--", " - ", " : ", " | ", " ("}
+)
+
 func matchVerdictLine(line string) (ReviewVerdict, bool) {
-	lineLower := strings.ToLower(line)
+	rawLine := strings.TrimSpace(line)
+	if rawLine == "" {
+		return VerdictComment, false
+	}
 
-	hasApproveEmoji := strings.Contains(line, "✅")
-	hasRejectEmoji := strings.Contains(line, "❌") || strings.Contains(line, "❎")
-	hasCommentEmoji := strings.Contains(line, "💬") || strings.Contains(line, "✳️") || strings.Contains(line, "✳")
+	hasApproveEmoji := strings.Contains(rawLine, "✅")
+	hasRejectEmoji := strings.Contains(rawLine, "❌") || strings.Contains(rawLine, "❎")
+	hasCommentEmoji := strings.Contains(rawLine, "💬") || strings.Contains(rawLine, "✳️") || strings.Contains(rawLine, "✳")
 
-	// Tokenize line into alphanumeric words
+	// Strip list item / blockquote / markdown header markers
+	cleaned := strings.TrimSpace(listPrefixRegex.ReplaceAllString(rawLine, ""))
+	// Strip leading verdict label like "**Verdict**:" or "Status:"
+	cleaned = strings.TrimSpace(verdictLabelRegex.ReplaceAllString(cleaned, ""))
+
+	// Delimiter isolation: split on separators that introduce rationale/explanation
+	earliestIdx := -1
+	for _, d := range verdictDelims {
+		if idx := strings.Index(cleaned, d); idx != -1 {
+			if earliestIdx == -1 || idx < earliestIdx {
+				earliestIdx = idx
+			}
+		}
+	}
+
+	verdictPart := cleaned
+	if earliestIdx != -1 {
+		verdictPart = strings.TrimSpace(cleaned[:earliestIdx])
+	}
+
+	// Tokenize verdictPart into alphanumeric words
 	var sb strings.Builder
-	for _, r := range lineLower {
+	for _, r := range strings.ToLower(verdictPart) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
 			sb.WriteRune(r)
 		} else {
@@ -215,6 +245,8 @@ func matchVerdictLine(line string) (ReviewVerdict, bool) {
 		}
 	}
 	words := strings.Fields(sb.String())
+
+	// Fallback to emoji-only match when words are empty
 	if len(words) == 0 {
 		if hasApproveEmoji && !hasRejectEmoji {
 			return VerdictApproved, true
@@ -228,65 +260,62 @@ func matchVerdictLine(line string) (ReviewVerdict, bool) {
 		return VerdictComment, false
 	}
 
-	// Check for negation words
+	// Descriptive sentences or paragraphs that exceed verdict token length are not concluding verdicts.
+	if len(words) > 3 {
+		return VerdictComment, false
+	}
+
+	// Check for negation words within the isolated verdict tokens
 	hasNegation := false
 	for _, w := range words {
 		if w == "not" || w == "unapproved" || w == "disapproved" || w == "never" ||
-			w == "cannot" || w == "cant" || w == "wont" || w == "no" || w == "denied" {
+			w == "cannot" || w == "cant" || w == "wont" || w == "denied" {
 			hasNegation = true
 			break
 		}
 	}
-
-	// Strip common verdict line prefixes: "verdict", "status", "review verdict", "final verdict", "overall verdict"
-	rem := words
-	if len(rem) >= 2 && (rem[0] == "overall" || rem[0] == "final" || rem[0] == "review") && rem[1] == "verdict" {
-		rem = rem[2:]
-	} else if len(rem) >= 1 && (rem[0] == "verdict" || rem[0] == "status") {
-		rem = rem[1:]
+	if !hasNegation && len(words) >= 2 && words[0] == "no" && (words[1] == "approval" || words[1] == "approve") {
+		hasNegation = true
 	}
 
 	// Rejection checks (take precedence over approval if negations or reject markers exist)
-	if hasRejectEmoji && !hasApproveEmoji && len(rem) <= 2 {
+	if hasRejectEmoji && !hasApproveEmoji && len(words) <= 2 {
 		return VerdictRejected, true
 	}
-	if hasNegation && (containsWord(rem, "approved") || containsWord(rem, "approv") || containsWord(rem, "accept") || containsWord(rem, "lgtm")) {
-		if len(rem) <= 3 {
-			return VerdictRejected, true
-		}
-		return VerdictComment, false
+	if hasNegation && (containsWord(words, "approved") || containsWord(words, "approv") || containsWord(words, "accept") || containsWord(words, "lgtm")) {
+		return VerdictRejected, true
 	}
-	if matchesWords(rem, []string{"rejected"}) ||
-		matchesWords(rem, []string{"reject"}) ||
-		matchesWords(rem, []string{"request", "changes"}) ||
-		matchesWords(rem, []string{"changes", "requested"}) ||
-		matchesWords(rem, []string{"not", "approved"}) ||
-		matchesWords(rem, []string{"disapproved"}) ||
-		matchesWords(rem, []string{"unapproved"}) {
+	if matchesWords(words, []string{"rejected"}) ||
+		matchesWords(words, []string{"reject"}) ||
+		matchesWords(words, []string{"request", "changes"}) ||
+		matchesWords(words, []string{"changes", "requested"}) ||
+		matchesWords(words, []string{"not", "approved"}) ||
+		matchesWords(words, []string{"disapproved"}) ||
+		matchesWords(words, []string{"unapproved"}) {
 		return VerdictRejected, true
 	}
 
 	// Approval checks: strictly requiring positive approval tokens with no negations
 	if !hasNegation && !hasRejectEmoji {
-		if matchesWords(rem, []string{"approved"}) ||
-			matchesWords(rem, []string{"approve"}) ||
-			matchesWords(rem, []string{"accepted"}) ||
-			matchesWords(rem, []string{"accept"}) ||
-			matchesWords(rem, []string{"lgtm"}) ||
-			(hasApproveEmoji && (len(rem) == 0 || (len(rem) == 1 && (rem[0] == "approved" || rem[0] == "approve" || rem[0] == "lgtm")))) {
+		if matchesWords(words, []string{"approved"}) ||
+			matchesWords(words, []string{"approve"}) ||
+			matchesWords(words, []string{"accepted"}) ||
+			matchesWords(words, []string{"accept"}) ||
+			matchesWords(words, []string{"lgtm"}) ||
+			(hasApproveEmoji && (len(words) == 0 || (len(words) == 1 && (words[0] == "approved" || words[0] == "approve" || words[0] == "lgtm")))) {
 			return VerdictApproved, true
 		}
 	}
 
 	// Comment checks
-	if hasCommentEmoji && len(rem) <= 2 {
+	if hasCommentEmoji && len(words) <= 2 {
 		return VerdictComment, true
 	}
-	if matchesWords(rem, []string{"comment"}) ||
-		matchesWords(rem, []string{"comments"}) ||
-		matchesWords(rem, []string{"neutral"}) ||
-		matchesWords(rem, []string{"advisory"}) ||
-		matchesWords(rem, []string{"discussion"}) {
+	if matchesWords(words, []string{"comment"}) ||
+		matchesWords(words, []string{"comments"}) ||
+		matchesWords(words, []string{"neutral"}) ||
+		matchesWords(words, []string{"advisory"}) ||
+		matchesWords(words, []string{"discussion"}) {
 		return VerdictComment, true
 	}
 

@@ -424,8 +424,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return err
 	}
 
-	verdict := core.DetermineVerdict(result)
-	reviewer.SetVerdict(verdict)
+	verdict := reviewer.GetVerdict()
 	if tools.IsT3Session() {
 		emoji := tools.ReviewStateElse
 		switch verdict {
@@ -460,12 +459,16 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			action := strings.ToUpper(strings.TrimSpace(structured.Approval.Action))
 			verdict := core.VerdictElse
 			emoji := tools.ReviewStateElse
-			if action == "REQUEST_CHANGES" {
+			switch {
+			case action == "REQUEST_CHANGES":
 				emoji = tools.ReviewStateRejected
 				verdict = core.VerdictRejected
-			} else if action == "APPROVE" || (action == "" && structured.Approval.Approved) {
+			case action == "APPROVE" || (action == "" && structured.Approval.Approved):
 				emoji = tools.ReviewStateApproved
 				verdict = core.VerdictApproved
+			case action == "COMMENT":
+				emoji = tools.ReviewStateElse
+				verdict = core.VerdictElse
 			}
 			if verdict != reviewer.GetVerdict() {
 				reviewer.SetVerdict(verdict)
