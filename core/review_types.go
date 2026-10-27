@@ -202,7 +202,7 @@ func DetermineVerdict(reviewText string) ReviewVerdict {
 var (
 	listPrefixRegex   = regexp.MustCompile(`^(\s*[-*+>]|\s*#+)\s*`)
 	verdictLabelRegex = regexp.MustCompile(`(?i)^\*{0,2}(?:overall\s+|final\s+|review\s+)?(?:verdict|status)\*{0,2}\s*:\s*`)
-	verdictDelims     = []string{"—", "–", "--", " - ", " : ", " | ", " ("}
+	verdictDelims     = []string{"—", "–", "--", " - ", ": ", " : ", " | ", " ("}
 )
 
 func matchVerdictLine(line string) (ReviewVerdict, bool) {

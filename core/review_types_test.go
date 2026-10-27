@@ -175,6 +175,24 @@ Every review MUST end with a final verdict section.
 - ✅ Approved — no blockers found.`,
 			expected: VerdictApproved,
 		},
+		{
+			name: "approved with colon delimiter without leading space",
+			input: `Changes look good.
+- ✅ Approved: great job`,
+			expected: VerdictApproved,
+		},
+		{
+			name: "rejected with colon delimiter without leading space",
+			input: `Changes cannot be merged.
+- ❌ Rejected: blocking security issues found`,
+			expected: VerdictRejected,
+		},
+		{
+			name: "verdict label with approved and trailing colon delimiter",
+			input: `All checks passed.
+Verdict: Approved: ready to deploy`,
+			expected: VerdictApproved,
+		},
 	}
 
 	for _, tt := range tests {
