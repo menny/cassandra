@@ -14,6 +14,7 @@ import (
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/stretchr/testify/require"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -335,6 +336,22 @@ func TestAgent_ExecuteToolCalls(t *testing.T) {
 		}
 		if msg.ToolResults[0].Content != "error: boom" {
 			t.Errorf("expected error string in content, got: %q", msg.ToolResults[0].Content)
+		}
+	})
+
+	t.Run("truncates oversized tool result", func(t *testing.T) {
+		d := newMockDispatcher()
+		huge := strings.Repeat("x", MaxToolResultBytes+1000)
+		d.handlers["huge"] = func(ctx context.Context, _ llm.ToolCall) (string, error) { return huge, nil }
+
+		agent := NewAgent(nil, d, WithStderr(io.Discard))
+		msg := agent.executeToolCalls(context.Background(), []llm.ToolCall{{ID: "id1", Name: "huge"}})
+
+		if len(msg.ToolResults) != 1 {
+			t.Fatal("expected 1 result")
+		}
+		if !strings.Contains(msg.ToolResults[0].Content, "Tool output truncated") {
+			t.Errorf("expected truncation warning in content, got: %s", msg.ToolResults[0].Content)
 		}
 	})
 
@@ -1171,7 +1188,7 @@ func TestTuiReporter(t *testing.T) {
 	}
 
 	// Verify that the final review content is written to stdout
-	if !strings.Contains(stdout.String(), "LGTM!") {
+	if !strings.Contains(stripANSI(stdout.String()), "LGTM!") {
 		t.Errorf("expected stdout to contain final review content, got %q", stdout.String())
 	}
 
@@ -1368,4 +1385,104 @@ func TestAgent_StageReporting(t *testing.T) {
 	if len(spy.stageFinalReviews) != 1 || spy.stageFinalReviews[0] != "Pre-Review Summary" {
 		t.Errorf("expected stage final review to be Pre-Review Summary, got %v", spy.stageFinalReviews)
 	}
+}
+
+func TestAgent_SessionStore(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("History and SetHistory", func(t *testing.T) {
+		agent := newTestAgent(&mockLLM{}, newMockDispatcher())
+		require.Empty(t, agent.History())
+
+		msgs := []llm.Message{
+			{Role: llm.RoleUser, Text: "hello"},
+			{Role: llm.RoleAssistant, Text: "world"},
+		}
+		agent.SetHistory(msgs)
+		require.Equal(t, msgs, agent.History())
+
+		// Verify copy isolation
+		h := agent.History()
+		h[0].Text = "mutated"
+		require.Equal(t, "hello", agent.History()[0].Text)
+	})
+
+	t.Run("RunReview persists when Stage is not Pre-Review Summary", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		lm := &mockLLM{responses: []*llm.Response{
+			textResponse("Final review text"),
+		}}
+		agent := newTestAgent(lm, newMockDispatcher())
+		agent.SetSession(store, "sess_review_1")
+
+		_, err := agent.RunReview(ctx, "stable sys", "", "user req", 5, 1024)
+		require.NoError(t, err)
+
+		saved, err := store.LoadSession(ctx, "sess_review_1")
+		require.NoError(t, err)
+		require.NotEmpty(t, saved)
+		require.Equal(t, llm.RoleSystem, saved[0].Role)
+		require.Equal(t, "stable sys", saved[0].Text)
+		require.Equal(t, llm.RoleUser, saved[1].Role)
+		require.Equal(t, "user req", saved[1].Text)
+		require.Equal(t, llm.RoleAssistant, saved[2].Role)
+		require.Equal(t, "Final review text", saved[2].Text)
+	})
+
+	t.Run("RunReview does NOT persist when Stage is Pre-Review Summary", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		lm := &mockLLM{responses: []*llm.Response{
+			textResponse("Pre-review summary"),
+		}}
+		agent := newTestAgent(lm, newMockDispatcher())
+		agent.Stage = "Pre-Review Summary"
+		agent.SetSession(store, "sess_prereview_1")
+
+		_, err := agent.RunReview(ctx, "pre sys", "", "pre req", 5, 1024)
+		require.NoError(t, err)
+
+		require.False(t, store.SessionExists("sess_prereview_1"))
+	})
+
+	t.Run("RunChatFlight persists on success and rolls back on failure", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		store := NewSessionStore(tmpDir)
+
+		lm := &mockLLM{
+			responses: []*llm.Response{
+				textResponse("reply 1"),
+				textResponse(""),
+			},
+			errs: []error{
+				nil,
+				errors.New("provider down"),
+			},
+		}
+		agent := newTestAgent(lm, newMockDispatcher())
+		agent.SetSession(store, "sess_chat_1")
+
+		// First turn succeeds
+		reply, err := agent.RunChatFlight(ctx, "query 1", 5, 1024)
+		require.NoError(t, err)
+		require.Equal(t, "reply 1", reply)
+
+		saved, err := store.LoadSession(ctx, "sess_chat_1")
+		require.NoError(t, err)
+		require.Len(t, saved, 2)
+		require.Equal(t, "query 1", saved[0].Text)
+		require.Equal(t, "reply 1", saved[1].Text)
+
+		// Second turn fails
+		_, err = agent.RunChatFlight(ctx, "query 2", 5, 1024)
+		require.Error(t, err)
+
+		// Verify session store still only has 2 messages
+		savedAfterErr, err := store.LoadSession(ctx, "sess_chat_1")
+		require.NoError(t, err)
+		require.Len(t, savedAfterErr, 2)
+	})
 }

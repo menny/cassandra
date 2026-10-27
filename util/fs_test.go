@@ -250,3 +250,35 @@ func TestValidateAndRel(t *testing.T) {
 		}
 	})
 }
+
+func TestExpandHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("skipping test; cannot determine home dir:", err)
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"empty", "", ""},
+		{"tilde only", "~", home},
+		{"tilde slash", "~/", home},
+		{"tilde subfolder", "~/.cassandra", filepath.Join(home, ".cassandra")},
+		{"tilde subfolder with leading and trailing whitespace", "  ~/.cassandra  ", filepath.Join(home, ".cassandra")},
+		{"tilde only with whitespace", "   ~   ", home},
+		{"tilde nested", "~/a/b/c", filepath.Join(home, "a/b/c")},
+		{"regular path", "/usr/local/bin", "/usr/local/bin"},
+		{"relative path", "foo/bar", "foo/bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExpandHome(tt.input)
+			if got != tt.expected {
+				t.Errorf("ExpandHome(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}

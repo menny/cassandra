@@ -118,6 +118,11 @@ func registerLocalGlobFiles(r *Registry, root string) {
 	}
 
 	RegisterToolWithArgs(r, def, func(ctx context.Context, args args) (string, error) {
+		const (
+			maxGlobMatches     = 250
+			maxGlobReturnBytes = 40000
+		)
+
 		dir := args.Directory
 		if dir == "" {
 			dir = "."
@@ -140,6 +145,8 @@ func registerLocalGlobFiles(r *Registry, root string) {
 		}
 
 		var matches []string
+		totalMatches := 0
+		currentBytes := 0
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -150,7 +157,11 @@ func registerLocalGlobFiles(r *Registry, root string) {
 			if !d.IsDir() {
 				relPath := util.SafeRel(resolvedRoot, path)
 				if strings.Contains(filepath.Base(relPath), args.Query) || strings.Contains(relPath, args.Query) {
-					matches = append(matches, relPath)
+					totalMatches++
+					if len(matches) < maxGlobMatches && currentBytes+len(relPath)+1 <= maxGlobReturnBytes {
+						matches = append(matches, relPath)
+						currentBytes += len(relPath) + 1
+					}
 				}
 			}
 			return nil
@@ -162,7 +173,12 @@ func registerLocalGlobFiles(r *Registry, root string) {
 		if len(matches) == 0 {
 			return "No matching files found.", nil
 		}
-		return strings.Join(matches, "\n"), nil
+
+		output := strings.Join(matches, "\n")
+		if totalMatches > len(matches) {
+			output += fmt.Sprintf("\n\n[Warning: Results truncated. Showing first %d of %d matches. Please narrow down your search using a more specific directory or query.]", len(matches), totalMatches)
+		}
+		return output, nil
 	})
 }
 

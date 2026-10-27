@@ -243,6 +243,28 @@ func (b *TailBuffer) Lines() [][]byte {
 	return res
 }
 
+// ExpandHome expands a leading "~" or "~/" in path to the current user's home directory.
+// If path is empty, does not start with "~", or the user's home directory cannot be
+// determined, it returns path unchanged.
+func ExpandHome(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return path
+	}
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
 // WriteFileWithDirs creates any missing parent directories before writing the
 // file with 0o644 permissions. It uses 0o755 for any created directories.
 func WriteFileWithDirs(path string, data []byte) error {

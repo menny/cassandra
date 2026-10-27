@@ -31,6 +31,7 @@ use_repo(
     "com_github_charmbracelet_lipgloss",
     "com_github_coder_acp_go_sdk",
     "com_github_google_go_github_v69",
+    "com_github_google_uuid",
     "com_github_migueleliasweb_go_github_mock",
     "com_github_modelcontextprotocol_go_sdk",
     "com_github_spf13_viper",

@@ -72,6 +72,81 @@ max-tokens = 100
 
 		require.Equal(t, "config-model", v.GetString("model"))
 	})
+
+	t.Run("cassandra-config-folder flag", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		var folder1, folder2 string
+		fs.StringVar(&folder1, "cassandra-config-folder", "~/.cassandra", "")
+		fs.StringVar(&folder2, "cassandraConfigFolder", "~/.cassandra", "")
+
+		v := viper.New()
+		v.SetDefault("cassandra-config-folder", "~/.cassandra")
+
+		require.NoError(t, fs.Parse([]string{"--cassandra-config-folder", "/my/custom/path"}))
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
+			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
+		}
+
+		require.Equal(t, "/my/custom/path", v.GetString("cassandra-config-folder"))
+	})
+
+	t.Run("cassandraConfigFolder alias flag", func(t *testing.T) {
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		var folder1, folder2 string
+		fs.StringVar(&folder1, "cassandra-config-folder", "~/.cassandra", "")
+		fs.StringVar(&folder2, "cassandraConfigFolder", "~/.cassandra", "")
+
+		v := viper.New()
+		v.SetDefault("cassandra-config-folder", "~/.cassandra")
+
+		require.NoError(t, fs.Parse([]string{"--cassandraConfigFolder", "/camel/custom/path"}))
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
+			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
+		}
+
+		require.Equal(t, "/camel/custom/path", v.GetString("cassandra-config-folder"))
+	})
+
+	t.Run("CLI flag overrides config file cassandraConfigFolder", func(t *testing.T) {
+		confTmpDir := t.TempDir()
+		confPath := filepath.Join(confTmpDir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(confPath, []byte(`cassandraConfigFolder = "/from/config"`), 0o644))
+
+		fs := flag.NewFlagSet("test", flag.ContinueOnError)
+		var folder string
+		fs.StringVar(&folder, "cassandra-config-folder", "~/.cassandra", "")
+
+		v := viper.New()
+		v.SetDefault("cassandra-config-folder", "~/.cassandra")
+
+		require.NoError(t, fs.Parse([]string{"--cassandra-config-folder", "/from/cli"}))
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Changed {
+				require.NoError(t, v.BindPFlag(f.Name, f))
+			}
+		})
+
+		v.SetConfigFile(confPath)
+		require.NoError(t, v.ReadInConfig())
+
+		if !fs.Changed("cassandra-config-folder") && v.IsSet("cassandraConfigFolder") {
+			v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
+		}
+
+		require.Equal(t, "/from/cli", v.GetString("cassandra-config-folder"))
+	})
 }
 
 func TestFormatMetadata(t *testing.T) {
