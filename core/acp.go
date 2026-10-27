@@ -150,6 +150,9 @@ type acpReporter struct {
 	reviewReady chan struct{}
 	reviewOnce  sync.Once
 
+	postReviewReady chan struct{}
+	postReviewOnce  sync.Once
+
 	firstMessageReady   chan struct{}
 	firstMessageOnce    sync.Once
 	firstMessageText    string
@@ -233,6 +236,7 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 		currentMode:       acpModeReview,
 		sessionReady:      make(chan struct{}),
 		reviewReady:       make(chan struct{}),
+		postReviewReady:   make(chan struct{}),
 		firstMessageReady: make(chan struct{}),
 		pendingCallsByID:  make(map[string]acp.ToolCallId),
 		pendingByName:     make(map[string][]acp.ToolCallId),
@@ -263,6 +267,7 @@ func (r *acpReporter) Close() error {
 		r.cancelActiveTurn()
 		r.signalSessionReady()
 		r.signalReviewReady()
+		r.signalPostReviewReady()
 		r.signalFirstMessage("")
 		if closer, ok := r.in.(io.Closer); ok && r.in != os.Stdin {
 			_ = closer.Close()
@@ -283,6 +288,12 @@ func (r *acpReporter) signalSessionReady() {
 func (r *acpReporter) signalReviewReady() {
 	r.reviewOnce.Do(func() {
 		close(r.reviewReady)
+	})
+}
+
+func (r *acpReporter) signalPostReviewReady() {
+	r.postReviewOnce.Do(func() {
+		close(r.postReviewReady)
 	})
 }
 
@@ -338,9 +349,7 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 	r.mu.Lock()
 	r.promptHandler = handler
 	r.inPostReview = true
-	if r.activeCancel == nil {
-		r.reviewErr = nil
-	}
+	r.reviewErr = nil
 	r.mu.Unlock()
 
 	r.advancePlan(map[string]acp.PlanEntryStatus{
@@ -350,6 +359,7 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 	})
 
 	r.signalReviewReady()
+	r.signalPostReviewReady()
 
 	select {
 	case <-ctx.Done():
@@ -595,7 +605,6 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 
 	r.mu.Lock()
 	reviewErr := r.reviewErr
-	r.reviewErr = nil
 	r.mu.Unlock()
 
 	// Only complete the turn that was actively awaiting the initial review if it failed.
@@ -620,7 +629,6 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 
 	r.mu.Lock()
 	waitForMessage := r.waitForMessageArmed
-	handler := r.promptHandler
 	r.mu.Unlock()
 
 	// When the initial review waited for a message (via --wait-for-message or
@@ -634,6 +642,19 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	if cleanInput == "" {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
+
+	// Wait for the post-review chat handler to be registered.
+	select {
+	case <-r.postReviewReady:
+	case <-turnCtx.Done():
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	case <-r.conn.Done():
+		return acp.PromptResponse{}, errors.New("ACP connection closed")
+	}
+
+	r.mu.Lock()
+	handler := r.promptHandler
+	r.mu.Unlock()
 
 	if handler == nil {
 		return acp.PromptResponse{}, errors.New("post-review chat handler is not available")

@@ -14,14 +14,15 @@ func TestTUIReporter_PostReviewMethods(t *testing.T) {
 	t.Run("ReportPostReviewUserQuery formats user query box", func(t *testing.T) {
 		stderr.Reset()
 		r.ReportPostReviewUserQuery("How does auth work?")
-		require.Contains(t, stderr.String(), "User:")
-		require.Contains(t, stderr.String(), "How does auth work?")
+		output := stripANSI(stderr.String())
+		require.Contains(t, output, "User:")
+		require.Contains(t, output, "How does auth work?")
 	})
 
 	t.Run("ReportPostReviewReply renders reply markdown", func(t *testing.T) {
 		stderr.Reset()
 		r.ReportPostReviewReply("Auth uses JWT.")
-		require.Contains(t, stderr.String(), "Auth uses JWT.")
+		require.Contains(t, stripANSI(stderr.String()), "Auth uses JWT.")
 	})
 }
 
@@ -59,7 +60,7 @@ func TestTUIModel_RenderContent_PreReviewSummary(t *testing.T) {
 			},
 		}
 
-		content := m.renderContent()
+		content := stripANSI(m.renderContent())
 		require.Contains(t, content, "📋 Pre-Review Summary:")
 		require.Contains(t, content, "This PR adds JWT auth.")
 		require.Contains(t, content, "🔍 [Pre-Review Summary - Iteration 1]")
@@ -74,7 +75,7 @@ func TestTUIModel_RenderContent_PreReviewSummary(t *testing.T) {
 			},
 		}
 
-		content := m.renderContent()
+		content := stripANSI(m.renderContent())
 		require.Contains(t, content, "📋 Pre-Review Summary:")
 		require.Contains(t, content, "Standalone pre-review summary text.")
 	})

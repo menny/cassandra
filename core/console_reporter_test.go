@@ -145,7 +145,7 @@ func TestConsoleReporter_Markdown(t *testing.T) {
 		require.NoError(t, err)
 		// glamour rendered output
 		require.Contains(t, stdout.String(), "Header")
-		require.Contains(t, stdout.String(), "list item")
+		require.Contains(t, stripANSI(stdout.String()), "list item")
 	})
 
 	t.Run("ReportReviewHeader prints styled header", func(t *testing.T) {
@@ -193,19 +193,19 @@ func TestConsoleReporter_Markdown(t *testing.T) {
 		stderr.Reset()
 		err := r.ReportStageReview("Pre-Review Summary", "Summary content")
 		require.NoError(t, err)
-		require.Contains(t, stderr.String(), "Pre-Review Summary")
+		require.Contains(t, stripANSI(stderr.String()), "Pre-Review Summary")
 	})
 
 	t.Run("ReportPostReviewUserQuery prints styled user query box", func(t *testing.T) {
 		stderr.Reset()
 		r.ReportPostReviewUserQuery("How does auth work?")
 		require.Contains(t, stderr.String(), "User:")
-		require.Contains(t, stderr.String(), "How does auth work?")
+		require.Contains(t, stripANSI(stderr.String()), "How does auth work?")
 	})
 
 	t.Run("ReportPostReviewReply prints styled reply markdown", func(t *testing.T) {
 		stderr.Reset()
 		r.ReportPostReviewReply("Auth uses JWT tokens.")
-		require.Contains(t, stderr.String(), "Auth uses JWT tokens.")
+		require.Contains(t, stripANSI(stderr.String()), "Auth uses JWT tokens.")
 	})
 }

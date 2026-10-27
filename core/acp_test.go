@@ -1355,6 +1355,7 @@ func TestACPReporter_SignalReviewFailed(t *testing.T) {
 		})
 	}()
 
+	time.Sleep(25 * time.Millisecond)
 	testErr := errors.New("simulated context overflow")
 	require.NoError(t, server.SignalReviewFailed(testErr))
 

@@ -1188,7 +1188,7 @@ func TestTuiReporter(t *testing.T) {
 	}
 
 	// Verify that the final review content is written to stdout
-	if !strings.Contains(stdout.String(), "LGTM!") {
+	if !strings.Contains(stripANSI(stdout.String()), "LGTM!") {
 		t.Errorf("expected stdout to contain final review content, got %q", stdout.String())
 	}
 
