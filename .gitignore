@@ -39,3 +39,6 @@ conductor/tracks/**/plan.md
 codecov
 codecov.SHA256SUM
 codecov.SHA256SUM.sig
+
+# secret Hermetiq credentials helper
+tools/hermetiq-credential-helper.*
