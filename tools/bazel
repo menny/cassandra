@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${BAZEL_REAL:-}" ]]; then
+  echo >&2 "Error: BAZEL_REAL is unset. tools/bazel is a wrapper intended to be executed via bazelisk."
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPER_SCRIPT="${SCRIPT_DIR}/hermetiq-credential-helper.sh"
 

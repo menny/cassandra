@@ -22,7 +22,7 @@ build --remote_instance_name=75d5b5ec-949e-40ad-b7c8-5f368a7992a9
 build --remote_cache=grpcs://lb.bb.cloud-grpc.hermetiq.io
 build --remote_upload_local_results=false
 build --remote_cache_async
-build --remote_download_toplevel
+build --remote_download_outputs=toplevel
 
 # Hermetiq remote exec (Linux hosts/workers)
 build:linux --remote_executor=grpcs://lb.bb.cloud-grpc.hermetiq.io

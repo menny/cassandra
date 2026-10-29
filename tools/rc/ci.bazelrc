@@ -1,2 +1,2 @@
 # CI specific flags
-build --remote_download_minimal
+build --remote_download_outputs=minimal
