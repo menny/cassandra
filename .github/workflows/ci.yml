@@ -13,6 +13,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Setup Hermetiq
+        uses: ./.github/actions/setup-hermetiq
+        env:
+          HERMETIQ_CRED_HELPER: ${{ secrets.HERMETIQ_CRED_HELPER }}
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:

@@ -1,1 +1,4 @@
 common --enable_bzlmod
+
+# Concurrency
+build --jobs=HOST_CPUS*2

@@ -13,6 +13,10 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Setup Hermetiq
+        uses: ./.github/actions/setup-hermetiq
+        env:
+          HERMETIQ_CRED_HELPER: ${{ secrets.HERMETIQ_CRED_HELPER }}
       - name: Setup Bazel
         uses: bazel-contrib/setup-bazel@0.18.0
         with:
@@ -39,6 +43,7 @@ jobs:
 
             echo "Building for $GOOS/$GOARCH using Bazel..."
             bazel build \
+              --remote_download_outputs=toplevel \
               --platforms="@rules_go//go/toolchain:${BAZEL_PLATFORM}" \
               //cmd/ai_reviewer:ai_reviewer \
               //cmd/github:github
