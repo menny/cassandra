@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -479,4 +482,140 @@ max-diff-bytes = 5000
 
 	defaultCfg := config.NewDefaultConfig()
 	require.Equal(t, config.DefaultMaxDiffBytes, defaultCfg.MaxDiffBytes)
+}
+
+func TestFormatOmittedDiffNotice(t *testing.T) {
+	reason := "Diff exceeded 100 bytes"
+	files := []string{"foo.go", "bar.go"}
+	fileSizes := map[string]int{"foo.go": 42}
+
+	got := formatOmittedDiffNotice(reason, files, fileSizes)
+	require.Contains(t, got, "### Git Diff Omitted\nDiff exceeded 100 bytes\n\n### Changed Files (2 files)\n")
+	require.Contains(t, got, "- foo.go (diff: 42 bytes)")
+	require.Contains(t, got, "- bar.go (diff size unavailable)")
+	require.Contains(t, got, "Use the `get_file_diff` tool")
+}
+
+func TestRun_DiffOmission_ByteLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+	diffFile := filepath.Join(tmpDir, "pr.diff")
+	diffContent := `diff --git a/foo.go b/foo.go
+index 1234567..89abcdef 100644
+--- a/foo.go
++++ b/foo.go
+@@ -1 +1 @@
+-hello
++world
+`
+	require.NoError(t, os.WriteFile(diffFile, []byte(diffContent), 0o644))
+
+	filesListFile := filepath.Join(tmpDir, "files.txt")
+	require.NoError(t, os.WriteFile(filesListFile, []byte("foo.go\n"), 0o644))
+	outFile := filepath.Join(tmpDir, "out.txt")
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+  "id": "chatcmpl-test",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "review verdict: approved\n\nAll clear."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}`)
+	}))
+	defer srv.Close()
+
+	args := []string{
+		"--provider", "openai",
+		"--model", "test-model",
+		"--provider-api-key", "fake-key",
+		"--provider-url", srv.URL,
+		"--diff-file", diffFile,
+		"--files-list-file", filesListFile,
+		"--max-diff-bytes", "10",
+		"--review-output-file", outFile,
+	}
+
+	stderr := log.New(io.Discard, "", 0)
+	err := run(context.Background(), args, stderr)
+	require.NoError(t, err)
+
+	require.Contains(t, capturedBody, "### Git Diff Omitted")
+	require.Contains(t, capturedBody, "exceeds the configured limit of 10 bytes")
+	require.Contains(t, capturedBody, "- foo.go (diff:")
+}
+
+func TestRun_DiffOmission_EmptyDiff(t *testing.T) {
+	tmpDir := t.TempDir()
+	diffFile := filepath.Join(tmpDir, "pr.diff")
+	require.NoError(t, os.WriteFile(diffFile, []byte(""), 0o644))
+
+	filesListFile := filepath.Join(tmpDir, "files.txt")
+	require.NoError(t, os.WriteFile(filesListFile, []byte("bar.go\n"), 0o644))
+	outFile := filepath.Join(tmpDir, "out.txt")
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+  "id": "chatcmpl-test",
+  "object": "chat.completion",
+  "created": 1234567890,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "review verdict: approved\n\nAll clear."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 5,
+    "total_tokens": 15
+  }
+}`)
+	}))
+	defer srv.Close()
+
+	args := []string{
+		"--provider", "openai",
+		"--model", "test-model",
+		"--provider-api-key", "fake-key",
+		"--provider-url", srv.URL,
+		"--diff-file", diffFile,
+		"--files-list-file", filesListFile,
+		"--max-diff-bytes", "10240",
+		"--review-output-file", outFile,
+	}
+
+	stderr := log.New(io.Discard, "", 0)
+	err := run(context.Background(), args, stderr)
+	require.NoError(t, err)
+
+	require.Contains(t, capturedBody, "### Git Diff Omitted")
+	require.Contains(t, capturedBody, "The git diff was omitted because it was not provided or exceeded diff limits.")
+	require.Contains(t, capturedBody, "- bar.go")
 }

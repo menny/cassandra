@@ -367,8 +367,13 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return nil
 	}
 
+	var fileSizes map[string]int
 	if diffOutput != "" {
-		reviewer.SetDiff(diffOutput)
+		diffMap := util.SplitUnifiedDiff(diffOutput)
+		if len(diffMap) > 0 {
+			reviewer.SetDiffMap(diffMap)
+		}
+		fileSizes = util.DiffMapToSizes(diffMap)
 	}
 
 	var requestTextBuilder strings.Builder
@@ -379,32 +384,12 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	diffBytesLen := len(diffOutput)
-	fileSizes := util.GetFileDiffSizes(diffOutput)
-
 	if cfg.MaxDiffBytes > 0 && diffBytesLen > cfg.MaxDiffBytes {
-		requestTextBuilder.WriteString("### Git Diff Omitted\n")
-		fmt.Fprintf(&requestTextBuilder, "The git diff was omitted because its total size (%d bytes) exceeds the configured limit of %d bytes.\n\n", diffBytesLen, cfg.MaxDiffBytes)
-		fmt.Fprintf(&requestTextBuilder, "### Changed Files (%d files)\n", len(changedFiles))
-		for _, f := range changedFiles {
-			if size, ok := fileSizes[f]; ok {
-				fmt.Fprintf(&requestTextBuilder, "- %s (diff: %d bytes)\n", f, size)
-			} else {
-				fmt.Fprintf(&requestTextBuilder, "- %s (diff size unavailable)\n", f)
-			}
-		}
-		requestTextBuilder.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
+		reason := fmt.Sprintf("The git diff was omitted because its total size (%d bytes) exceeds the configured limit of %d bytes.", diffBytesLen, cfg.MaxDiffBytes)
+		requestTextBuilder.WriteString(formatOmittedDiffNotice(reason, changedFiles, fileSizes))
 	} else if strings.TrimSpace(diffOutput) == "" && len(changedFiles) > 0 {
-		requestTextBuilder.WriteString("### Git Diff Omitted\n")
-		requestTextBuilder.WriteString("The git diff was omitted because it was not provided or exceeded diff limits.\n\n")
-		fmt.Fprintf(&requestTextBuilder, "### Changed Files (%d files)\n", len(changedFiles))
-		for _, f := range changedFiles {
-			if size, ok := fileSizes[f]; ok {
-				fmt.Fprintf(&requestTextBuilder, "- %s (diff: %d bytes)\n", f, size)
-			} else {
-				fmt.Fprintf(&requestTextBuilder, "- %s (diff size unavailable)\n", f)
-			}
-		}
-		requestTextBuilder.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
+		reason := "The git diff was omitted because it was not provided or exceeded diff limits."
+		requestTextBuilder.WriteString(formatOmittedDiffNotice(reason, changedFiles, fileSizes))
 	} else {
 		requestTextBuilder.WriteString("Review the following git diff for issues:\n\n")
 		requestTextBuilder.WriteString(diffOutput)
@@ -588,5 +573,22 @@ func formatMetadata(metadata core.PRMetadata) string {
 		}
 	}
 
+	return sb.String()
+}
+
+func formatOmittedDiffNotice(reason string, changedFiles []string, fileSizes map[string]int) string {
+	var sb strings.Builder
+	sb.WriteString("### Git Diff Omitted\n")
+	sb.WriteString(reason)
+	sb.WriteString("\n\n")
+	fmt.Fprintf(&sb, "### Changed Files (%d files)\n", len(changedFiles))
+	for _, f := range changedFiles {
+		if size, ok := fileSizes[f]; ok {
+			fmt.Fprintf(&sb, "- %s (diff: %d bytes)\n", f, size)
+		} else {
+			fmt.Fprintf(&sb, "- %s (diff size unavailable)\n", f)
+		}
+	}
+	sb.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
 	return sb.String()
 }

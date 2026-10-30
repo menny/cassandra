@@ -75,6 +75,71 @@ index 3333333..4444444 100644
 			t.Errorf("expected positive size for pkg/file one.go, got %d", sizes["pkg/file one.go"])
 		}
 	})
+
+	t.Run("quoted paths with tabs and special characters", func(t *testing.T) {
+		diff := "diff --git \"a/file\\twith\\ttabs.txt\" \"b/file\\twith\\ttabs.txt\"\n" +
+			"index 1111111..2222222 100644\n" +
+			"--- \"a/file\\twith\\ttabs.txt\"\n" +
+			"+++ \"b/file\\twith\\ttabs.txt\"\n" +
+			"@@ -1 +1 @@\n" +
+			"+hello\n" +
+			"diff --git \"a/path/with spaces/file.txt\" \"b/path/with spaces/file.txt\"\n" +
+			"index 3333333..4444444 100644\n" +
+			"--- \"a/path/with spaces/file.txt\"\n" +
+			"+++ \"b/path/with spaces/file.txt\"\n" +
+			"@@ -1 +1 @@\n" +
+			"+world\n"
+		chunks := SplitUnifiedDiff(diff)
+		if len(chunks) != 2 {
+			t.Fatalf("expected 2 chunks, got %d", len(chunks))
+		}
+		if _, ok := chunks["file\twith\ttabs.txt"]; !ok {
+			t.Errorf("missing chunk for 'file\\twith\\ttabs.txt'")
+		}
+		if _, ok := chunks["path/with spaces/file.txt"]; !ok {
+			t.Errorf("missing chunk for 'path/with spaces/file.txt'")
+		}
+	})
+
+	t.Run("fallback when b prefix is missing or dev null", func(t *testing.T) {
+		diff := `diff --git a/deleted_file.txt /dev/null
+deleted file mode 100644
+--- a/deleted_file.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-deleted
+diff --git a/source_only.txt other_trailing_data
+--- a/source_only.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-only
+`
+		chunks := SplitUnifiedDiff(diff)
+		if _, ok := chunks["deleted_file.txt"]; !ok {
+			t.Errorf("expected key deleted_file.txt")
+		}
+		if _, ok := chunks["source_only.txt"]; !ok {
+			t.Errorf("expected key source_only.txt without trailing tokens")
+		}
+	})
+}
+
+func TestDiffMapToSizes(t *testing.T) {
+	if got := DiffMapToSizes(nil); got != nil {
+		t.Errorf("expected nil for nil input, got %v", got)
+	}
+
+	chunks := map[string]string{
+		"a.go": "12345",
+		"b.go": "1234567890",
+	}
+	sizes := DiffMapToSizes(chunks)
+	if sizes["a.go"] != 5 {
+		t.Errorf("expected 5 for a.go, got %d", sizes["a.go"])
+	}
+	if sizes["b.go"] != 10 {
+		t.Errorf("expected 10 for b.go, got %d", sizes["b.go"])
+	}
 }
 
 func stringsTrimRight(s string) string {
