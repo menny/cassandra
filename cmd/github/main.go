@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -641,8 +642,15 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 }
 
 func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, ignoredLockFiles []string) (string, error) {
-	diff, _, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
+	diff, resp, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
 	if err != nil {
+		var errResp *github.ErrorResponse
+		if (errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == 406) ||
+			(resp != nil && resp.StatusCode == 406) ||
+			strings.Contains(err.Error(), "406") {
+			stderr.Printf("Warning: PR diff exceeds GitHub API limit (406). Proceeding with empty diff and relying on changed files list.")
+			return "", nil
+		}
 		return "", err
 	}
 

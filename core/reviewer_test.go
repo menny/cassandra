@@ -617,7 +617,7 @@ func TestReviewer_PostReview_UpdateReviewVerdict(t *testing.T) {
 	cfg.Render = "markdown"
 
 	registry := tools.NewRegistry()
-	tools.RegisterLocalTools(registry, t.TempDir(), nil, "", false, false, nil)
+	tools.RegisterLocalTools(registry, t.TempDir(), "main", "HEAD", nil, "", false, false, nil, nil)
 
 	argsBytes, err := json.Marshal(map[string]any{
 		"verdict":   "approved",

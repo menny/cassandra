@@ -355,7 +355,7 @@ func TestPRCommentTool(t *testing.T) {
 func TestRegisterLocalTools_PRComment(t *testing.T) {
 	t.Run("when allowPRComment is true", func(t *testing.T) {
 		r := NewRegistry()
-		RegisterLocalTools(r, "", nil, "", false, true, nil)
+		RegisterLocalTools(r, "", "main", "HEAD", nil, "", false, true, nil, nil)
 		var hasCommentTool bool
 		for _, td := range r.ToTools() {
 			if td.Name == "post_pr_comment" {
@@ -368,7 +368,7 @@ func TestRegisterLocalTools_PRComment(t *testing.T) {
 
 	t.Run("when allowPRComment is false", func(t *testing.T) {
 		r := NewRegistry()
-		RegisterLocalTools(r, "", nil, "", false, false, nil)
+		RegisterLocalTools(r, "", "main", "HEAD", nil, "", false, false, nil, nil)
 		var hasCommentTool bool
 		for _, td := range r.ToTools() {
 			if td.Name == "post_pr_comment" {

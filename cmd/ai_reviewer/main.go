@@ -53,6 +53,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.PreReviewPromptFile, "pre-review-prompt", "", "Optional path to a file containing a prompt to an LLM Agent for pre-review summary")
 	fs.StringVar(&cfg.PreReviewModel, "pre-review-model", "", "Optional model override for the pre-review summary phase (defaults to main model)")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
+	fs.IntVar(&cfg.MaxDiffBytes, "max-diff-bytes", config.DefaultMaxDiffBytes, "Maximum diff size in bytes before omitting full diff from prompt (defaults to 10240; 0 to disable)")
 	fs.StringVar(&cfg.Base, "base", "main", "Base commit/branch for diff (defaults to 'main')")
 	fs.StringVar(&cfg.Head, "head", "HEAD", "Head commit/branch for diff (defaults to 'HEAD')")
 	fs.StringVar(&cfg.ReviewOutputFile, "review-output-file", "", "Path to a file where the final review will be written")
@@ -110,6 +111,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("base", "main")
 	v.SetDefault("head", "HEAD")
 	v.SetDefault("max-tokens", llm.DefaultMaxTokens)
+	v.SetDefault("max-diff-bytes", config.DefaultMaxDiffBytes)
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
 	v.SetDefault("allow-ask-developer", false)
@@ -365,14 +367,33 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return nil
 	}
 
+	var fileSizes map[string]int
+	if diffOutput != "" {
+		diffMap := util.SplitUnifiedDiff(diffOutput)
+		if len(diffMap) > 0 {
+			reviewer.SetDiffMap(diffMap)
+		}
+		fileSizes = util.DiffMapToSizes(diffMap)
+	}
+
 	var requestTextBuilder strings.Builder
 	if commitsOutput != "" {
 		requestTextBuilder.WriteString("### Commit Messages\n")
 		requestTextBuilder.WriteString(commitsOutput)
 		requestTextBuilder.WriteString("\n\n")
 	}
-	requestTextBuilder.WriteString("Review the following git diff for issues:\n\n")
-	requestTextBuilder.WriteString(diffOutput)
+
+	diffBytesLen := len(diffOutput)
+	if cfg.MaxDiffBytes > 0 && diffBytesLen > cfg.MaxDiffBytes {
+		reason := fmt.Sprintf("The git diff was omitted because its total size (%d bytes) exceeds the configured limit of %d bytes.", diffBytesLen, cfg.MaxDiffBytes)
+		requestTextBuilder.WriteString(formatOmittedDiffNotice(reason, changedFiles, fileSizes))
+	} else if strings.TrimSpace(diffOutput) == "" && len(changedFiles) > 0 {
+		reason := "The git diff was omitted because it was not provided or exceeded diff limits."
+		requestTextBuilder.WriteString(formatOmittedDiffNotice(reason, changedFiles, fileSizes))
+	} else {
+		requestTextBuilder.WriteString("Review the following git diff for issues:\n\n")
+		requestTextBuilder.WriteString(diffOutput)
+	}
 
 	requestText := requestTextBuilder.String()
 
@@ -552,5 +573,22 @@ func formatMetadata(metadata core.PRMetadata) string {
 		}
 	}
 
+	return sb.String()
+}
+
+func formatOmittedDiffNotice(reason string, changedFiles []string, fileSizes map[string]int) string {
+	var sb strings.Builder
+	sb.WriteString("### Git Diff Omitted\n")
+	sb.WriteString(reason)
+	sb.WriteString("\n\n")
+	fmt.Fprintf(&sb, "### Changed Files (%d files)\n", len(changedFiles))
+	for _, f := range changedFiles {
+		if size, ok := fileSizes[f]; ok {
+			fmt.Fprintf(&sb, "- %s (diff: %d bytes)\n", f, size)
+		} else {
+			fmt.Fprintf(&sb, "- %s (diff size unavailable)\n", f)
+		}
+	}
+	sb.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
 	return sb.String()
 }
