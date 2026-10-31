@@ -42,6 +42,8 @@ var acpToolKinds = map[string]acp.ToolKind{
 	"orchestrator_capabilities": acp.ToolKindOther,
 	"t3_thread_launch":          acp.ToolKindOther,
 	"post_pr_comment":           acp.ToolKindOther,
+	"get_pr_metadata":           acp.ToolKindRead,
+	"get_pr_diff":               acp.ToolKindRead,
 }
 
 func availableACPModes(desc string) []acp.SessionMode {

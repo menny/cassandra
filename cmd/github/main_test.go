@@ -555,10 +555,28 @@ func TestGetDiff_Success(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, []string{"go.sum"})
+	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, nil, []string{"go.sum"})
 	assert.NoError(t, err)
 	assert.Contains(t, diff, "foo.go")
 	assert.NotContains(t, diff, "go.sum")
+}
+
+func TestGetDiff_WithPathFilter(t *testing.T) {
+	mockedHTTPClient := mock.NewMockedHTTPClient(
+		mock.WithRequestMatchHandler(
+			mock.GetReposPullsByOwnerByRepoByPullNumber,
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("diff --git a/foo.go b/foo.go\n+new line\ndiff --git a/bar.go b/bar.go\n+other\n"))
+			}),
+		),
+	)
+	client := github.NewClient(mockedHTTPClient)
+
+	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, []string{"bar.go"}, nil)
+	assert.NoError(t, err)
+	assert.NotContains(t, diff, "foo.go")
+	assert.Contains(t, diff, "bar.go")
 }
 
 func TestGetDiff_406Fallback(t *testing.T) {
@@ -573,7 +591,7 @@ func TestGetDiff_406Fallback(t *testing.T) {
 	)
 	client := github.NewClient(mockedHTTPClient)
 
-	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, nil)
+	diff, err := getDiff(context.Background(), client, "owner", "repo", 1, nil, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, "", diff)
 }

@@ -245,6 +245,24 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 	defer closeReporter()
 
+	var metadata *core.PRMetadata
+	if cfg.MetadataJSONFile != "" {
+		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
+		if err != nil {
+			reporter.ReportWarning("Failed to read metadata JSON. Proceeding without metadata", err)
+		} else {
+			var m core.PRMetadata
+			if err := json.Unmarshal(metadataBytes, &m); err != nil {
+				reporter.ReportWarning("Failed to parse metadata JSON. Proceeding without metadata", err)
+			} else {
+				metadata = &m
+				if !fs.Changed("base") && m.Base != "" {
+					cfg.Base = m.Base
+				}
+			}
+		}
+	}
+
 	reporter.ReportConfig(cfg, targetDir)
 
 	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
@@ -397,18 +415,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 
 	requestText := requestTextBuilder.String()
 
-	if cfg.MetadataJSONFile != "" {
-		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
-		if err != nil {
-			reporter.ReportWarning("Failed to read metadata JSON. Proceeding without metadata", err)
-		} else {
-			var metadata core.PRMetadata
-			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				reporter.ReportWarning("Failed to parse metadata JSON. Proceeding without metadata", err)
-			} else {
-				requestText = formatMetadata(metadata) + "\n\n" + requestText
-			}
-		}
+	if metadata != nil {
+		requestText = formatMetadata(*metadata) + "\n\n" + requestText
 	}
 
 	if tools.IsT3Session() {
@@ -544,6 +552,27 @@ func formatMetadata(metadata core.PRMetadata) string {
 	fmt.Fprintf(&sb, "- **Title**: %s\n", metadata.Title)
 	if metadata.Description != "" {
 		fmt.Fprintf(&sb, "- **Description**: %s\n", metadata.Description)
+	}
+	if metadata.Branch != "" {
+		fmt.Fprintf(&sb, "- **Branch**: %s\n", metadata.Branch)
+	}
+	if metadata.Base != "" {
+		fmt.Fprintf(&sb, "- **Base**: %s\n", metadata.Base)
+	}
+	if metadata.Head != "" {
+		fmt.Fprintf(&sb, "- **Head**: %s\n", metadata.Head)
+	}
+
+	if len(metadata.Stack) > 0 {
+		sb.WriteString("\n### PR Stack\n")
+		for _, item := range metadata.Stack {
+			indicator := ""
+			if metadata.PRNumber > 0 && item.PRNumber == metadata.PRNumber {
+				indicator = " <- (this PR)"
+			}
+			fmt.Fprintf(&sb, "- #%d: %s (branch: %s, base: %s, head: %s)%s\n",
+				item.PRNumber, item.Title, item.Branch, item.Base, item.Head, indicator)
+		}
 	}
 
 	if len(metadata.Comments) > 0 {

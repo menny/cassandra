@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -193,14 +195,31 @@ func TestFormatMetadata(t *testing.T) {
 		},
 	}
 
+	metadata.PRNumber = 102
+	metadata.Branch = "feature-b"
+	metadata.Base = "feature-a"
+	metadata.Head = "sha2"
+	metadata.Stack = []core.PRStackItem{
+		{PRNumber: 101, Title: "Feature A", Branch: "feature-a", Base: "main", Head: "sha1"},
+		{PRNumber: 102, Title: "Feature B", Branch: "feature-b", Base: "feature-a", Head: "sha2"},
+	}
+
 	formatted := formatMetadata(metadata)
 
 	require.Contains(t, formatted, "### PR Metadata")
 	require.Contains(t, formatted, "- **Repository**: owner/repo")
+	require.Contains(t, formatted, "- **PR Number**: #102")
 	require.Contains(t, formatted, "- **Author**: author1")
 	require.Contains(t, formatted, "- **Date**: 2026-04-09")
 	require.Contains(t, formatted, "- **Title**: PR Title")
 	require.Contains(t, formatted, "- **Description**: PR Description")
+	require.Contains(t, formatted, "- **Branch**: feature-b")
+	require.Contains(t, formatted, "- **Base**: feature-a")
+	require.Contains(t, formatted, "- **Head**: sha2")
+
+	require.Contains(t, formatted, "### PR Stack")
+	require.Contains(t, formatted, "- #101: Feature A (branch: feature-a, base: main, head: sha1)")
+	require.Contains(t, formatted, "- #102: Feature B (branch: feature-b, base: feature-a, head: sha2) <- (this PR)")
 
 	require.Contains(t, formatted, "### PR Comments")
 	require.Contains(t, formatted, "- **user1** (2026-04-09 11:00):")
@@ -279,6 +298,39 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		require.Contains(t, err.Error(), "missing required arguments")
 		require.Contains(t, err.Error(), "--model")
 		require.Contains(t, err.Error(), "--provider-api-key")
+	})
+
+	t.Run("metadata-json resolves base branch before reviewer initialization", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		metaFile := filepath.Join(tmpDir, "metadata.json")
+		require.NoError(t, os.WriteFile(metaFile, []byte(`{"base":"stacked-base-branch"}`), 0o644))
+
+		diffFile := filepath.Join(tmpDir, "diff.txt")
+		require.NoError(t, os.WriteFile(diffFile, []byte(""), 0o644))
+		filesListFile := filepath.Join(tmpDir, "files.txt")
+		require.NoError(t, os.WriteFile(filesListFile, []byte(""), 0o644))
+
+		var buf bytes.Buffer
+		customStderr := log.New(&buf, "", 0)
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--metadata-json", metaFile,
+			"--diff-file", diffFile,
+			"--files-list-file", filesListFile,
+		}
+
+		err = run(ctx, args, customStderr)
+		require.NoError(t, err)
+		require.Contains(t, buf.String(), "stacked-base-branch")
 	})
 }
 
@@ -618,4 +670,40 @@ func TestRun_DiffOmission_EmptyDiff(t *testing.T) {
 	require.Contains(t, capturedBody, "### Git Diff Omitted")
 	require.Contains(t, capturedBody, "The git diff was omitted because it was not provided or exceeded diff limits.")
 	require.Contains(t, capturedBody, "- bar.go")
+}
+
+func TestRun_MetadataBaseBranch(t *testing.T) {
+	tmpDir := t.TempDir()
+	metaFile := filepath.Join(tmpDir, "metadata.json")
+	meta := core.PRMetadata{
+		PRNumber: 123,
+		Base:     "stacked-base-branch",
+	}
+	metaBytes, _ := json.Marshal(meta)
+	require.NoError(t, os.WriteFile(metaFile, metaBytes, 0o644))
+
+	diffFile := filepath.Join(tmpDir, "pr.diff")
+	require.NoError(t, os.WriteFile(diffFile, []byte("diff content"), 0o644))
+	filesListFile := filepath.Join(tmpDir, "files.txt")
+	require.NoError(t, os.WriteFile(filesListFile, []byte("file.go\n"), 0o644))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices": [{"message": {"role": "assistant", "content": "verdict: approved"}}]}`)
+	}))
+	defer srv.Close()
+
+	args := []string{
+		"--provider", "openai",
+		"--model", "test-model",
+		"--provider-api-key", "fake-key",
+		"--provider-url", srv.URL,
+		"--metadata-json", metaFile,
+		"--diff-file", diffFile,
+		"--files-list-file", filesListFile,
+	}
+
+	stderr := log.New(io.Discard, "", 0)
+	err := run(context.Background(), args, stderr)
+	require.NoError(t, err)
 }
