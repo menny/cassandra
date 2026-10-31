@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v69/github"
 	"github.com/menny/cassandra/core"
+	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/util"
 	flag "github.com/spf13/pflag"
 )
@@ -35,6 +35,7 @@ func main() {
 	var allowReviewAction bool
 	var deleteOldComments bool
 	var ignoredLockFiles []string
+	var paths []string
 
 	flag.StringVar(&repoFullName, "repo-full-name", "", "Full name of the repository (owner/repo)")
 	flag.IntVar(&prNumber, "pr", 0, "Pull request number")
@@ -47,6 +48,7 @@ func main() {
 	flag.BoolVar(&allowReviewAction, "allow-review-action", false, "Whether to allow the AI's suggested review action (APPROVE/REQUEST_CHANGES). If false, forces COMMENT.")
 	flag.BoolVar(&deleteOldComments, "delete-old-comments", true, "Whether to delete previous bot-authored inline comments before posting a new review.")
 	flag.StringSliceVar(&ignoredLockFiles, "ignored-lock-files", util.DefaultLockFiles, "Comma-separated list of lock files to ignore (overrides default)")
+	flag.StringSliceVar(&paths, "paths", nil, "Optional comma-separated list of file paths to filter the diff")
 
 	flag.Parse()
 
@@ -137,7 +139,7 @@ func main() {
 		writeOutputOrStdout(outputFile, "metadata", bytes)
 
 	case "get-diff":
-		diff, err := getDiff(ctx, client, owner, repo, prNumber, ignoredLockFiles)
+		diff, err := getDiff(ctx, client, owner, repo, prNumber, paths, ignoredLockFiles)
 		if err != nil {
 			log.Fatalf("Failed to get diff: %v", err)
 		}
@@ -177,11 +179,7 @@ func writeOutputOrStdout(outputFile, label string, data []byte) {
 }
 
 func parseRepo(fullName string) (owner, repo string, err error) {
-	parts := strings.Split(fullName, "/")
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("expected owner/repo, got %s", fullName)
-	}
-	return parts[0], parts[1], nil
+	return tools.ParseRepoSlug(fullName)
 }
 
 // Tag prefixes used to namespace bot-authored PR content. DESIGN.md
@@ -371,6 +369,12 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		Author:        pr.GetUser().GetLogin(),
 		CreatedAt:     getCreatedAt(pr.CreatedAt),
 		IdentifiedTag: tag,
+		Branch:        pr.GetHead().GetRef(),
+		Base:          pr.GetBase().GetRef(),
+		Head:          pr.GetHead().GetSHA(),
+	}
+	if stack, err := tools.FetchPRStack(ctx, client, owner, repo, prNumber); err == nil && len(stack) > 1 {
+		metadata.Stack = stack
 	}
 
 	opts := &github.IssueListCommentsOptions{
@@ -641,66 +645,19 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 	return nil
 }
 
-func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, ignoredLockFiles []string) (string, error) {
-	diff, resp, err := client.PullRequests.GetRaw(ctx, owner, repo, prNumber, github.RawOptions{Type: github.Diff})
+func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, paths []string, ignoredLockFiles []string) (string, error) {
+	diff, err := tools.FetchPRDiff(ctx, client, owner, repo, prNumber, paths, ignoredLockFiles)
 	if err != nil {
-		var errResp *github.ErrorResponse
-		if (errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == 406) ||
-			(resp != nil && resp.StatusCode == 406) ||
-			strings.Contains(err.Error(), "406") {
-			stderr.Printf("Warning: PR diff exceeds GitHub API limit (406). Proceeding with empty diff and relying on changed files list.")
-			return "", nil
-		}
 		return "", err
 	}
-
-	// Filter out lockfiles from the raw diff text.
-	// Unified diff format separates file chunks with "diff --git a/... b/..."
-	lines := strings.Split(diff, "\n")
-	var filteredLines []string
-	skipping := false
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "diff --git ") {
-			// Extract the b/ path from "diff --git a/path/to/file b/path/to/file".
-			// Using strings.Fields would break for paths containing spaces, so we
-			// split on " b/" from the right to correctly isolate the destination path.
-			skipping = false
-			if idx := strings.LastIndex(line, " b/"); idx != -1 {
-				skipping = util.IsLockFile(line[idx+3:], ignoredLockFiles)
-			}
-		}
-
-		if !skipping {
-			filteredLines = append(filteredLines, line)
-		}
+	if diff == "" && len(paths) == 0 {
+		stderr.Printf("Warning: PR diff exceeds GitHub API limit (406). Proceeding with empty diff and relying on changed files list.")
 	}
-
-	return strings.Join(filteredLines, "\n"), nil
+	return diff, nil
 }
 
 func getFiles(ctx context.Context, client *github.Client, owner, repo string, prNumber int, ignoredLockFiles []string) ([]string, error) {
-	opts := &github.ListOptions{
-		PerPage: 100,
-	}
-	var allFiles []string
-
-	for {
-		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
-		if err != nil {
-			return nil, err
-		}
-		for _, f := range files {
-			if path := f.GetFilename(); !util.IsLockFile(path, ignoredLockFiles) {
-				allFiles = append(allFiles, path)
-			}
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
-	}
-	return allFiles, nil
+	return tools.FetchPRFiles(ctx, client, owner, repo, prNumber, ignoredLockFiles)
 }
 
 func getCommits(ctx context.Context, client *github.Client, owner, repo string, prNumber int) ([]string, error) {
