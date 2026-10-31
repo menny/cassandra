@@ -153,6 +153,19 @@ def _resolve_branch_ref(branch_name: str, target_dir: Path) -> str:
     return branch_name
 
 
+def _extract_branch_name(val: any) -> str | None:
+    """Extracts a branch name from either a string or a dict ({'branch': ...} or {'name': ...})."""
+    if isinstance(val, str):
+        cleaned = val.strip()
+        return cleaned or None
+    if isinstance(val, dict):
+        res = val.get("branch") or val.get("name") or val.get("ref")
+        if isinstance(res, str):
+            cleaned = res.strip()
+            return cleaned or None
+    return None
+
+
 def _get_gh_stack_base_ref(target_dir: Path, current_branch: str) -> str | None:
     """Resolves the parent branch ref in a gh stack if the current branch is stacked."""
     if not current_branch:
@@ -171,12 +184,12 @@ def _get_gh_stack_base_ref(target_dir: Path, current_branch: str) -> str | None:
                     data = json.load(f)
                 for stack in data.get("stacks", []):
                     branches = stack.get("branches", [])
-                    branch_names = [b.get("branch") for b in branches]
+                    branch_names = [_extract_branch_name(b) for b in branches]
                     if current_branch in branch_names:
                         idx = branch_names.index(current_branch)
-                        if idx > 0:
+                        if idx > 0 and branch_names[idx - 1]:
                             return _resolve_branch_ref(branch_names[idx - 1], target_dir)
-                        trunk = stack.get("trunk", {}).get("branch")
+                        trunk = _extract_branch_name(stack.get("trunk"))
                         if trunk:
                             return _resolve_branch_ref(trunk, target_dir)
             except Exception:
@@ -194,12 +207,12 @@ def _get_gh_stack_base_ref(target_dir: Path, current_branch: str) -> str | None:
         if res.returncode == 0 and res.stdout.strip():
             data = json.loads(res.stdout)
             branches = data.get("branches", [])
-            branch_names = [b.get("name") for b in branches]
+            branch_names = [_extract_branch_name(b) for b in branches]
             if current_branch in branch_names:
                 idx = branch_names.index(current_branch)
-                if idx > 0:
+                if idx > 0 and branch_names[idx - 1]:
                     return _resolve_branch_ref(branch_names[idx - 1], target_dir)
-                trunk = data.get("trunk")
+                trunk = _extract_branch_name(data.get("trunk"))
                 if trunk:
                     return _resolve_branch_ref(trunk, target_dir)
     except Exception:

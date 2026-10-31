@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/go-github/v69/github"
@@ -159,6 +160,11 @@ func FetchPRFiles(ctx context.Context, client *github.Client, owner, repo string
 	return allFiles, nil
 }
 
+func cleanPRPath(p string) string {
+	cleaned := filepath.Clean(strings.TrimPrefix(strings.TrimSpace(p), "./"))
+	return filepath.ToSlash(cleaned)
+}
+
 // FetchPRDiff fetches the git diff for a PR. If paths are supplied, only diffs for those paths are returned.
 // Lockfiles in ignoredLockFiles are omitted.
 func FetchPRDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, paths []string, ignoredLockFiles []string) (string, error) {
@@ -185,10 +191,11 @@ func FetchPRDiff(ctx context.Context, client *github.Client, owner, repo string,
 		diffMap := util.SplitUnifiedDiff(diff)
 		var matched []string
 		for _, p := range paths {
-			if util.IsLockFile(p, ignoredLockFiles) {
+			cleaned := cleanPRPath(p)
+			if util.IsLockFile(cleaned, ignoredLockFiles) {
 				continue
 			}
-			if chunk, ok := diffMap[p]; ok && strings.TrimSpace(chunk) != "" {
+			if chunk, ok := diffMap[cleaned]; ok && strings.TrimSpace(chunk) != "" {
 				matched = append(matched, chunk)
 			}
 		}
@@ -217,8 +224,9 @@ func FetchPRDiff(ctx context.Context, client *github.Client, owner, repo string,
 func fetchFilePatches(ctx context.Context, client *github.Client, owner, repo string, prNumber int, paths []string, ignoredLockFiles []string) (string, error) {
 	targetPaths := make(map[string]bool, len(paths))
 	for _, p := range paths {
-		if !util.IsLockFile(p, ignoredLockFiles) {
-			targetPaths[p] = true
+		cleaned := cleanPRPath(p)
+		if !util.IsLockFile(cleaned, ignoredLockFiles) {
+			targetPaths[cleaned] = true
 		}
 	}
 	if len(targetPaths) == 0 {
@@ -227,7 +235,6 @@ func fetchFilePatches(ctx context.Context, client *github.Client, owner, repo st
 
 	opts := &github.ListOptions{PerPage: 100}
 	var matchedChunks []string
-	matchedCount := 0
 
 	for {
 		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
@@ -237,14 +244,14 @@ func fetchFilePatches(ctx context.Context, client *github.Client, owner, repo st
 		for _, f := range files {
 			fn := f.GetFilename()
 			if targetPaths[fn] {
-				matchedCount++
+				delete(targetPaths, fn)
 				if f.GetPatch() != "" {
 					chunk := fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n%s", fn, fn, fn, fn, f.GetPatch())
 					matchedChunks = append(matchedChunks, chunk)
 				}
 			}
 		}
-		if matchedCount == len(targetPaths) || resp.NextPage == 0 {
+		if len(targetPaths) == 0 || resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage

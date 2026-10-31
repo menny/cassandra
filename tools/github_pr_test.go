@@ -216,7 +216,7 @@ index 555..666 100644
 			}, nil
 		})
 
-		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"file2.go"}, []string{"go.sum"})
+		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"./file2.go"}, []string{"go.sum"})
 		require.NoError(t, err)
 		require.NotContains(t, diff, "file1.go")
 		require.Contains(t, diff, "file2.go")
@@ -270,7 +270,7 @@ index 555..666 100644
 			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewBufferString("{}"))}, nil
 		})
 
-		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"path/to/target.go"}, nil)
+		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"./path/to/target.go"}, nil)
 		require.NoError(t, err)
 		require.Contains(t, diff, "path/to/target.go")
 		require.NotContains(t, diff, "other.go")

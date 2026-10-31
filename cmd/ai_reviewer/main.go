@@ -245,6 +245,24 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 	defer closeReporter()
 
+	var metadata *core.PRMetadata
+	if cfg.MetadataJSONFile != "" {
+		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
+		if err != nil {
+			reporter.ReportWarning("Failed to read metadata JSON. Proceeding without metadata", err)
+		} else {
+			var m core.PRMetadata
+			if err := json.Unmarshal(metadataBytes, &m); err != nil {
+				reporter.ReportWarning("Failed to parse metadata JSON. Proceeding without metadata", err)
+			} else {
+				metadata = &m
+				if !fs.Changed("base") && m.Base != "" {
+					cfg.Base = m.Base
+				}
+			}
+		}
+	}
+
 	reporter.ReportConfig(cfg, targetDir)
 
 	reviewer, err := core.NewReviewer(sessionCtx, cfg, targetDir, reporter)
@@ -302,24 +320,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	var diffOutput string
 	var changedFiles []string
 	var commitsOutput string
-
-	var metadata *core.PRMetadata
-	if cfg.MetadataJSONFile != "" {
-		metadataBytes, err := os.ReadFile(cfg.MetadataJSONFile)
-		if err != nil {
-			reporter.ReportWarning("Failed to read metadata JSON. Proceeding without metadata", err)
-		} else {
-			var m core.PRMetadata
-			if err := json.Unmarshal(metadataBytes, &m); err != nil {
-				reporter.ReportWarning("Failed to parse metadata JSON. Proceeding without metadata", err)
-			} else {
-				metadata = &m
-				if !fs.Changed("base") && m.Base != "" {
-					cfg.Base = m.Base
-				}
-			}
-		}
-	}
 
 	if cfg.DiffFile != "" || cfg.FilesListFile != "" {
 		if cfg.DiffFile == "" || cfg.FilesListFile == "" {

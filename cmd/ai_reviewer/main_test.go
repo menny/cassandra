@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -297,6 +298,39 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		require.Contains(t, err.Error(), "missing required arguments")
 		require.Contains(t, err.Error(), "--model")
 		require.Contains(t, err.Error(), "--provider-api-key")
+	})
+
+	t.Run("metadata-json resolves base branch before reviewer initialization", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		tmpDir := t.TempDir()
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		metaFile := filepath.Join(tmpDir, "metadata.json")
+		require.NoError(t, os.WriteFile(metaFile, []byte(`{"base":"stacked-base-branch"}`), 0o644))
+
+		diffFile := filepath.Join(tmpDir, "diff.txt")
+		require.NoError(t, os.WriteFile(diffFile, []byte(""), 0o644))
+		filesListFile := filepath.Join(tmpDir, "files.txt")
+		require.NoError(t, os.WriteFile(filesListFile, []byte(""), 0o644))
+
+		var buf bytes.Buffer
+		customStderr := log.New(&buf, "", 0)
+
+		args := []string{
+			"--provider", "google",
+			"--model", "gemini-1.5-flash",
+			"--provider-api-key", "fake-key",
+			"--metadata-json", metaFile,
+			"--diff-file", diffFile,
+			"--files-list-file", filesListFile,
+		}
+
+		err = run(ctx, args, customStderr)
+		require.NoError(t, err)
+		require.Contains(t, buf.String(), "stacked-base-branch")
 	})
 }
 
