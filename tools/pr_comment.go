@@ -20,6 +20,14 @@ var gitHubClientFactory = func(token string) *github.Client {
 	return github.NewClient(nil).WithAuthToken(token)
 }
 
+func getGitHubToken() string {
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		token = os.Getenv("GH_TOKEN")
+	}
+	return token
+}
+
 type prCommentArgs struct {
 	Comment   string `json:"comment"`
 	Path      string `json:"path,omitempty"`
@@ -32,6 +40,11 @@ type prCommentArgs struct {
 type prMetadataFile struct {
 	RepoFullName string `json:"repo_full_name"`
 	PRNumber     int    `json:"pr_number"`
+}
+
+// ParseRepoSlug parses owner and repo from an owner/repo slug or git URL.
+func ParseRepoSlug(raw string) (owner, repo string, err error) {
+	return parseRepoSlug(raw)
 }
 
 func parseRepoSlug(raw string) (owner, repo string, err error) {
@@ -151,10 +164,7 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 	}
 
 	RegisterToolWithArgs(r, def, func(ctx context.Context, args prCommentArgs) (string, error) {
-		token := os.Getenv("GITHUB_TOKEN")
-		if token == "" {
-			token = os.Getenv("GH_TOKEN")
-		}
+		token := getGitHubToken()
 		if token == "" {
 			return "", errors.New("GITHUB_TOKEN (or GH_TOKEN) environment variable is required to post PR comments")
 		}
@@ -239,6 +249,8 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 				"path":       args.Path,
 				"line":       args.Line,
 				"start_line": args.StartLine,
+				"repo":       fmt.Sprintf("%s/%s", owner, repo),
+				"pr":         prNumber,
 			}
 			resJSON, _ := json.Marshal(result)
 			return string(resJSON), nil
