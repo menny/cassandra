@@ -46,7 +46,7 @@ jobs:
             "$EVAL_CONFIG" \
             "$GEMINI_API_KEY" \
             "google" \
-            "gemini-3.8-flash-medium" \
+            "gemini-3.8-flash" \
             "$GEMINI_API_KEY" \
             "$EVAL_REPEATS"
       - name: Generate GitHub App Token
