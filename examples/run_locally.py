@@ -17,6 +17,7 @@ Requirements:
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -137,6 +138,91 @@ def git_ref_exists(ref, cwd):
     return subprocess.run(cmd).returncode == 0
 
 
+
+def has_arg(args: list[str], flag: str) -> bool:
+    """Checks if a flag (e.g. '--base') is in args as '--base' or '--base='."""
+    return any(a == flag or a.startswith(f"{flag}=") for a in args)
+
+
+def _resolve_branch_ref(branch_name: str, target_dir: Path) -> str:
+    """Resolves branch name to a fully-qualified ref if present, otherwise returns branch name."""
+    for prefix in ["refs/heads/", "refs/remotes/origin/"]:
+        ref = f"{prefix}{branch_name}"
+        if git_ref_exists(ref, target_dir):
+            return ref
+    return branch_name
+
+
+def _get_gh_stack_base_ref(target_dir: Path, current_branch: str) -> str | None:
+    """Resolves the parent branch ref in a gh stack if the current branch is stacked."""
+    if not current_branch:
+        return None
+
+    # 1. Try reading .git/gh-stack directly (fast, no external CLI dependency)
+    git_common_dir = run_git(["rev-parse", "--git-common-dir"], target_dir, check=False)
+    if git_common_dir:
+        gh_stack_path = Path(git_common_dir)
+        if not gh_stack_path.is_absolute():
+            gh_stack_path = target_dir / gh_stack_path
+        gh_stack_file = gh_stack_path / "gh-stack"
+        if gh_stack_file.exists():
+            try:
+                with gh_stack_file.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for stack in data.get("stacks", []):
+                    branches = stack.get("branches", [])
+                    branch_names = [b.get("branch") for b in branches]
+                    if current_branch in branch_names:
+                        idx = branch_names.index(current_branch)
+                        if idx > 0:
+                            return _resolve_branch_ref(branch_names[idx - 1], target_dir)
+                        trunk = stack.get("trunk", {}).get("branch")
+                        if trunk:
+                            return _resolve_branch_ref(trunk, target_dir)
+            except Exception:
+                pass
+
+    # 2. Fallback to `gh stack view --json` if gh CLI extension is available
+    try:
+        res = subprocess.run(
+            ["gh", "stack", "view", "--json"],
+            cwd=str(target_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            branches = data.get("branches", [])
+            branch_names = [b.get("name") for b in branches]
+            if current_branch in branch_names:
+                idx = branch_names.index(current_branch)
+                if idx > 0:
+                    return _resolve_branch_ref(branch_names[idx - 1], target_dir)
+                trunk = data.get("trunk")
+                if trunk:
+                    return _resolve_branch_ref(trunk, target_dir)
+    except Exception:
+        pass
+
+    return None
+
+
+def _get_upstream_base_ref(target_dir: Path, current_branch: str) -> str | None:
+    """Checks if the current branch has a tracking upstream that isn't origin/<current_branch>."""
+    if not current_branch:
+        return None
+    upstream = run_git(["rev-parse", "--abbrev-ref", "@{upstream}"], target_dir, check=False)
+    if not upstream:
+        return None
+    if (
+        upstream == current_branch
+        or upstream == f"origin/{current_branch}"
+        or upstream.endswith(f"/{current_branch}")
+    ):
+        return None
+    return _resolve_branch_ref(upstream, target_dir)
+
 def _get_default_base_ref(target_dir):
     """Resolves the default base ref, falling back to standard names if origin/HEAD is unset."""
     ref = run_git(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], target_dir, check=False)
@@ -239,23 +325,47 @@ def main():
 
     # 2. Determine default base commit (SHA) of target repository if in a git repo
     is_git = run_git(["rev-parse", "--is-inside-work-tree"], target_dir, check=False) == "true"
+    base_ref = None
+    base_type = None
+    base_sha = None
     merge_base_sha = None
 
-    if is_git:
-        default_base_ref = _get_default_base_ref(target_dir)
-        if default_base_ref:
-            default_base_sha = run_git(["rev-parse", default_base_ref], target_dir, check=False)
-            if default_base_sha:
-                merge_base_sha = run_git(["merge-base", "HEAD", default_base_sha], target_dir, check=False)
+    has_base_arg = has_arg(remaining_args, "--base")
+    has_meta_arg = has_arg(remaining_args, "--metadata-json")
+    has_diff_arg = has_arg(remaining_args, "--diff-file")
+
+    if is_git and not has_base_arg and not has_meta_arg and not has_diff_arg:
+        current_branch = run_git(["branch", "--show-current"], target_dir, check=False)
+
+        # 1. Check stack parent from gh stack
+        base_ref = _get_gh_stack_base_ref(target_dir, current_branch)
+        if base_ref:
+            base_type = "stack parent"
+        else:
+            # 2. Check git upstream branch tracking
+            base_ref = _get_upstream_base_ref(target_dir, current_branch)
+            if base_ref:
+                base_type = "upstream branch"
+            else:
+                # 3. Default trunk branch fallback
+                base_ref = _get_default_base_ref(target_dir)
+                if base_ref:
+                    base_type = "default branch"
+
+        if base_ref:
+            base_sha = run_git(["rev-parse", base_ref], target_dir, check=False)
+            if base_sha:
+                merge_base_sha = run_git(["merge-base", "HEAD", base_sha], target_dir, check=False)
                 if not merge_base_sha:
-                    merge_base_sha = default_base_sha
+                    merge_base_sha = base_sha
 
     if merge_base_sha:
         if not args.acp:
-            print(f"Detected base ref:           {default_base_ref}", file=sys.stderr)
-            print(f"Default branch tip:          {default_base_sha}", file=sys.stderr)
-            print(f"Effective base (merge-base): {merge_base_sha}", file=sys.stderr)
-    else:
+            label = f"Detected base ref ({base_type}):" if base_type else "Detected base ref:"
+            print(f"{label:<32} {base_ref}", file=sys.stderr)
+            print(f"Base branch tip:                 {base_sha}", file=sys.stderr)
+            print(f"Effective base (merge-base):     {merge_base_sha}", file=sys.stderr)
+    elif not has_base_arg and not has_meta_arg and not has_diff_arg:
         if not args.acp:
             print(
                 f"No git repository or base branch detected in {target_dir}. Assuming no-diff.",
@@ -323,8 +433,10 @@ def main():
             str(target_dir),
         ]
         if merge_base_sha:
-            run_args.extend(["--base", merge_base_sha, "--head", "HEAD"])
-        else:
+            run_args.extend(["--base", merge_base_sha])
+            if not has_arg(remaining_args, "--head"):
+                run_args.extend(["--head", "HEAD"])
+        elif not has_base_arg and not has_meta_arg and not has_diff_arg:
             run_args.extend(
                 [
                     "--diff-file",
