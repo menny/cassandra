@@ -3,7 +3,7 @@
 # Precedence: CLI Arguments > Configuration File > Defaults
 
 provider = "google"
-model = "gemini-4-carbon"
+model = "gemini-4-argon"
 allow-url-fetch = true
 
 # Path to an MCP configuration file.
