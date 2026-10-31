@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -648,10 +649,11 @@ func dismissPreviousReviews(ctx context.Context, client *github.Client, owner, r
 func getDiff(ctx context.Context, client *github.Client, owner, repo string, prNumber int, paths []string, ignoredLockFiles []string) (string, error) {
 	diff, err := tools.FetchPRDiff(ctx, client, owner, repo, prNumber, paths, ignoredLockFiles)
 	if err != nil {
+		if errors.Is(err, tools.ErrDiffTooLarge) {
+			stderr.Printf("Warning: PR diff exceeds GitHub API limit (406). Proceeding with empty diff and relying on changed files list.")
+			return "", nil
+		}
 		return "", err
-	}
-	if diff == "" && len(paths) == 0 {
-		stderr.Printf("Warning: PR diff exceeds GitHub API limit (406). Proceeding with empty diff and relying on changed files list.")
 	}
 	return diff, nil
 }

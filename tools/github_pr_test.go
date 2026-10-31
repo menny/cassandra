@@ -223,6 +223,23 @@ index 555..666 100644
 		require.NotContains(t, diff, "go.sum")
 	})
 
+	t.Run("diff 406 fallback without paths returns ErrDiffTooLarge", func(t *testing.T) {
+		client := newMockGitHubClient(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.Header.Get("Accept"), "diff") {
+				return &http.Response{
+					StatusCode: http.StatusNotAcceptable,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewBufferString(`{"message": "diff too large"}`)),
+				}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewBufferString("{}"))}, nil
+		})
+
+		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, nil, nil)
+		require.ErrorIs(t, err, ErrDiffTooLarge)
+		require.Empty(t, diff)
+	})
+
 	t.Run("diff 406 fallback with paths filter uses ListFiles patches", func(t *testing.T) {
 		client := newMockGitHubClient(func(req *http.Request) (*http.Response, error) {
 			if strings.Contains(req.Header.Get("Accept"), "diff") {
@@ -257,6 +274,65 @@ index 555..666 100644
 		require.NoError(t, err)
 		require.Contains(t, diff, "path/to/target.go")
 		require.NotContains(t, diff, "other.go")
+	})
+
+	t.Run("diff 406 fallback when all paths are ignored lockfiles returns empty diff immediately", func(t *testing.T) {
+		calledFiles := false
+		client := newMockGitHubClient(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.Header.Get("Accept"), "diff") {
+				return &http.Response{
+					StatusCode: http.StatusNotAcceptable,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewBufferString(`{"message": "diff too large"}`)),
+				}, nil
+			}
+			if strings.Contains(req.URL.Path, "/files") {
+				calledFiles = true
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewBufferString("[]"))}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewBufferString("{}"))}, nil
+		})
+
+		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"go.sum"}, []string{"go.sum"})
+		require.NoError(t, err)
+		require.Empty(t, diff)
+		require.False(t, calledFiles, "ListFiles should not have been called when targetPaths is empty")
+	})
+
+	t.Run("diff 406 fallback stops pagination early once all targets are found", func(t *testing.T) {
+		pageCount := 0
+		client := newMockGitHubClient(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.Header.Get("Accept"), "diff") {
+				return &http.Response{
+					StatusCode: http.StatusNotAcceptable,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(bytes.NewBufferString(`{"message": "diff too large"}`)),
+				}, nil
+			}
+			if strings.Contains(req.URL.Path, "/files") {
+				pageCount++
+				files := []*github.CommitFile{
+					{
+						Filename: github.Ptr("path/found.go"),
+						Patch:    github.Ptr("@@ -1 +1 @@\n-1\n+2"),
+					},
+				}
+				data, _ := json.Marshal(files)
+				header := make(http.Header)
+				header.Set("Link", `<https://api.github.com/repos/owner/repo/pulls/1/files?page=2>; rel="next"`)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     header,
+					Body:       io.NopCloser(bytes.NewReader(data)),
+				}, nil
+			}
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(bytes.NewBufferString("{}"))}, nil
+		})
+
+		diff, err := FetchPRDiff(ctx, client, "owner", "repo", 1, []string{"path/found.go"}, nil)
+		require.NoError(t, err)
+		require.Contains(t, diff, "path/found.go")
+		require.Equal(t, 1, pageCount, "Should break pagination as soon as all target paths are matched")
 	})
 }
 

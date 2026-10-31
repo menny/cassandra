@@ -12,6 +12,9 @@ import (
 	"github.com/menny/cassandra/util"
 )
 
+// ErrDiffTooLarge is returned when GitHub rejects a PR diff request with HTTP 406 (e.g. diff exceeds limit).
+var ErrDiffTooLarge = errors.New("PR diff exceeds GitHub API limit (406)")
+
 // PRStackItem represents a pull request in a stacked PR chain.
 type PRStackItem struct {
 	PRNumber int    `json:"pr_number"`
@@ -173,7 +176,7 @@ func FetchPRDiff(ctx context.Context, client *github.Client, owner, repo string,
 			if len(paths) > 0 {
 				return fetchFilePatches(ctx, client, owner, repo, prNumber, paths, ignoredLockFiles)
 			}
-			return "", nil
+			return "", ErrDiffTooLarge
 		}
 		return "", err
 	}
@@ -218,8 +221,13 @@ func fetchFilePatches(ctx context.Context, client *github.Client, owner, repo st
 			targetPaths[p] = true
 		}
 	}
+	if len(targetPaths) == 0 {
+		return "", nil
+	}
+
 	opts := &github.ListOptions{PerPage: 100}
 	var matchedChunks []string
+	matchedCount := 0
 
 	for {
 		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, prNumber, opts)
@@ -228,12 +236,15 @@ func fetchFilePatches(ctx context.Context, client *github.Client, owner, repo st
 		}
 		for _, f := range files {
 			fn := f.GetFilename()
-			if targetPaths[fn] && f.GetPatch() != "" {
-				chunk := fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n%s", fn, fn, fn, fn, f.GetPatch())
-				matchedChunks = append(matchedChunks, chunk)
+			if targetPaths[fn] {
+				matchedCount++
+				if f.GetPatch() != "" {
+					chunk := fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n%s", fn, fn, fn, fn, f.GetPatch())
+					matchedChunks = append(matchedChunks, chunk)
+				}
 			}
 		}
-		if resp.NextPage == 0 {
+		if matchedCount == len(targetPaths) || resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
