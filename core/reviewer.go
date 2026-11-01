@@ -59,7 +59,7 @@ func (r *Reviewer) GetVerdict() ReviewVerdict {
 }
 
 func allowAskDeveloper(cfg *config.Config) bool {
-	return cfg != nil && cfg.AllowAskDeveloper && cfg.Render != "acp"
+	return cfg != nil && cfg.AllowAskDeveloper
 }
 
 func isACPSession(cfg *config.Config) bool {
@@ -79,6 +79,9 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	}
 
 	registry := tools.NewRegistry()
+	if p, ok := reporter.(tools.DeveloperPrompter); ok {
+		registry.SetDeveloperPrompter(p)
+	}
 	var notifier tools.UserNotifier = reporter
 	if cfg.Render != "markdown" && cfg.Render != "tui" {
 		notifier = tools.NoOpUserNotifier{}

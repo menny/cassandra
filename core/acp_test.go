@@ -19,13 +19,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 	"github.com/stretchr/testify/require"
 )
 
 type testACPClient struct {
-	mu      sync.Mutex
-	updates []acp.SessionNotification
-	updateC chan acp.SessionNotification
+	mu            sync.Mutex
+	updates       []acp.SessionNotification
+	updateC       chan acp.SessionNotification
+	elicitHandler func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error)
 }
 
 func newTestACPClient() *testACPClient {
@@ -78,6 +80,16 @@ func (c *testACPClient) ReleaseTerminal(ctx context.Context, _ acp.ReleaseTermin
 
 func (c *testACPClient) WaitForTerminalExit(ctx context.Context, _ acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
 	return acp.WaitForTerminalExitResponse{}, ctx.Err()
+}
+
+func (c *testACPClient) UnstableCreateElicitation(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+	c.mu.Lock()
+	handler := c.elicitHandler
+	c.mu.Unlock()
+	if handler != nil {
+		return handler(ctx, params)
+	}
+	return acp.UnstableCreateElicitationResponse{}, ctx.Err()
 }
 
 func (c *testACPClient) snapshotUpdates() []acp.SessionNotification {
@@ -1529,5 +1541,184 @@ func TestACPReporter_LoadSession_Errors(t *testing.T) {
 			McpServers: []acp.McpServer{},
 		})
 		require.Error(t, err)
+	})
+}
+
+func TestACP_AskDeveloper_Elicitation(t *testing.T) {
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+
+	t.Run("skips when client does not support elicitation form", func(t *testing.T) {
+		reporter, clientConn, _, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+		})
+		require.NoError(t, err)
+
+		prompter, ok := reporter.(tools.DeveloperPrompter)
+		require.True(t, ok)
+
+		resp, err := prompter.AskDeveloper(sessionCtx, tools.AskDeveloperRequest{
+			Question:  "Should we use PostgreSQL?",
+			Reasoning: "Affects persistence layer.",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "skipped", resp.Status)
+		require.Contains(t, resp.Message, "does not support elicitation forms")
+	})
+
+	t.Run("answered with single-select options", func(t *testing.T) {
+		reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		client.elicitHandler = func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+			require.NotNil(t, params.Form)
+			require.Contains(t, params.Form.Message, "Which database should we use?")
+			require.Contains(t, params.Form.Message, "Reasoning: Need ACID transactions.")
+			require.Equal(t, "form", params.Form.Mode)
+
+			return acp.UnstableCreateElicitationResponse{
+				Accept: &acp.UnstableCreateElicitationAccept{
+					Action: "accept",
+					Content: map[string]any{
+						"selected": "PostgreSQL",
+						"response": "Ensure migrations are applied.",
+					},
+				},
+			}, nil
+		}
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+			ClientCapabilities: acp.ClientCapabilities{
+				Elicitation: &acp.ElicitationCapabilities{
+					Form: &acp.ElicitationFormCapabilities{},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		prompter, ok := reporter.(tools.DeveloperPrompter)
+		require.True(t, ok)
+
+		resp, err := prompter.AskDeveloper(sessionCtx, tools.AskDeveloperRequest{
+			Question:      "Which database should we use?",
+			Reasoning:     "Need ACID transactions.",
+			Options:       []string{"PostgreSQL", "SQLite"},
+			IsMultiSelect: false,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "answered", resp.Status)
+		require.Equal(t, []string{"PostgreSQL"}, resp.Selected)
+		require.Equal(t, "Ensure migrations are applied.", resp.Response)
+	})
+
+	t.Run("answered with multi-select options", func(t *testing.T) {
+		reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		client.elicitHandler = func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+			return acp.UnstableCreateElicitationResponse{
+				Accept: &acp.UnstableCreateElicitationAccept{
+					Action: "accept",
+					Content: map[string]any{
+						"selected": []any{"frontend", "backend"},
+						"response": "Full stack changes.",
+					},
+				},
+			}, nil
+		}
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+			ClientCapabilities: acp.ClientCapabilities{
+				Elicitation: &acp.ElicitationCapabilities{
+					Form: &acp.ElicitationFormCapabilities{},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		prompter, ok := reporter.(tools.DeveloperPrompter)
+		require.True(t, ok)
+
+		resp, err := prompter.AskDeveloper(sessionCtx, tools.AskDeveloperRequest{
+			Question:      "Which scopes apply?",
+			Reasoning:     "Tagging PR.",
+			Options:       []string{"frontend", "backend", "infra"},
+			IsMultiSelect: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "answered", resp.Status)
+		require.Equal(t, []string{"frontend", "backend"}, resp.Selected)
+		require.Equal(t, "Full stack changes.", resp.Response)
+	})
+
+	t.Run("declined by developer", func(t *testing.T) {
+		reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		client.elicitHandler = func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+			return acp.UnstableCreateElicitationResponse{
+				Decline: &acp.UnstableCreateElicitationDecline{
+					Action: "decline",
+				},
+			}, nil
+		}
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+			ClientCapabilities: acp.ClientCapabilities{
+				Elicitation: &acp.ElicitationCapabilities{
+					Form: &acp.ElicitationFormCapabilities{},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		prompter, ok := reporter.(tools.DeveloperPrompter)
+		require.True(t, ok)
+
+		resp, err := prompter.AskDeveloper(sessionCtx, tools.AskDeveloperRequest{
+			Question:  "Should we refactor this?",
+			Reasoning: "Code smell observed.",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "skipped", resp.Status)
+		require.Contains(t, resp.Message, "declined to respond")
+	})
+
+	t.Run("times out when developer does not answer", func(t *testing.T) {
+		reporter, clientConn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+		defer cleanup()
+
+		client.elicitHandler = func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+			<-ctx.Done()
+			return acp.UnstableCreateElicitationResponse{}, ctx.Err()
+		}
+
+		_, err := clientConn.Initialize(sessionCtx, acp.InitializeRequest{
+			ProtocolVersion: acp.ProtocolVersionNumber,
+			ClientCapabilities: acp.ClientCapabilities{
+				Elicitation: &acp.ElicitationCapabilities{
+					Form: &acp.ElicitationFormCapabilities{},
+				},
+			},
+		})
+		require.NoError(t, err)
+
+		prompter, ok := reporter.(tools.DeveloperPrompter)
+		require.True(t, ok)
+
+		ctxWithTimeout := tools.WithAskDeveloperTimeout(sessionCtx, 50*time.Millisecond)
+		resp, err := prompter.AskDeveloper(ctxWithTimeout, tools.AskDeveloperRequest{
+			Question:  "Should we refactor this?",
+			Reasoning: "Code smell observed.",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "timeout", resp.Status)
+		require.Contains(t, resp.Message, "did not respond within")
 	})
 }

@@ -76,7 +76,7 @@ type PromptSummary struct {
 //  3. <supplemental_guideline>  — semi-static, additive guidelines
 //  4. <approval_evaluation_guidelines> — semi-static
 //  5. <personal_review_guidelines>     — semi-static, optional
-//  6. ask_developer guidelines         — semi-static, optional
+//  6. <ask_developer_guidelines>       — semi-static, optional
 //  7. <t3_thread_launch_guidelines>    — semi-static, optional (T3 Code sessions only)
 //  8. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
 //
@@ -112,7 +112,22 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 
 	// Zone 2: semi-static, config-driven
 	if allowAskDeveloper {
-		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. If the tool returns a timeout message, do your best to assume the answer and document your assumption.\n"
+		stable += "\n<ask_developer_guidelines>\n" +
+			"You have access to the `ask_developer` tool to ask the developer clarifying questions during the review.\n\n" +
+			"1. **When to ask**:\n" +
+			"   - Ambiguous Intent: A change removes or significantly alters existing functionality or tests, and it is ambiguous whether this was intentional or an accidental regression.\n" +
+			"   - Missing Business Context: Critical business rules, edge cases, or architectural decisions that cannot be determined from the code, git history, or PR description.\n" +
+			"   - Verdict-Altering Uncertainty: Only ask questions whose answers would directly affect your review findings or concluding verdict (Approved vs Rejected vs Comment).\n\n" +
+			"2. **When NOT to ask**:\n" +
+			"   - Do NOT ask questions that can be answered by exploring the repository using `read_file`, `glob_files`, or `grep_files`. Always investigate first.\n" +
+			"   - Do NOT ask about subjective stylistic choices, formatting, or trivial preferences.\n" +
+			"   - Do NOT ask questions after you have already determined your final verdict.\n\n" +
+			"3. **How to ask**:\n" +
+			"   - Provide concrete, concise `options` whenever feasible, and set `is_multi_select: true` if multiple choices may apply to make answering fast and clear for the developer.\n" +
+			"   - Keep questions brief and explain your `reasoning` clearly so the developer understands what hinges on their answer.\n\n" +
+			"4. **Handling timeouts or skipped prompts**:\n" +
+			"   - If the tool returns a timeout or skipped response, do not abort or stall the review. Proceed using your best technical judgment and explicitly state your assumption in the review finding.\n" +
+			"</ask_developer_guidelines>\n"
 	}
 
 	if allowT3ThreadLaunch {

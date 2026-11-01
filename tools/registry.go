@@ -17,6 +17,7 @@ type Registry struct {
 	tools           []llm.ToolDef
 	handlers        map[string]ToolHandler
 	verdictListener VerdictChangeListener
+	prompter        DeveloperPrompter
 }
 
 func NewRegistry() *Registry {
@@ -31,6 +32,10 @@ func (r *Registry) ToTools() []llm.ToolDef {
 
 func (r *Registry) SetVerdictChangeListener(l VerdictChangeListener) {
 	r.verdictListener = l
+}
+
+func (r *Registry) SetDeveloperPrompter(p DeveloperPrompter) {
+	r.prompter = p
 }
 
 func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
@@ -100,6 +105,12 @@ func RegisterLocalTools(r *Registry, root, base, head string, ignoredLockFiles [
 		registerPRCommentTool(r, root, metaFile)
 	}
 	if allowAskDeveloper {
-		registerAskDeveloper(r, notifier)
+		prompter := r.prompter
+		if prompter == nil {
+			if p, ok := notifier.(DeveloperPrompter); ok {
+				prompter = p
+			}
+		}
+		registerAskDeveloper(r, prompter, notifier)
 	}
 }
