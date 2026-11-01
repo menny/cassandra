@@ -38,10 +38,6 @@ func (r *Registry) SetDeveloperPrompter(p DeveloperPrompter) {
 	r.prompter = p
 }
 
-func (r *Registry) DeveloperPrompter() DeveloperPrompter {
-	return r.prompter
-}
-
 func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
 	if _, exists := r.handlers[def.Name]; exists {
 		for i, existing := range r.tools {

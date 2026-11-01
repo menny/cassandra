@@ -247,13 +247,14 @@ func TestBuildSystemPrompt_AllowAskDeveloper(t *testing.T) {
 	t.Run("when allowAskDeveloper is true", func(t *testing.T) {
 		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, false, "")
 		require.NoError(t, err)
-		require.Contains(t, stable, "You have access to the `ask_developer` tool.")
+		require.Contains(t, stable, "<ask_developer_guidelines>")
+		require.Contains(t, stable, "You have access to the `ask_developer` tool to ask the developer clarifying questions")
 	})
 
 	t.Run("when allowAskDeveloper is false", func(t *testing.T) {
 		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, "")
 		require.NoError(t, err)
-		require.NotContains(t, stable, "You have access to the `ask_developer` tool.")
+		require.NotContains(t, stable, "<ask_developer_guidelines>")
 	})
 }
 

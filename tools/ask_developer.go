@@ -94,9 +94,6 @@ func registerAskDeveloper(r *Registry, prompter DeveloperPrompter, notifier User
 		notifier.NotifyUser()
 
 		activePrompter := prompter
-		if p, ok := ctx.Value(prompterKey{}).(DeveloperPrompter); ok && p != nil {
-			activePrompter = p
-		}
 
 		req := AskDeveloperRequest{
 			Question:      args.Question,
@@ -286,10 +283,9 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 }
 
 type (
-	stdinKey    struct{}
-	stderrKey   struct{}
-	timeoutKey  struct{}
-	prompterKey struct{}
+	stdinKey   struct{}
+	stderrKey  struct{}
+	timeoutKey struct{}
 )
 
 // AskDeveloperTimeout returns the configured timeout for developer elicitation from context,
@@ -310,9 +306,4 @@ func WithTestStreams(ctx context.Context, in io.Reader, out io.Writer) context.C
 // WithAskDeveloperTimeout wraps a context to override the ask_developer timeout.
 func WithAskDeveloperTimeout(ctx context.Context, d time.Duration) context.Context {
 	return context.WithValue(ctx, timeoutKey{}, d)
-}
-
-// WithDeveloperPrompter wraps a context to override the DeveloperPrompter.
-func WithDeveloperPrompter(ctx context.Context, p DeveloperPrompter) context.Context {
-	return context.WithValue(ctx, prompterKey{}, p)
 }
