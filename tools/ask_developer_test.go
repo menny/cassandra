@@ -50,7 +50,7 @@ func TestAskDeveloper_Answered(t *testing.T) {
 		_, _ = inW.Write([]byte("My Answer\n"))
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:  "Should we use PostgreSQL?",
 		Reasoning: "It affects the database abstraction layer.",
 	})
@@ -84,7 +84,7 @@ func TestAskDeveloper_Skipped(t *testing.T) {
 		_, _ = inW.Write([]byte("\n"))
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:  "Should we use PostgreSQL?",
 		Reasoning: "It affects the database abstraction layer.",
 	})
@@ -113,7 +113,7 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 	ctx := WithTestStreams(context.Background(), inR, &outBuf)
 	ctx = WithAskDeveloperTimeout(ctx, 50*time.Millisecond)
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:  "Should we use PostgreSQL?",
 		Reasoning: "It affects the database abstraction layer.",
 	})
@@ -150,7 +150,7 @@ func TestAskDeveloper_Cancelled(t *testing.T) {
 		inW.Close()
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:  "Should we use PostgreSQL?",
 		Reasoning: "It affects the database abstraction layer.",
 	})
@@ -177,7 +177,7 @@ func TestAskDeveloper_CustomPrompter(t *testing.T) {
 	r.SetDeveloperPrompter(prompter)
 	registerAskDeveloper(r, prompter, &notifier)
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:      "Which database should we use?",
 		Reasoning:     "We need a persistent store.",
 		Options:       []string{"PostgreSQL", "SQLite", "MySQL"},
@@ -225,7 +225,7 @@ func TestAskDeveloper_TerminalPrompter_Options(t *testing.T) {
 		_, _ = inW.Write([]byte("Local development notes\n"))
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:      "Which database should we use?",
 		Reasoning:     "Persistence choice.",
 		Options:       []string{"SQLite", "PostgreSQL"},
@@ -267,7 +267,7 @@ func TestAskDeveloper_TerminalPrompter_OtherChoice(t *testing.T) {
 		_, _ = inW.Write([]byte("DuckDB\n"))
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:      "Which database should we use?",
 		Reasoning:     "Persistence choice.",
 		Options:       []string{"SQLite", "PostgreSQL"},
@@ -310,7 +310,7 @@ func TestAskDeveloper_TerminalPrompter_MultiSelect(t *testing.T) {
 		_, _ = inW.Write([]byte("Selected option 1 details\n"))
 	}()
 
-	argsBytes, err := json.Marshal(askDeveloperArgs{
+	argsBytes, err := json.Marshal(AskDeveloperRequest{
 		Question:      "Which tags should apply?",
 		Reasoning:     "Tag classification.",
 		Options:       []string{"backend", "frontend", "infra"},
