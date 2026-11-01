@@ -125,7 +125,8 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 			for _, o := range req.Options {
 				opts = append(opts, huh.NewOption(o, o))
 			}
-			fields = append(fields,
+			fields = append(
+				fields,
 				huh.NewMultiSelect[string]().
 					Title("Select option(s)").
 					Options(opts...).
@@ -140,7 +141,8 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 				opts = append(opts, huh.NewOption(o, o))
 			}
 			opts = append(opts, huh.NewOption(OtherChoiceOption, OtherChoiceOption))
-			fields = append(fields,
+			fields = append(
+				fields,
 				huh.NewSelect[string]().
 					Title("Select an option").
 					Options(opts...).
@@ -151,7 +153,8 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 			)
 		}
 	} else {
-		fields = append(fields,
+		fields = append(
+			fields,
 			huh.NewInput().
 				Title("Your Response").
 				Value(&response),
