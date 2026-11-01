@@ -8,7 +8,7 @@ This configuration uses the standard Cassandra settings without any supplemental
 
 <!-- EVAL_RESULTS_START:baseline -->
 **Config**: `cassandra.toml`
-**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
+**Commit**: [`f72f56d`](https://github.com/menny/cassandra/commit/f72f56dff34e1d82850b4b6e6708c111c620ba20)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
@@ -26,13 +26,13 @@ This suite evaluates the agent's ability to discover, understand, and correctly 
 
 <!-- EVAL_RESULTS_START:baseline_mcp_invoking -->
 **Config**: `cassandra.toml`
-**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
+**Commit**: [`f72f56d`](https://github.com/menny/cassandra/commit/f72f56dff34e1d82850b4b6e6708c111c620ba20)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
-| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 2 | 1.20 |
-| **OVERALL** | | | **3.00** | **3.50** | **3.10** |
+| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 1 | 1.00 |
+| **OVERALL** | | | **3.00** | **3.00** | **3.00** |
 
 <!-- EVAL_RESULTS_END:baseline_mcp_invoking -->
 

@@ -1,0 +1,71 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly satisfies the rubric. It explicitly identifies that `ExecuteAsync` does not exist on `*db.DB` in `lib/db/db.go`, notes that this will lead to a compilation failure, references the actual available method `Execute`, and offers clear, actionable remediation.",
+      "findings": [
+        "Accurately identified that `ExecuteAsync` is not a valid method on `*db.DB` in `lib/db/db.go`.",
+        "Correctly pointed out that this results in a compilation failure.",
+        "Provided helpful and constructive remediation by referencing the existing `Execute` method."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 13596,
+        "output": 639,
+        "thinking": 2111,
+        "cached": 13277,
+        "total_input": 26873,
+        "total_output": 2750
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 11,
+        "by_tool": {
+          "emit_reviewer_state": 3,
+          "glob_files": 1,
+          "godoc_package": 3,
+          "godoc_symbol": 2,
+          "read_file": 2
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The rubric explicitly required the agent to fetch the URL 'https://ai.google.dev/api/rest/v1beta/models/generateContent' and verify the API usage and discrepancies against the official documentation. The agent failed to do this, explicitly claiming in the review that it cannot verify against live external web documentation.",
+      "findings": [
+        "Failed to fetch the specified URL (https://ai.google.dev/api/rest/v1beta/models/generateContent).",
+        "Explicitly stated that external web documentation cannot be verified, completely missing the primary rubric requirement.",
+        "Did not confirm API usage or discrepancies based on the live documentation."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9701,
+        "output": 696,
+        "thinking": 2817,
+        "cached": 12184,
+        "total_input": 21885,
+        "total_output": 3513
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 5,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1,
+          "wishlist_tool": 1
+        }
+      }
+    }
+  }
+]

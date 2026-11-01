@@ -1,0 +1,71 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly satisfies the rubric. It clearly identifies that `ExecuteAsync` is not a valid method on `*db.DB`, accurately citing `lib/db/db.go` and noting the actual existing method `Execute(query string) error`. The review is constructive, concise, and provides an actionable fix.",
+      "findings": [
+        "Accurately identified that `ExecuteAsync` does not exist on `*db.DB` by checking `lib/db/db.go`.",
+        "Provided the exact correct existing method (`Execute`) and recommended removing the leftover bug comments.",
+        "Included a reasonable, constructive observation regarding nil receiver handling."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 8961,
+        "output": 516,
+        "thinking": 3082,
+        "cached": 11184,
+        "total_input": 20145,
+        "total_output": 3598
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 8,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "godoc_package": 2,
+          "godoc_symbol": 2,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 1,
+      "rationale": "The review failed to fulfill the explicit requirement of the rubric, which mandated fetching the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and confirming API usage or identifying discrepancies. Instead, the review explicitly stated that it 'cannot verify external web documentation directly from the local review environment', entirely skipping the required check.",
+      "findings": [
+        "Failed to fetch the specified URL https://ai.google.dev/api/rest/v1beta/models/generateContent as required by the rubric.",
+        "Explicitly stated an inability to check external documentation instead of attempting to retrieve or verify the documentation details.",
+        "Sensibly identified that the code was an incomplete stub with an unresolved bug comment, but ignored the core directive of the rubric."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 17010,
+        "output": 784,
+        "thinking": 6711,
+        "cached": 11381,
+        "total_input": 28391,
+        "total_output": 7495
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 5,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 1,
+          "wishlist_tool": 1
+        }
+      }
+    }
+  }
+]
