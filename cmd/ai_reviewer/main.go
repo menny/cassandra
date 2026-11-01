@@ -176,7 +176,6 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		}
 		cfg.Render = "acp"
 		cfg.InteractivePostReview = true
-		cfg.AllowAskDeveloper = false
 	} else if cfg.Render == "acp" {
 		return errors.New("ACP mode can only be enabled via the --acp CLI flag")
 	}
@@ -210,8 +209,8 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		return fmt.Errorf("invalid value for --render: %q (must be 'raw', 'markdown', 'tui', or 'acp')", cfg.Render)
 	}
 
-	if cfg.AllowAskDeveloper && cfg.Render != "markdown" && cfg.Render != "tui" {
-		return errors.New("--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+	if cfg.AllowAskDeveloper && cfg.Render != "markdown" && cfg.Render != "tui" && cfg.Render != "acp" {
+		return errors.New("--allow-ask-developer can only be used when --render is 'markdown', 'tui', or 'acp'")
 	}
 
 	if cfg.InteractivePostReview && cfg.Render != "markdown" && cfg.Render != "tui" && cfg.Render != "acp" {

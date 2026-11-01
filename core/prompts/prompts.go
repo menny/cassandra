@@ -112,7 +112,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 
 	// Zone 2: semi-static, config-driven
 	if allowAskDeveloper {
-		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. If the tool returns a timeout message, do your best to assume the answer and document your assumption.\n"
+		stable += "\nYou have access to the `ask_developer` tool. If you lack context about internal business logic or are unsure about a complex architectural choice, do not guess. Call the `ask_developer` tool to clarify. When feasible, provide candidate `options` (and set `is_multi_select` if multiple selections apply) to make answering fast and clear for the developer. If the tool returns a timeout or skipped message, do your best to assume the answer and document your assumption in the review.\n"
 	}
 
 	if allowT3ThreadLaunch {

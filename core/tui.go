@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 	"golang.org/x/term"
 )
 
@@ -431,6 +432,11 @@ type tuiReporter struct {
 	closeOnce sync.Once
 }
 
+var (
+	_ Reporter                = (*tuiReporter)(nil)
+	_ tools.DeveloperPrompter = (*tuiReporter)(nil)
+)
+
 // NewTuiReporter constructs a TUI reporter.
 func NewTuiReporter(stdout, stderr io.Writer, cancel context.CancelFunc) Reporter {
 	m := &tuiModel{
@@ -729,4 +735,22 @@ func indentText(text string, indent int) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// AskDeveloper implements tools.DeveloperPrompter. It releases the terminal
+// so that the interactive huh form can prompt the developer without interference
+// from the background Bubble Tea loop, then restores the terminal afterwards.
+func (r *tuiReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRequest) (tools.AskDeveloperResponse, error) {
+	r.mu.Lock()
+	prog := r.program
+	r.mu.Unlock()
+
+	if prog != nil {
+		_ = prog.ReleaseTerminal()
+		defer func() {
+			_ = prog.RestoreTerminal()
+		}()
+	}
+
+	return tools.DefaultTerminalPrompter{}.AskDeveloper(ctx, req)
 }

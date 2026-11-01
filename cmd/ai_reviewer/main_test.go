@@ -376,7 +376,7 @@ func TestRun_AllowAskDeveloperValidation(t *testing.T) {
 
 		err := run(ctx, args, stderr)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "--allow-ask-developer can only be used when --render is 'markdown' or 'tui'")
+		require.Contains(t, err.Error(), "--allow-ask-developer can only be used when --render is 'markdown', 'tui', or 'acp'")
 	})
 
 	t.Run("proceeds past validation when allow-ask-developer is true and render is markdown", func(t *testing.T) {
@@ -427,7 +427,7 @@ func TestRun_ACPValidation(t *testing.T) {
 		require.Contains(t, err.Error(), "--acp requires --interactive-post-review to be enabled")
 	})
 
-	t.Run("disables allow-ask-developer automatically when --acp is set", func(t *testing.T) {
+	t.Run("allows allow-ask-developer when --acp is set", func(t *testing.T) {
 		cwd, err := os.Getwd()
 		require.NoError(t, err)
 		defer func() { _ = os.Chdir(cwd) }()
@@ -444,6 +444,7 @@ func TestRun_ACPValidation(t *testing.T) {
 			"--model", "gemini-1.5-flash",
 			"--provider-api-key", "fake-key",
 			"--acp",
+			"--allow-ask-developer",
 		}
 		// run() will fail later due to missing git repository, not due to allow-ask-developer validation
 		err = run(ctx, args, stderr)

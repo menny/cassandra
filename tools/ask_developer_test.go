@@ -20,10 +20,21 @@ func (m *mockNotifier) NotifyUser() {
 	m.notified++
 }
 
+type mockPrompter struct {
+	lastReq AskDeveloperRequest
+	resp    AskDeveloperResponse
+	err     error
+}
+
+func (m *mockPrompter) AskDeveloper(_ context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error) {
+	m.lastReq = req
+	return m.resp, m.err
+}
+
 func TestAskDeveloper_Answered(t *testing.T) {
 	r := NewRegistry()
 	notifier := mockNotifier{}
-	registerAskDeveloper(r, &notifier)
+	registerAskDeveloper(r, nil, &notifier)
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -57,7 +68,7 @@ func TestAskDeveloper_Answered(t *testing.T) {
 
 func TestAskDeveloper_Skipped(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r, &mockNotifier{})
+	registerAskDeveloper(r, nil, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -90,7 +101,7 @@ func TestAskDeveloper_Skipped(t *testing.T) {
 
 func TestAskDeveloper_Timeout(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r, &mockNotifier{})
+	registerAskDeveloper(r, nil, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	defer inW.Close()
@@ -120,7 +131,7 @@ func TestAskDeveloper_Timeout(t *testing.T) {
 
 func TestAskDeveloper_Cancelled(t *testing.T) {
 	r := NewRegistry()
-	registerAskDeveloper(r, &mockNotifier{})
+	registerAskDeveloper(r, nil, &mockNotifier{})
 
 	inR, inW := io.Pipe()
 	var outBuf bytes.Buffer
@@ -148,4 +159,171 @@ func TestAskDeveloper_Cancelled(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestAskDeveloper_CustomPrompter(t *testing.T) {
+	r := NewRegistry()
+	notifier := mockNotifier{}
+	prompter := &mockPrompter{
+		resp: AskDeveloperResponse{
+			Status:   "answered",
+			Selected: []string{"PostgreSQL"},
+			Response: "Use PostgreSQL for ACID compliance.",
+		},
+	}
+	r.SetDeveloperPrompter(prompter)
+	registerAskDeveloper(r, prompter, &notifier)
+
+	argsBytes, err := json.Marshal(askDeveloperArgs{
+		Question:      "Which database should we use?",
+		Reasoning:     "We need a persistent store.",
+		Options:       []string{"PostgreSQL", "SQLite", "MySQL"},
+		IsMultiSelect: false,
+	})
+	require.NoError(t, err)
+
+	res, err := r.HandleCall(context.Background(), llm.ToolCall{
+		Name:      "ask_developer",
+		Arguments: string(argsBytes),
+	})
+	require.NoError(t, err)
+
+	var resp AskDeveloperResponse
+	require.NoError(t, json.Unmarshal([]byte(res), &resp))
+	require.Equal(t, "answered", resp.Status)
+	require.Equal(t, []string{"PostgreSQL"}, resp.Selected)
+	require.Equal(t, "Use PostgreSQL for ACID compliance.", resp.Response)
+	require.Equal(t, 1, notifier.notified)
+	require.Equal(t, "Which database should we use?", prompter.lastReq.Question)
+	require.Equal(t, []string{"PostgreSQL", "SQLite", "MySQL"}, prompter.lastReq.Options)
+	require.False(t, prompter.lastReq.IsMultiSelect)
+}
+
+func TestAskDeveloper_TerminalPrompter_Options(t *testing.T) {
+	r := NewRegistry()
+	registerAskDeveloper(r, nil, &mockNotifier{})
+
+	inR, inW := io.Pipe()
+	var outBuf bytes.Buffer
+
+	ctx := WithTestStreams(context.Background(), inR, &outBuf)
+
+	// In accessible mode:
+	// Choice 1: "SQLite"
+	// Choice 2: "PostgreSQL"
+	// Choice 3: "Other (specify below)"
+	// Then input field: "Additional notes"
+	go func() {
+		defer inW.Close()
+		// Select option 1 (SQLite)
+		_, _ = inW.Write([]byte("1\n"))
+		// Wait for select prompt to finish and second input prompt to start reading
+		time.Sleep(30 * time.Millisecond)
+		_, _ = inW.Write([]byte("Local development notes\n"))
+	}()
+
+	argsBytes, err := json.Marshal(askDeveloperArgs{
+		Question:      "Which database should we use?",
+		Reasoning:     "Persistence choice.",
+		Options:       []string{"SQLite", "PostgreSQL"},
+		IsMultiSelect: false,
+	})
+	require.NoError(t, err)
+
+	res, err := r.HandleCall(ctx, llm.ToolCall{
+		Name:      "ask_developer",
+		Arguments: string(argsBytes),
+	})
+	require.NoError(t, err)
+
+	var resp AskDeveloperResponse
+	require.NoError(t, json.Unmarshal([]byte(res), &resp))
+	require.Equal(t, "answered", resp.Status)
+	require.Equal(t, []string{"SQLite"}, resp.Selected)
+	require.Equal(t, "Local development notes", resp.Response)
+}
+
+func TestAskDeveloper_TerminalPrompter_OtherChoice(t *testing.T) {
+	r := NewRegistry()
+	registerAskDeveloper(r, nil, &mockNotifier{})
+
+	inR, inW := io.Pipe()
+	var outBuf bytes.Buffer
+
+	ctx := WithTestStreams(context.Background(), inR, &outBuf)
+
+	// Choice 1: "SQLite"
+	// Choice 2: "PostgreSQL"
+	// Choice 3: "Other (specify below)"
+	go func() {
+		defer inW.Close()
+		// Select "Other" (3)
+		_, _ = inW.Write([]byte("3\n"))
+		time.Sleep(30 * time.Millisecond)
+		// Enter custom choice in response
+		_, _ = inW.Write([]byte("DuckDB\n"))
+	}()
+
+	argsBytes, err := json.Marshal(askDeveloperArgs{
+		Question:      "Which database should we use?",
+		Reasoning:     "Persistence choice.",
+		Options:       []string{"SQLite", "PostgreSQL"},
+		IsMultiSelect: false,
+	})
+	require.NoError(t, err)
+
+	res, err := r.HandleCall(ctx, llm.ToolCall{
+		Name:      "ask_developer",
+		Arguments: string(argsBytes),
+	})
+	require.NoError(t, err)
+
+	var resp AskDeveloperResponse
+	require.NoError(t, json.Unmarshal([]byte(res), &resp))
+	require.Equal(t, "answered", resp.Status)
+	require.Empty(t, resp.Selected)
+	require.Equal(t, "DuckDB", resp.Response)
+}
+
+func TestAskDeveloper_TerminalPrompter_MultiSelect(t *testing.T) {
+	r := NewRegistry()
+	registerAskDeveloper(r, nil, &mockNotifier{})
+
+	inR, inW := io.Pipe()
+	var outBuf bytes.Buffer
+
+	ctx := WithTestStreams(context.Background(), inR, &outBuf)
+
+	// In accessible mode for multiselect:
+	// Enter "1\n" to select item 1
+	// Enter "0\n" to finish selection
+	// Then enter input text
+	go func() {
+		defer inW.Close()
+		_, _ = inW.Write([]byte("1\n"))
+		time.Sleep(30 * time.Millisecond)
+		_, _ = inW.Write([]byte("0\n"))
+		time.Sleep(30 * time.Millisecond)
+		_, _ = inW.Write([]byte("Selected option 1 details\n"))
+	}()
+
+	argsBytes, err := json.Marshal(askDeveloperArgs{
+		Question:      "Which tags should apply?",
+		Reasoning:     "Tag classification.",
+		Options:       []string{"backend", "frontend", "infra"},
+		IsMultiSelect: true,
+	})
+	require.NoError(t, err)
+
+	res, err := r.HandleCall(ctx, llm.ToolCall{
+		Name:      "ask_developer",
+		Arguments: string(argsBytes),
+	})
+	require.NoError(t, err)
+
+	var resp AskDeveloperResponse
+	require.NoError(t, json.Unmarshal([]byte(res), &resp))
+	require.Equal(t, "answered", resp.Status)
+	require.Equal(t, []string{"backend"}, resp.Selected)
+	require.Equal(t, "Selected option 1 details", resp.Response)
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/util"
 )
 
@@ -44,6 +45,7 @@ var acpToolKinds = map[string]acp.ToolKind{
 	"post_pr_comment":           acp.ToolKindOther,
 	"get_pr_metadata":           acp.ToolKindRead,
 	"get_pr_diff":               acp.ToolKindRead,
+	"ask_developer":             acp.ToolKindOther,
 }
 
 func availableACPModes(desc string) []acp.SessionMode {
@@ -184,21 +186,23 @@ type acpReporter struct {
 	sessionTitle       string
 	sessionDescription string
 
-	sessionStore    SessionStore
-	isLoadedSession bool
-	loadedMessages  []llm.Message
-	replayDone      chan struct{}
-	reviewErr       error
+	sessionStore                  SessionStore
+	clientSupportsElicitationForm bool
+	isLoadedSession               bool
+	loadedMessages                []llm.Message
+	replayDone                    chan struct{}
+	reviewErr                     error
 
 	closeOnce sync.Once
 }
 
 var (
-	_ Reporter         = (*acpReporter)(nil)
-	_ acp.Agent        = (*acpReporter)(nil)
-	_ acp.AgentLoader  = (*acpReporter)(nil)
-	_ SessionWaiter    = (*acpReporter)(nil)
-	_ PostReviewServer = (*acpReporter)(nil)
+	_ Reporter                = (*acpReporter)(nil)
+	_ acp.Agent               = (*acpReporter)(nil)
+	_ acp.AgentLoader         = (*acpReporter)(nil)
+	_ SessionWaiter           = (*acpReporter)(nil)
+	_ PostReviewServer        = (*acpReporter)(nil)
+	_ tools.DeveloperPrompter = (*acpReporter)(nil)
 )
 
 // ACPOption configures an acpReporter.
@@ -509,7 +513,12 @@ func (r *acpReporter) writeStderr(format string, args ...any) {
 
 // --- acp.Agent implementation ---
 
-func (r *acpReporter) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (r *acpReporter) Initialize(_ context.Context, req acp.InitializeRequest) (acp.InitializeResponse, error) {
+	r.mu.Lock()
+	if req.ClientCapabilities.Elicitation != nil && req.ClientCapabilities.Elicitation.Form != nil {
+		r.clientSupportsElicitationForm = true
+	}
+	r.mu.Unlock()
 	title := "Cassandra AI Code Reviewer"
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
@@ -1603,4 +1612,146 @@ func parseFileLineRef(ref string) (filePath, linePart string, startLine int, ok 
 		return "", "", 0, false
 	}
 	return filePath, linePart, line, true
+}
+
+// AskDeveloper implements tools.DeveloperPrompter using ACP elicitation protocol.
+func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRequest) (tools.AskDeveloperResponse, error) {
+	r.mu.Lock()
+	supportsForm := r.clientSupportsElicitationForm
+	conn := r.conn
+	r.mu.Unlock()
+
+	if !supportsForm || conn == nil {
+		return tools.AskDeveloperResponse{
+			Status:  "skipped",
+			Message: "The connected ACP client does not support elicitation forms. Proceed with your best assumption and note it in the review.",
+		}, nil
+	}
+
+	title := "Clarification Request"
+	desc := req.Reasoning
+	schema := acp.UnstableElicitationSchema{
+		Title:       &title,
+		Description: &desc,
+		Type:        acp.UnstableElicitationSchemaTypeObject,
+		Properties:  make(map[string]any),
+	}
+
+	if len(req.Options) > 0 {
+		if req.IsMultiSelect {
+			schema.Properties["selected"] = map[string]any{
+				"type":        "array",
+				"title":       "Options",
+				"description": "Select one or more options",
+				"items": map[string]any{
+					"type": "string",
+					"enum": req.Options,
+				},
+			}
+		} else {
+			opts := make([]any, 0, len(req.Options)+1)
+			for _, o := range req.Options {
+				opts = append(opts, o)
+			}
+			opts = append(opts, tools.OtherChoiceOption)
+			schema.Properties["selected"] = map[string]any{
+				"type":        "string",
+				"title":       "Options",
+				"description": "Select an option",
+				"enum":        opts,
+			}
+		}
+	}
+
+	schema.Properties["response"] = map[string]any{
+		"type":        "string",
+		"title":       "Your Response",
+		"description": "Provide your answer, clarification, or additional context",
+	}
+
+	if len(req.Options) == 0 {
+		schema.Required = []string{"response"}
+	}
+
+	timeout := 2 * time.Minute
+	if t, ok := ctx.Value(tools.TimeoutKey{}).(time.Duration); ok {
+		timeout = t
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	msg := req.Question
+	if req.Reasoning != "" {
+		msg += "\n\nReasoning: " + req.Reasoning
+	}
+
+	elicitReq := acp.NewUnstableCreateElicitationRequestForm(schema)
+	elicitReq.Form.Message = msg
+
+	resp, err := conn.UnstableCreateElicitation(timeoutCtx, elicitReq)
+	if ctx.Err() != nil {
+		return tools.AskDeveloperResponse{}, ctx.Err()
+	}
+	if timeoutCtx.Err() != nil {
+		return tools.AskDeveloperResponse{
+			Status:  "timeout",
+			Message: fmt.Sprintf("The developer did not respond within %v. Proceed with your best assumption and note it in the review.", timeout),
+		}, nil
+	}
+	if err != nil {
+		return tools.AskDeveloperResponse{}, fmt.Errorf("ACP elicitation failed: %w", err)
+	}
+
+	if resp.Decline != nil || resp.Cancel != nil {
+		return tools.AskDeveloperResponse{
+			Status:  "skipped",
+			Message: "The developer declined to respond. Proceed with your best assumption and note it in the review.",
+		}, nil
+	}
+
+	if resp.Accept != nil {
+		var selected []string
+		var response string
+		if content := resp.Accept.Content; content != nil {
+			if respVal, ok := content["response"].(string); ok {
+				response = strings.TrimSpace(respVal)
+			}
+			if selVal, ok := content["selected"].(string); ok {
+				selVal = strings.TrimSpace(selVal)
+				if selVal != "" && selVal != tools.OtherChoiceOption {
+					selected = append(selected, selVal)
+				}
+			} else if selSlice, ok := content["selected"].([]any); ok {
+				for _, item := range selSlice {
+					if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+						selected = append(selected, strings.TrimSpace(s))
+					}
+				}
+			} else if selSliceStr, ok := content["selected"].([]string); ok {
+				for _, s := range selSliceStr {
+					if strings.TrimSpace(s) != "" {
+						selected = append(selected, strings.TrimSpace(s))
+					}
+				}
+			}
+		}
+
+		if len(selected) == 0 && response == "" {
+			return tools.AskDeveloperResponse{
+				Status:  "skipped",
+				Message: "The developer did not respond. Proceed with your best assumption and note it in the review.",
+			}, nil
+		}
+
+		return tools.AskDeveloperResponse{
+			Status:   "answered",
+			Selected: selected,
+			Response: response,
+		}, nil
+	}
+
+	return tools.AskDeveloperResponse{
+		Status:  "skipped",
+		Message: "The developer did not provide a valid response.",
+	}, nil
 }
