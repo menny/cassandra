@@ -45,13 +45,6 @@ type DeveloperPrompter interface {
 	AskDeveloper(ctx context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error)
 }
 
-type askDeveloperArgs struct {
-	Question      string   `json:"question"`
-	Reasoning     string   `json:"reasoning"`
-	Options       []string `json:"options,omitempty"`
-	IsMultiSelect bool     `json:"is_multi_select,omitempty"`
-}
-
 func registerAskDeveloper(r *Registry, prompter DeveloperPrompter, notifier UserNotifier) {
 	if notifier == nil {
 		notifier = NoOpUserNotifier{}
@@ -90,17 +83,10 @@ func registerAskDeveloper(r *Registry, prompter DeveloperPrompter, notifier User
 		},
 	}
 
-	RegisterToolWithArgs(r, def, func(ctx context.Context, args askDeveloperArgs) (string, error) {
+	RegisterToolWithArgs(r, def, func(ctx context.Context, req AskDeveloperRequest) (string, error) {
 		notifier.NotifyUser()
 
 		activePrompter := prompter
-
-		req := AskDeveloperRequest{
-			Question:      args.Question,
-			Reasoning:     args.Reasoning,
-			Options:       args.Options,
-			IsMultiSelect: args.IsMultiSelect,
-		}
 
 		resp, err := activePrompter.AskDeveloper(ctx, req)
 		if err != nil {
