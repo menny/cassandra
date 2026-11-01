@@ -1649,11 +1649,7 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 				},
 			}
 		} else {
-			opts := make([]any, 0, len(req.Options)+1)
-			for _, o := range req.Options {
-				opts = append(opts, o)
-			}
-			opts = append(opts, tools.OtherChoiceOption)
+			opts := append(slices.Clone(req.Options), tools.OtherChoiceOption)
 			schema.Properties["selected"] = map[string]any{
 				"type":        "string",
 				"title":       "Options",
@@ -1673,10 +1669,7 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 		schema.Required = []string{"response"}
 	}
 
-	timeout := 2 * time.Minute
-	if t, ok := ctx.Value(tools.TimeoutKey{}).(time.Duration); ok {
-		timeout = t
-	}
+	timeout := tools.AskDeveloperTimeout(ctx)
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -1716,19 +1709,20 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 			if respVal, ok := content["response"].(string); ok {
 				response = strings.TrimSpace(respVal)
 			}
-			if selVal, ok := content["selected"].(string); ok {
-				selVal = strings.TrimSpace(selVal)
+			switch sel := content["selected"].(type) {
+			case string:
+				selVal := strings.TrimSpace(sel)
 				if selVal != "" && selVal != tools.OtherChoiceOption {
 					selected = append(selected, selVal)
 				}
-			} else if selSlice, ok := content["selected"].([]any); ok {
-				for _, item := range selSlice {
+			case []any:
+				for _, item := range sel {
 					if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
 						selected = append(selected, strings.TrimSpace(s))
 					}
 				}
-			} else if selSliceStr, ok := content["selected"].([]string); ok {
-				for _, s := range selSliceStr {
+			case []string:
+				for _, s := range sel {
 					if strings.TrimSpace(s) != "" {
 						selected = append(selected, strings.TrimSpace(s))
 					}

@@ -26,7 +26,10 @@ type mockPrompter struct {
 	err     error
 }
 
-func (m *mockPrompter) AskDeveloper(_ context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error) {
+func (m *mockPrompter) AskDeveloper(ctx context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return AskDeveloperResponse{}, err
+	}
 	m.lastReq = req
 	return m.resp, m.err
 }

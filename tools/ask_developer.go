@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -16,7 +17,9 @@ import (
 	"golang.org/x/term"
 )
 
-var askDeveloperTimeout = 2 * time.Minute
+var terminalPromptMu sync.Mutex
+
+const defaultAskDeveloperTimeout = 2 * time.Minute
 
 const OtherChoiceOption = "Other (specify below)"
 
@@ -119,6 +122,8 @@ func registerAskDeveloper(r *Registry, prompter DeveloperPrompter, notifier User
 type DefaultTerminalPrompter struct{}
 
 func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error) {
+	terminalPromptMu.Lock()
+	defer terminalPromptMu.Unlock()
 	noteText := fmt.Sprintf("**Question:** %s\n\n**Reasoning:** %s", req.Question, req.Reasoning)
 
 	var selectedOptions []string
@@ -198,10 +203,7 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 	form.WithInput(input)
 	form.WithOutput(output)
 
-	timeout := askDeveloperTimeout
-	if t, ok := ctx.Value(TimeoutKey{}).(time.Duration); ok {
-		timeout = t
-	}
+	timeout := AskDeveloperTimeout(ctx)
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -286,9 +288,18 @@ func (DefaultTerminalPrompter) AskDeveloper(ctx context.Context, req AskDevelope
 type (
 	stdinKey    struct{}
 	stderrKey   struct{}
-	TimeoutKey  struct{}
+	timeoutKey  struct{}
 	prompterKey struct{}
 )
+
+// AskDeveloperTimeout returns the configured timeout for developer elicitation from context,
+// or the default 2-minute timeout if unset.
+func AskDeveloperTimeout(ctx context.Context) time.Duration {
+	if t, ok := ctx.Value(timeoutKey{}).(time.Duration); ok && t > 0 {
+		return t
+	}
+	return defaultAskDeveloperTimeout
+}
 
 // WithTestStreams wraps a context to override standard input/output of ask_developer.
 func WithTestStreams(ctx context.Context, in io.Reader, out io.Writer) context.Context {
@@ -298,7 +309,7 @@ func WithTestStreams(ctx context.Context, in io.Reader, out io.Writer) context.C
 
 // WithAskDeveloperTimeout wraps a context to override the ask_developer timeout.
 func WithAskDeveloperTimeout(ctx context.Context, d time.Duration) context.Context {
-	return context.WithValue(ctx, TimeoutKey{}, d)
+	return context.WithValue(ctx, timeoutKey{}, d)
 }
 
 // WithDeveloperPrompter wraps a context to override the DeveloperPrompter.

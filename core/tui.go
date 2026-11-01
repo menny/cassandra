@@ -422,6 +422,7 @@ func compactToolCallArgsString(args string) string {
 // tuiReporter implements Reporter to drive Bubble Tea UI.
 type tuiReporter struct {
 	mu        sync.Mutex
+	promptMu  sync.Mutex
 	program   *tea.Program
 	model     *tuiModel
 	stdout    io.Writer
@@ -741,6 +742,9 @@ func indentText(text string, indent int) string {
 // so that the interactive huh form can prompt the developer without interference
 // from the background Bubble Tea loop, then restores the terminal afterwards.
 func (r *tuiReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRequest) (tools.AskDeveloperResponse, error) {
+	r.promptMu.Lock()
+	defer r.promptMu.Unlock()
+
 	r.mu.Lock()
 	prog := r.program
 	r.mu.Unlock()
