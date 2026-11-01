@@ -1,0 +1,131 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly satisfies the rubric by explicitly identifying that the `Divide` function does not check for division by zero (`b == 0`), detailing the runtime panic consequences in Go, and proposing an idiomatic fix (returning an error). Furthermore, it provides constructive guidance regarding test coverage and edge cases without introducing false positives.",
+      "findings": [
+        "Accurately identified the division by zero vulnerability required by the rubric.",
+        "Proposed an idiomatic Go solution by changing the signature to return `(int, error)`.",
+        "Provided constructive feedback regarding missing unit tests and edge cases (e.g., integer overflow `math.MinInt / -1`)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 7984,
+        "output": 355,
+        "thinking": 761,
+        "cached": 0,
+        "total_input": 7984,
+        "total_output": 1116
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review directly identifies the exact issue required by the rubric: passing an empty name results in `u` remaining nil, which is then passed to `SaveUser`, violating `SaveUser`'s requirement for a non-nil `*User`. Furthermore, the reviewer checked `repository.go` context to explain the downstream effect (returning a misleading `context.DeadlineExceeded`), providing high-quality, constructive feedback.",
+      "findings": [
+        "Accurately caught the potential nil pointer passed from `CreateAndSave` to `SaveUser`.",
+        "Correctly referenced context from `repository.go` regarding non-nil requirements and error handling.",
+        "Provided actionable and constructive advice for handling empty input and adding test coverage."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9549,
+        "output": 519,
+        "thinking": 1295,
+        "cached": 5414,
+        "total_input": 14963,
+        "total_output": 1814
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 5,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 2
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review fully met the rubric requirements by identifying the path traversal vulnerability in the `/file` handler and providing accurate, actionable recommendations for boundary checks (such as prefix validation, `os.DirFS`, and Go 1.24+ `os.OpenInRoot`). It also correctly points out other legitimate issues with error handling and memory buffering without introducing false positives.",
+      "findings": [
+        "Accurately identified arbitrary file read / path traversal in the `/file` handler.",
+        "Correctly explained why `filepath.Join` alone fails to prevent path traversal when `..` segments are provided.",
+        "Recommended boundary checks (`strings.HasPrefix`, `os.DirFS`, `os.OpenInRoot`) as required by the rubric.",
+        "Identified additional valid issues such as unhandled errors from `os.ReadFile` and missing HTTP timeouts."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 4608,
+        "output": 522,
+        "thinking": 1576,
+        "cached": 0,
+        "total_input": 4608,
+        "total_output": 2098
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric requirement by explicitly flagging that calling `db.Query` directly violates the conventions in `AGENTS.md` requiring `SafeQuery`. Additionally, it accurately caught a critical functional bug where the query results are never scanned, returning a hardcoded `0, nil`.",
+      "findings": [
+        "Successfully identified the violation of AGENTS.md regarding raw db.Query vs SafeQuery.",
+        "Correctly identified that the result rows were never iterated or scanned into a variable, returning hardcoded 0.",
+        "Clear, constructive, and actionable feedback."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9751,
+        "output": 489,
+        "thinking": 831,
+        "cached": 5574,
+        "total_input": 15325,
+        "total_output": 1320
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 5,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "read_file": 2
+        }
+      }
+    }
+  }
+]
