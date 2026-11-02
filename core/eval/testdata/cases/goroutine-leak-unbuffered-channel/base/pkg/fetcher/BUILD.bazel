@@ -1,0 +1,8 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "fetcher",
+    srcs = ["fetcher.go"],
+    importpath = "github.com/menny/cassandra/core/eval/testdata/cases/goroutine-leak-unbuffered-channel/base/pkg/fetcher",
+    visibility = ["//visibility:public"],
+)

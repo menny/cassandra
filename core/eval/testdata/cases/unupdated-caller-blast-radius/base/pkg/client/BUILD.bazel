@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "client",
+    srcs = ["http.go"],
+    importpath = "github.com/menny/cassandra/core/eval/testdata/cases/unupdated-caller-blast-radius/base/pkg/client",
+    visibility = ["//visibility:public"],
+    deps = ["//core/eval/testdata/cases/unupdated-caller-blast-radius/base/pkg/config"],
+)

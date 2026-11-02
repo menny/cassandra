@@ -31,7 +31,7 @@ This suite evaluates the agent's ability to discover, understand, and correctly 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
-| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 2 | 1.20 |
+| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/generate-content#v1beta.models.generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 2 | 1.20 |
 | **OVERALL** | | | **3.00** | **3.50** | **3.10** |
 
 <!-- EVAL_RESULTS_END:baseline_mcp_invoking -->

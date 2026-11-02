@@ -17,12 +17,21 @@ import (
 )
 
 type Manager struct {
-	sessions []*mcp.ClientSession
-	mu       sync.Mutex
+	sessions  []*mcp.ClientSession
+	targetDir string
+	mu        sync.Mutex
 }
 
 func NewManager() *Manager {
 	return &Manager{}
+}
+
+// SetTargetDir configures the target repository directory to expose to MCP
+// subprocesses via the CASSANDRA_TARGET_DIR environment variable.
+func (m *Manager) SetTargetDir(targetDir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.targetDir = targetDir
 }
 
 func (m *Manager) Close() error {
@@ -72,6 +81,7 @@ func (m *Manager) RegisterServers(
 			if err := m.registerServer(ctx, name, server, safeReportWarning, register); err != nil {
 				mu.Lock()
 				report(name, "failed to load", err)
+				reportWarning(fmt.Sprintf("failed to register MCP server %q", name), err)
 				lastErr = err
 				mu.Unlock()
 			} else {
@@ -136,11 +146,20 @@ func (m *Manager) registerServer(
 
 		// Security: Prevent secret leakage by not inheriting the full host environment.
 		// However, we MUST inherit essential system variables for the command to execute.
-		essential := []string{"PATH", "HOME", "USER", "TMPDIR"}
+		essential := []string{"PATH", "HOME", "USER", "TMPDIR", "BUILD_WORKSPACE_DIRECTORY"}
 		for _, e := range essential {
 			if val, ok := os.LookupEnv(e); ok {
 				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", e, val))
 			}
+		}
+
+		m.mu.Lock()
+		targetDir := m.targetDir
+		m.mu.Unlock()
+		if targetDir != "" {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("CASSANDRA_TARGET_DIR=%s", targetDir))
+		} else if val, ok := os.LookupEnv("CASSANDRA_TARGET_DIR"); ok {
+			cmd.Env = append(cmd.Env, fmt.Sprintf("CASSANDRA_TARGET_DIR=%s", val))
 		}
 
 		// Add explicitly configured environment variables.

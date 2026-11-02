@@ -117,6 +117,13 @@ func godocSymbolHandler(ctx context.Context, req *mcp.CallToolRequest, input str
 	}, nil, nil
 }
 
+func resolveWorkingDir() string {
+	if targetDir := os.Getenv("CASSANDRA_TARGET_DIR"); targetDir != "" {
+		return targetDir
+	}
+	return os.Getenv("BUILD_WORKSPACE_DIRECTORY")
+}
+
 func runGoDoc(ctx context.Context, arg string) (string, error) {
 	goBin := os.Getenv("GO_BIN")
 	if goBin == "" {
@@ -124,6 +131,9 @@ func runGoDoc(ctx context.Context, arg string) (string, error) {
 	}
 	// We invoke 'go doc' directly.
 	cmd := exec.CommandContext(ctx, goBin, "doc", arg)
+	if dir := resolveWorkingDir(); dir != "" {
+		cmd.Dir = dir
+	}
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

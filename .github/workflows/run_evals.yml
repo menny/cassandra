@@ -1,18 +1,25 @@
 name: Run Evaluations
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'core/eval/testdata/**'
+      - 'scripts/run_evals.sh'
+      - '.github/workflows/run_evals.yml'
   workflow_dispatch:
     inputs:
       id:
         description: 'Evaluation ID (matches markers in EVALUATIONS.md)'
-        required: true
+        required: false
         default: 'baseline'
       config:
         description: 'Path to Cassandra config'
-        required: true
+        required: false
         default: 'cassandra.toml'
       repeats:
         description: 'Number of evaluation runs'
-        required: true
+        required: false
         default: '5'
 jobs:
   evaluate:
@@ -21,6 +28,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      EVAL_ID: ${{ inputs.id || 'baseline' }}
+      EVAL_CONFIG: ${{ inputs.config || 'cassandra.toml' }}
+      EVAL_REPEATS: ${{ inputs.repeats || '5' }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -34,12 +45,11 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
       - name: Run Evaluations
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EVAL_ID: ${{ github.event.inputs.id }}
-          EVAL_CONFIG: ${{ github.event.inputs.config }}
-          EVAL_REPEATS: ${{ github.event.inputs.repeats }}
         run: |
           ./scripts/run_evals.sh \
             "$EVAL_ID" \
@@ -59,10 +69,10 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ steps.app-token.outputs.token }}
-          commit-message: "docs: update evaluation results for '${{ github.event.inputs.id }}'"
-          title: "Evaluation Results: ${{ github.event.inputs.id }}"
-          body: "Automated evaluation results for configuration `${{ github.event.inputs.config }}` using ID `${{ github.event.inputs.id }}`."
-          branch: "eval-results/${{ github.event.inputs.id }}"
+          commit-message: "docs: update evaluation results for '${{ env.EVAL_ID }}'"
+          title: "Evaluation Results: ${{ env.EVAL_ID }}"
+          body: "Automated evaluation results for configuration `${{ env.EVAL_CONFIG }}` using ID `${{ env.EVAL_ID }}`."
+          branch: "eval-results/${{ env.EVAL_ID }}"
           labels: "skip-ai-review"
           base: main
           delete-branch: true

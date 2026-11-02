@@ -92,11 +92,6 @@ func TestManager_RegisterServers_Reporting(t *testing.T) {
 	manager := NewManager()
 	defer manager.Close()
 
-	// We'll mock registerServer by temporarily overriding the transport creation logic if it were possible,
-	// but since RegisterServers uses registerServer which creates transports based on config,
-	// we'll just test the reporting flow by providing a config that will fail and one that will (hypothetically) succeed if we could mock the transport.
-	// Actually, let's just test that it reports "start" and then "end" with error for an invalid config.
-
 	cfg := Config{
 		MCPServers: map[string]ServerConfig{
 			"invalid": {
@@ -118,7 +113,10 @@ func TestManager_RegisterServers_Reporting(t *testing.T) {
 			err    error
 		}{name, status, err})
 	}
-	reportWarning := func(msg string, err error) {}
+	var warnings []string
+	reportWarning := func(msg string, err error) {
+		warnings = append(warnings, msg)
+	}
 
 	err := manager.RegisterServers(ctx, cfg, report, reportWarning, func(llm.ToolDef, func(context.Context, llm.ToolCall) (string, error)) {})
 	assert.Error(t, err)
@@ -129,4 +127,6 @@ func TestManager_RegisterServers_Reporting(t *testing.T) {
 	assert.Equal(t, "failed to load", reports[1].status)
 	assert.Error(t, reports[1].err)
 	assert.Contains(t, reports[1].err.Error(), "invalid server config")
+	assert.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], `failed to register MCP server "invalid"`)
 }

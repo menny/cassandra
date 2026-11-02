@@ -1,0 +1,29 @@
+--- a/pkg/fetcher/fetcher.go
++++ b/pkg/fetcher/fetcher.go
+@@ -17,7 +17,23 @@
+ 	return &Service{backend: b}
+ }
+ 
+-// Get retrieves a record synchronously.
+-func (s *Service) Get(_ context.Context, id string) (string, error) {
+-	return s.backend.FetchRecord(id)
++type fetchResult struct {
++	payload string
++	err     error
+ }
++
++// Get retrieves a record, aborting early if ctx is canceled.
++func (s *Service) Get(ctx context.Context, id string) (string, error) {
++	resCh := make(chan fetchResult)
++	go func() {
++		payload, err := s.backend.FetchRecord(id)
++		resCh <- fetchResult{payload: payload, err: err}
++	}()
++
++	select {
++	case <-ctx.Done():
++		return "", ctx.Err()
++	case res := <-resCh:
++		return res.payload, res.err
++	}
++}
