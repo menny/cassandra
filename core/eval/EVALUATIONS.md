@@ -8,7 +8,7 @@ This configuration uses the standard Cassandra settings without any supplemental
 
 <!-- EVAL_RESULTS_START:baseline -->
 **Config**: `cassandra.toml`
-**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
+**Commit**: [`a550c62`](https://github.com/menny/cassandra/commit/a550c62f03d7b48c8cb692d9ee59d63030816221)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
@@ -16,6 +16,9 @@ This configuration uses the standard Cassandra settings without any supplemental
 | `interface-contract` | Interface Contract Violation | The agent MUST identify that `CreateAndSave` in `service.go` passes a potentially nil user to `SaveUser`, which explicitly requires a non-nil pointer in `repository.go`. | 5 | 5 | 5.00 |
 | `security-path-traversal` | Security: Path Traversal | The agent MUST identify the path traversal vulnerability in the `/file` handler and recommend using `filepath.Clean` or a boundary check. | 5 | 5 | 5.00 |
 | `local-agents-convention` | Local Agents Convention | The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`. | 5 | 5 | 5.00 |
+| `unupdated-caller-blast-radius` | Unupdated Caller Blast Radius | The agent MUST search the repository for callers of `ParseTimeout`, identify that untouched callers (`pkg/client/http.go` and/or `cmd/worker/worker.go`) still multiply the return value by `time.Second` after `ParseTimeout` was changed to return milliseconds (causing timeouts to be 1000x too long), and reject the change. | 5 | 5 | 5.00 |
+| `clean-pr-false-positive-restraint` | Clean PR False-Positive Restraint | The agent MUST approve the change (`Approve`) and MUST NOT raise false-positive blocking issues (such as falsely claiming `onEvict` is called unsafely outside the mutex lock, which is explicitly mandated by `internal/cache/REVIEWERS.md` to prevent deadlocks). | 5 | 5 | 5.00 |
+| `goroutine-leak-unbuffered-channel` | Concurrency: Goroutine Leak on Context Cancellation | The agent MUST identify the goroutine leak in `Service.Get`: when `ctx.Done()` fires before `FetchRecord` completes, `Get` returns early and the spawned goroutine blocks indefinitely trying to send to the unbuffered `resCh` channel. The agent should recommend using a buffered channel (`make(chan fetchResult, 1)`) or propagating `ctx`. | 5 | 5 | 5.00 |
 | **OVERALL** | | | **5.00** | **5.00** | **5.00** |
 
 <!-- EVAL_RESULTS_END:baseline -->
@@ -26,13 +29,13 @@ This suite evaluates the agent's ability to discover, understand, and correctly 
 
 <!-- EVAL_RESULTS_START:baseline_mcp_invoking -->
 **Config**: `cassandra.toml`
-**Commit**: [`f31cf61`](https://github.com/menny/cassandra/commit/f31cf615ea6e8a4e57865385cbf5bf96754a27e5)
+**Commit**: [`a550c62`](https://github.com/menny/cassandra/commit/a550c62f03d7b48c8cb692d9ee59d63030816221)
 
 | Eval ID | Eval Name | Judge Criteria | Min | Max | Mean |
 | --- | --- | --- | --- | --- | --- |
 | `library-godoc-verification` | Library API Verification | The agent MUST identify that `ExecuteAsync` is not a valid method on the `db.DB` type by inspecting the `lib/db/db.go` file or using godoc. | 5 | 5 | 5.00 |
-| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/generate-content#v1beta.models.generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 1 | 2 | 1.20 |
-| **OVERALL** | | | **3.00** | **3.50** | **3.10** |
+| `external-url-verification` | External URL Verification | The agent MUST fetch the URL https://ai.google.dev/api/generate-content#v1beta.models.generateContent and identify any discrepancies or confirm the API usage based on the documentation. | 2 | 3 | 2.20 |
+| **OVERALL** | | | **3.50** | **4.00** | **3.60** |
 
 <!-- EVAL_RESULTS_END:baseline_mcp_invoking -->
 
