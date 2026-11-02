@@ -82,4 +82,34 @@ func TestRunGoDoc(t *testing.T) {
 		_, err := runGoDoc(ctx, "nonexistent_package_12345")
 		assert.Error(t, err)
 	})
+
+	t.Run("uses CASSANDRA_TARGET_DIR over BUILD_WORKSPACE_DIRECTORY", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		pkgDir := filepath.Join(tmpDir, "custompkg")
+		assert.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		assert.NoError(t, os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/testmod\n\ngo 1.24\n"), 0o644))
+		assert.NoError(t, os.WriteFile(filepath.Join(pkgDir, "custom.go"), []byte("package custompkg\n\n// HelloTargetDir is a test symbol.\nfunc HelloTargetDir() {}\n"), 0o644))
+
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", "/nonexistent/workspace")
+		t.Setenv("CASSANDRA_TARGET_DIR", tmpDir)
+
+		output, err := runGoDoc(ctx, "./custompkg")
+		assert.NoError(t, err)
+		assert.Contains(t, output, "func HelloTargetDir()")
+	})
+
+	t.Run("falls back to BUILD_WORKSPACE_DIRECTORY", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		pkgDir := filepath.Join(tmpDir, "fallbackpkg")
+		assert.NoError(t, os.MkdirAll(pkgDir, 0o755))
+		assert.NoError(t, os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/testmod\n\ngo 1.24\n"), 0o644))
+		assert.NoError(t, os.WriteFile(filepath.Join(pkgDir, "fallback.go"), []byte("package fallbackpkg\n\n// HelloWorkspaceDir is a test symbol.\nfunc HelloWorkspaceDir() {}\n"), 0o644))
+
+		t.Setenv("CASSANDRA_TARGET_DIR", "")
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", tmpDir)
+
+		output, err := runGoDoc(ctx, "./fallbackpkg")
+		assert.NoError(t, err)
+		assert.Contains(t, output, "func HelloWorkspaceDir()")
+	})
 }

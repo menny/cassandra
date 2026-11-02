@@ -13,7 +13,7 @@
       "id": "external-url-verification",
       "name": "External URL Verification",
       "description": "Tests if the agent uses the fetch tool to verify information from an external URL.",
-      "rubric": "The agent MUST fetch the URL https://ai.google.dev/api/rest/v1beta/models/generateContent and identify any discrepancies or confirm the API usage based on the documentation.",
+      "rubric": "The agent MUST fetch the URL https://ai.google.dev/api/generate-content#v1beta.models.generateContent and identify any discrepancies or confirm the API usage based on the documentation.",
       "fixture_path": "cases/external-url-verification"
     }
   ]

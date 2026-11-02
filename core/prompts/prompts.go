@@ -79,11 +79,12 @@ type PromptSummary struct {
 //  6. <ask_developer_guidelines>       — semi-static, optional
 //  7. <t3_thread_launch_guidelines>    — semi-static, optional (T3 Code sessions only)
 //  8. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
+//  9. <url_fetch_guidelines>           — semi-static, optional
 //
 // Dynamic (Zone 3):
-//  9. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  10. <reviewer_context>       — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, currentModel string) (stable, dynamic string, summary PromptSummary, err error) {
+//  10. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  11. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -173,6 +174,17 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"3. **Strict scope**:\n" +
 			"   - This tool ONLY posts comments (top-level PR discussion comments or inline line/range comments). It cannot approve, reject, or request changes on a pull request.\n" +
 			"</pr_comment_guidelines>\n"
+	}
+
+	if allowURLFetch {
+		stable += "\n<url_fetch_guidelines>\n" +
+			"You have access to the `mcp-server-fetch_fetch` tool to retrieve content from external URLs.\n\n" +
+			"1. **When to use**:\n" +
+			"   - When the diff, code comments, or PR description reference an external documentation URL to justify an API endpoint, method signature, payload structure, or behavior, you MUST use `mcp-server-fetch_fetch` to retrieve and verify that URL rather than relying on internal training data or skipping verification.\n" +
+			"   - If the fetched content is truncated and the relevant section has not yet appeared, call `mcp-server-fetch_fetch` again with `start_index` to read subsequent chunks.\n\n" +
+			"2. **When NOT to use**:\n" +
+			"   - Do NOT fetch arbitrary or unrelated URLs (e.g., generic license headers, homepage links, or standard library references that do not require external verification).\n" +
+			"</url_fetch_guidelines>\n"
 	}
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.

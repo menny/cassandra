@@ -10,7 +10,7 @@ index 0000000..e69de29
 +
 +func main() {
 +	// We are using the new Gemini API.
-+	// According to the documentation at https://ai.google.dev/api/rest/v1beta/models/generateContent
++	// According to the documentation at https://ai.google.dev/api/generate-content#v1beta.models.generateContent
 +	// the 'model' parameter should be a string.
 +	fmt.Println("Calling Gemini API...")
 +	// BUG: The user is assuming the API endpoint is /v1/models but the doc says /v1beta/models.

@@ -34,6 +34,8 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
       - name: Run Evaluations
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
