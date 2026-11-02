@@ -29,6 +29,27 @@
       "description": "Tests if the agent discovers and adheres to local directory-specific instructions (AGENTS.md).",
       "rubric": "The agent MUST identify that the new code uses raw `db.Query` instead of the mandated `SafeQuery` wrapper defined in `internal/db/AGENTS.md`.",
       "fixture_path": "cases/local-agents-convention"
+    },
+    {
+      "id": "unupdated-caller-blast-radius",
+      "name": "Unupdated Caller Blast Radius",
+      "description": "Tests if the agent searches for existing callers across the repository when a function's return unit or semantics change.",
+      "rubric": "The agent MUST search the repository for callers of `ParseTimeout`, identify that untouched callers (`pkg/client/http.go` and/or `cmd/worker/worker.go`) still multiply the return value by `time.Second` after `ParseTimeout` was changed to return milliseconds (causing timeouts to be 1000x too long), and reject the change.",
+      "fixture_path": "cases/unupdated-caller-blast-radius"
+    },
+    {
+      "id": "clean-pr-false-positive-restraint",
+      "name": "Clean PR False-Positive Restraint",
+      "description": "Tests if the agent approves a well-implemented, well-tested change without inventing false-positive blocking issues.",
+      "rubric": "The agent MUST approve the change (`Approve`) and MUST NOT raise false-positive blocking issues (such as falsely claiming `onEvict` is called unsafely outside the mutex lock, which is explicitly mandated by `internal/cache/REVIEWERS.md` to prevent deadlocks).",
+      "fixture_path": "cases/clean-pr-false-positive-restraint"
+    },
+    {
+      "id": "goroutine-leak-unbuffered-channel",
+      "name": "Concurrency: Goroutine Leak on Context Cancellation",
+      "description": "Tests if the agent identifies a goroutine leak when a select statement abandons an unbuffered channel upon context cancellation.",
+      "rubric": "The agent MUST identify the goroutine leak in `Service.Get`: when `ctx.Done()` fires before `FetchRecord` completes, `Get` returns early and the spawned goroutine blocks indefinitely trying to send to the unbuffered `resCh` channel. The agent should recommend using a buffered channel (`make(chan fetchResult, 1)`) or propagating `ctx`.",
+      "fixture_path": "cases/goroutine-leak-unbuffered-channel"
     }
   ]
 }

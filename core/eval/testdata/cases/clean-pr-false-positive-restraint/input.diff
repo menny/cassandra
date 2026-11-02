@@ -1,0 +1,107 @@
+diff --git a/internal/cache/cache.go b/internal/cache/cache.go
+index 1111111..2222222 100644
+--- a/internal/cache/cache.go
++++ b/internal/cache/cache.go
+@@ -1,6 +1,10 @@
+ package cache
+ 
+-import "sync"
++import (
++	"context"
++	"strings"
++	"sync"
++)
+ 
+ // EvictCallback is invoked when an entry is removed from the cache.
+ type EvictCallback func(key, value string)
+@@ -33,3 +37,39 @@ func (c *Cache) Get(key string) (string, bool) {
+ 	v, ok := c.items[key]
+ 	return v, ok
+ }
++
++type evictedEntry struct {
++	key   string
++	value string
++}
++
++// DeletePrefix removes all entries whose keys start with prefix and returns
++// the number of removed entries. If prefix is empty, no entries are removed.
++func (c *Cache) DeletePrefix(ctx context.Context, prefix string) (int, error) {
++	if err := ctx.Err(); err != nil {
++		return 0, err
++	}
++	if prefix == "" {
++		return 0, nil
++	}
++
++	var evicted []evictedEntry
++	var onEvict EvictCallback
++
++	c.mu.Lock()
++	onEvict = c.onEvict
++	for k, v := range c.items {
++		if strings.HasPrefix(k, prefix) {
++			delete(c.items, k)
++			if onEvict != nil {
++				evicted = append(evicted, evictedEntry{key: k, value: v})
++			}
++		}
++	}
++	c.mu.Unlock()
++
++	for _, entry := range evicted {
++		onEvict(entry.key, entry.value)
++	}
++	return len(evicted), nil
++}
+diff --git a/internal/cache/cache_test.go b/internal/cache/cache_test.go
+index 3333333..4444444 100644
+--- a/internal/cache/cache_test.go
++++ b/internal/cache/cache_test.go
+@@ -1,6 +1,9 @@
+ package cache
+ 
+-import "testing"
++import (
++	"context"
++	"testing"
++)
+ 
+ func TestCacheSetGet(t *testing.T) {
+ 	c := New(nil)
+@@ -10,3 +13,34 @@ func TestCacheSetGet(t *testing.T) {
+ 		t.Fatalf("expected one, got %q (ok=%v)", got, ok)
+ 	}
+ }
++
++func TestCacheDeletePrefix(t *testing.T) {
++	evicted := make(map[string]string)
++	c := New(func(k, v string) {
++		// Re-entering Cache inside onEvict must not deadlock.
++		_, _ = c.Get(k)
++		evicted[k] = v
++	})
++	c.Set("user:1", "alice")
++	c.Set("user:2", "bob")
++	c.Set("session:1", "xyz")
++
++	n, err := c.DeletePrefix(context.Background(), "user:")
++	if err != nil {
++		t.Fatalf("unexpected error: %v", err)
++	}
++	if n != 2 {
++		t.Fatalf("expected 2 deleted entries, got %d", n)
++	}
++	if len(evicted) != 2 || evicted["user:1"] != "alice" || evicted["user:2"] != "bob" {
++		t.Fatalf("unexpected evicted entries: %v", evicted)
++	}
++	if _, ok := c.Get("session:1"); !ok {
++		t.Fatal("expected session:1 to remain in cache")
++	}
++
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if _, err := c.DeletePrefix(ctx, "session:"); err == nil {
++		t.Fatal("expected error for canceled context")
++	}
++}

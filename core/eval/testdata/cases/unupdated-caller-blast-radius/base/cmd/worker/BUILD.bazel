@@ -1,0 +1,9 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "worker",
+    srcs = ["worker.go"],
+    importpath = "github.com/menny/cassandra/core/eval/testdata/cases/unupdated-caller-blast-radius/base/cmd/worker",
+    visibility = ["//visibility:public"],
+    deps = ["//core/eval/testdata/cases/unupdated-caller-blast-radius/base/pkg/config"],
+)

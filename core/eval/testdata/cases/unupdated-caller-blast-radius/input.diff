@@ -1,0 +1,35 @@
+diff --git a/pkg/config/timeout.go b/pkg/config/timeout.go
+index 1111111..2222222 100644
+--- a/pkg/config/timeout.go
++++ b/pkg/config/timeout.go
+@@ -5,7 +5,8 @@ import (
+ 	"strconv"
+ )
+ 
+-// ParseTimeout parses a numeric timeout string and returns the timeout in seconds.
++// ParseTimeout parses a numeric timeout string in seconds and returns the
++// timeout in milliseconds for sub-second precision.
+ func ParseTimeout(s string) (int, error) {
+ 	v, err := strconv.Atoi(s)
+ 	if err != nil {
+@@ -14,5 +15,5 @@ func ParseTimeout(s string) (int, error) {
+ 	if v <= 0 {
+ 		return 0, fmt.Errorf("timeout must be positive: %d", v)
+ 	}
+-	return v, nil
++	return v * 1000, nil
+ }
+diff --git a/pkg/config/timeout_test.go b/pkg/config/timeout_test.go
+index 3333333..4444444 100644
+--- a/pkg/config/timeout_test.go
++++ b/pkg/config/timeout_test.go
+@@ -7,7 +7,7 @@ func TestParseTimeout(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("unexpected error: %v", err)
+ 	}
+-	if got != 5 {
+-		t.Fatalf("expected 5 seconds, got %d", got)
++	if got != 5000 {
++		t.Fatalf("expected 5000 milliseconds, got %d", got)
+ 	}
+ }
