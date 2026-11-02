@@ -347,7 +347,9 @@ def main():
     has_meta_arg = has_arg(remaining_args, "--metadata-json")
     has_diff_arg = has_arg(remaining_args, "--diff-file")
 
-    if is_git and not has_base_arg and not has_meta_arg and not has_diff_arg:
+    # Detect the base even when --metadata-json is given: metadata only carries a branch
+    # name, which Cassandra would otherwise resolve against a possibly stale local branch.
+    if is_git and not has_base_arg and not has_diff_arg:
         current_branch = run_git(["branch", "--show-current"], target_dir, check=False)
 
         # 1. Check stack parent from gh stack

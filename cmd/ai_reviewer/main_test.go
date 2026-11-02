@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -547,6 +549,39 @@ func TestFormatOmittedDiffNotice(t *testing.T) {
 	require.Contains(t, got, "- foo.go (diff: 42 bytes)")
 	require.Contains(t, got, "- bar.go (diff size unavailable)")
 	require.Contains(t, got, "Use the `get_file_diff` tool")
+}
+
+func TestFormatOmittedDiffNotice_TruncatesFileList(t *testing.T) {
+	var files []string
+	for i := range 2000 {
+		files = append(files, fmt.Sprintf("some/long/directory/path/file_%04d.go", i))
+	}
+
+	got := formatOmittedDiffNotice("too big", files, nil)
+	require.Contains(t, got, "### Changed Files (2000 files)")
+	require.Contains(t, got, "- some/long/directory/path/file_0000.go")
+	require.NotContains(t, got, "file_1999.go")
+	require.Contains(t, got, "more files (listing truncated at 10240 bytes)")
+	require.Less(t, len(got), maxPromptListBytes+1024)
+}
+
+func TestTruncateCommitList(t *testing.T) {
+	small := "- one\n- two"
+	require.Equal(t, small, truncateCommitList(small))
+
+	var lines []string
+	for i := range 2000 {
+		lines = append(lines, fmt.Sprintf("- commit subject number %04d", i))
+	}
+	got := truncateCommitList(strings.Join(lines, "\n"))
+	require.Contains(t, got, "- commit subject number 0000")
+	require.NotContains(t, got, "number 1999")
+	require.Regexp(t, `\.\.\. and \d+ more commits \(list truncated at 10240 bytes\)$`, got)
+	require.Less(t, len(got), maxPromptListBytes+128)
+	// Cut at a line boundary: no partially-written subject before the notice.
+	for _, line := range strings.Split(got, "\n")[:len(strings.Split(got, "\n"))-1] {
+		require.Regexp(t, `^- commit subject number \d{4}$`, line)
+	}
 }
 
 func TestRun_DiffOmission_ByteLimit(t *testing.T) {

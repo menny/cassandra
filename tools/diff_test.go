@@ -317,3 +317,125 @@ func TestLocalGetFileDiff(t *testing.T) {
 		}
 	})
 }
+
+func gitRevParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", rev)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse %s failed: %v\nOutput: %s", rev, err, string(out))
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestResolveBase(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Local branch resolves to merge-base", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		setupGitRepo(t, tmpDir)
+
+		// main and feature diverged at the initial commit.
+		want := gitRevParse(t, tmpDir, "feature~1")
+		if got := ResolveBase(ctx, tmpDir, "main", "feature"); got != want {
+			t.Errorf("ResolveBase = %q, want merge-base %q", got, want)
+		}
+	})
+
+	t.Run("Remote-tracking ref wins over stale local branch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		setupGitRepo(t, tmpDir)
+
+		newMain := gitRevParse(t, tmpDir, "main")
+		// Simulate origin/main having advanced while the local main stays stale.
+		runGitCmd(t, tmpDir, "update-ref", "refs/remotes/origin/main", newMain)
+		// A PR branch cut from the up-to-date main.
+		runGitCmd(t, tmpDir, "checkout", "-b", "pr", newMain)
+		runGitCmd(t, tmpDir, "branch", "-f", "main", "feature~1")
+		if err := os.WriteFile(filepath.Join(tmpDir, "pr.txt"), []byte("pr"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, tmpDir, "add", "pr.txt")
+		runGitCmd(t, tmpDir, "commit", "-m", "pr commit")
+
+		if got := ResolveBase(ctx, tmpDir, "main", "HEAD"); got != newMain {
+			t.Errorf("ResolveBase = %q, want %q (origin/main merge-base, not the stale local main)", got, newMain)
+		}
+
+		_, files, err := FetchGitDiff(ctx, tmpDir, ResolveBase(ctx, tmpDir, "main", "HEAD"), "HEAD", util.DefaultLockFiles)
+		if err != nil {
+			t.Fatalf("FetchGitDiff failed: %v", err)
+		}
+		if len(files) != 1 || files[0] != "pr.txt" {
+			t.Errorf("diff files = %v, want only [pr.txt]", files)
+		}
+	})
+
+	t.Run("SHA input", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		setupGitRepo(t, tmpDir)
+
+		mainSHA := gitRevParse(t, tmpDir, "main")
+		want := gitRevParse(t, tmpDir, "feature~1")
+		if got := ResolveBase(ctx, tmpDir, mainSHA, "feature"); got != want {
+			t.Errorf("ResolveBase = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("Unresolvable base is returned unchanged", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		setupGitRepo(t, tmpDir)
+
+		if got := ResolveBase(ctx, tmpDir, "no-such-branch", "feature"); got != "no-such-branch" {
+			t.Errorf("ResolveBase = %q, want unchanged", got)
+		}
+	})
+
+	t.Run("Fetches the base branch from origin first", func(t *testing.T) {
+		upstream := t.TempDir()
+		setupGitRepo(t, upstream)
+
+		clone := filepath.Join(t.TempDir(), "clone")
+		runGitCmd(t, upstream, "clone", "-q", upstream, clone)
+		runGitCmd(t, clone, "config", "user.email", "test@example.com")
+		runGitCmd(t, clone, "config", "user.name", "Test User")
+		runGitCmd(t, clone, "config", "commit.gpgsign", "false")
+		runGitCmd(t, clone, "checkout", "-q", "-b", "pr")
+		if err := os.WriteFile(filepath.Join(clone, "pr.txt"), []byte("pr"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, clone, "add", "pr.txt")
+		runGitCmd(t, clone, "commit", "-q", "-m", "pr commit")
+		branchPoint := gitRevParse(t, clone, "origin/main")
+
+		// origin/main advances after the clone; the clone's tracking ref is now stale.
+		if err := os.WriteFile(filepath.Join(upstream, "later.txt"), []byte("later"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGitCmd(t, upstream, "add", "later.txt")
+		runGitCmd(t, upstream, "commit", "-q", "-m", "later main commit")
+		newMain := gitRevParse(t, upstream, "main")
+		if got := gitRevParse(t, clone, "origin/main"); got != branchPoint {
+			t.Fatalf("test setup: origin/main = %q, want stale %q", got, branchPoint)
+		}
+
+		// The PR branch still branched from the old tip, so that remains the merge-base,
+		// but the remote-tracking ref must have been refreshed along the way.
+		if got := ResolveBase(ctx, clone, "main", "HEAD"); got != branchPoint {
+			t.Errorf("ResolveBase = %q, want merge-base %q", got, branchPoint)
+		}
+		if got := gitRevParse(t, clone, "origin/main"); got != newMain {
+			t.Errorf("origin/main = %q after ResolveBase, want fetched %q", got, newMain)
+		}
+	})
+
+	t.Run("Empty base and non-git dir", func(t *testing.T) {
+		if got := ResolveBase(ctx, t.TempDir(), "", "HEAD"); got != "" {
+			t.Errorf("ResolveBase(empty) = %q, want empty", got)
+		}
+		if got := ResolveBase(ctx, t.TempDir(), "main", "HEAD"); got != "main" {
+			t.Errorf("ResolveBase(non-git) = %q, want unchanged", got)
+		}
+	})
+}

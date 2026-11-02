@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/util"
@@ -51,6 +55,85 @@ func FetchGitDiff(ctx context.Context, workingDir, base, head string, ignoredLoc
 	}
 
 	return diffText, filteredFiles, nil
+}
+
+// ResolveBase turns a branch name (e.g. a PR base branch from metadata) into the
+// commit that a PR diff should be taken from: the merge-base of base and head.
+//
+// A bare branch name is ambiguous: git resolves it to the local branch, which can
+// be arbitrarily stale and would make the diff include everything that landed on
+// the base since. So the remote-tracking ref (origin/<base>) is preferred, falling
+// back to base as given (local branch, SHA, or other revision). Using the
+// merge-base rather than the base tip keeps commits that landed on the base after
+// the PR branched off out of the diff and commit list.
+//
+// The base branch is fetched first (best effort) so that origin/<base> reflects the
+// remote rather than whenever the clone was last updated.
+//
+// If base cannot be resolved locally it is returned unchanged, so the later git
+// diff/log reports the failure against the name the caller supplied.
+func ResolveBase(ctx context.Context, workingDir, base, head string) string {
+	if base == "" {
+		return base
+	}
+	if head == "" {
+		head = "HEAD"
+	}
+
+	fetchBaseBranch(ctx, workingDir, base)
+
+	var resolved string
+	for _, candidate := range []string{"refs/remotes/origin/" + base, base} {
+		if sha, ok := resolveCommit(ctx, workingDir, candidate); ok {
+			resolved = sha
+			break
+		}
+	}
+	if resolved == "" {
+		return base
+	}
+
+	out, err := util.RunGit(ctx, workingDir, "merge-base", resolved, head)
+	if err != nil {
+		return resolved
+	}
+	if mergeBase := strings.TrimSpace(string(out)); mergeBase != "" {
+		return mergeBase
+	}
+	return resolved
+}
+
+// baseFetchTimeout bounds the best-effort fetch of the base branch.
+const baseFetchTimeout = 60 * time.Second
+
+var fullSHARegexp = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
+
+// fetchBaseBranch updates refs/remotes/origin/<base> from origin. It is best effort:
+// failures (no origin remote, offline, missing credentials, base is not a branch) are
+// ignored and the caller falls back to whatever is available locally. It never uses
+// --depth, since shallow fetches truncate history shared with other worktrees.
+func fetchBaseBranch(ctx context.Context, workingDir, base string) {
+	if fullSHARegexp.MatchString(base) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, baseFetchTimeout)
+	defer cancel()
+
+	refspec := fmt.Sprintf("+refs/heads/%[1]s:refs/remotes/origin/%[1]s", base)
+	cmd := exec.CommandContext(ctx, "git", "fetch", "--quiet", "--no-tags", "origin", refspec)
+	cmd.Dir = workingDir
+	// Never block on an interactive credential prompt.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	_ = cmd.Run()
+}
+
+func resolveCommit(ctx context.Context, workingDir, rev string) (string, bool) {
+	out, err := util.RunGit(ctx, workingDir, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return "", false
+	}
+	sha := strings.TrimSpace(string(out))
+	return sha, sha != ""
 }
 
 // FetchGitCommits returns a bulleted list of commit subjects (first line of

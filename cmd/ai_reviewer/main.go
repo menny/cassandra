@@ -256,7 +256,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			} else {
 				metadata = &m
 				if !fs.Changed("base") && m.Base != "" {
-					cfg.Base = m.Base
+					// m.Base is a branch name; resolve it to a merge-base commit so a
+					// stale local branch can't inflate the diff.
+					cfg.Base = tools.ResolveBase(ctx, targetDir, m.Base, cfg.Head)
 				}
 			}
 		}
@@ -396,7 +398,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	var requestTextBuilder strings.Builder
 	if commitsOutput != "" {
 		requestTextBuilder.WriteString("### Commit Messages\n")
-		requestTextBuilder.WriteString(commitsOutput)
+		requestTextBuilder.WriteString(truncateCommitList(commitsOutput))
 		requestTextBuilder.WriteString("\n\n")
 	}
 
@@ -604,18 +606,45 @@ func formatMetadata(metadata core.PRMetadata) string {
 	return sb.String()
 }
 
+// maxPromptListBytes bounds each unbounded list embedded in the request (the changed-file
+// listing and the commit subjects) so that a mis-resolved base can't blow the model's
+// context window.
+const maxPromptListBytes = 10 * 1024
+
+// truncateCommitList caps a newline-separated commit list at maxPromptListBytes, cutting
+// at a line boundary and noting how many commits were dropped.
+func truncateCommitList(commits string) string {
+	if len(commits) <= maxPromptListBytes {
+		return commits
+	}
+	kept := commits[:maxPromptListBytes]
+	if i := strings.LastIndexByte(kept, '\n'); i >= 0 {
+		kept = kept[:i]
+	}
+	dropped := strings.Count(commits, "\n") - strings.Count(kept, "\n")
+	return fmt.Sprintf("%s\n... and %d more commits (list truncated at %d bytes)", kept, dropped, maxPromptListBytes)
+}
+
 func formatOmittedDiffNotice(reason string, changedFiles []string, fileSizes map[string]int) string {
 	var sb strings.Builder
 	sb.WriteString("### Git Diff Omitted\n")
 	sb.WriteString(reason)
 	sb.WriteString("\n\n")
 	fmt.Fprintf(&sb, "### Changed Files (%d files)\n", len(changedFiles))
-	for _, f := range changedFiles {
+	listed := 0
+	for i, f := range changedFiles {
+		var line string
 		if size, ok := fileSizes[f]; ok {
-			fmt.Fprintf(&sb, "- %s (diff: %d bytes)\n", f, size)
+			line = fmt.Sprintf("- %s (diff: %d bytes)\n", f, size)
 		} else {
-			fmt.Fprintf(&sb, "- %s (diff size unavailable)\n", f)
+			line = fmt.Sprintf("- %s (diff size unavailable)\n", f)
 		}
+		if listed+len(line) > maxPromptListBytes {
+			fmt.Fprintf(&sb, "... and %d more files (listing truncated at %d bytes)\n", len(changedFiles)-i, maxPromptListBytes)
+			break
+		}
+		sb.WriteString(line)
+		listed += len(line)
 	}
 	sb.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
 	return sb.String()
