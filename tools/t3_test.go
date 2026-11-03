@@ -520,3 +520,128 @@ esac
 	require.NotContains(t, string(launchLog), `"instanceId":"cassandra"`)
 	require.Contains(t, string(launchLog), `"instanceId":"antigravity"`)
 }
+
+func TestGetAvailableCodingHarnessChoices_WhenFirstPreferenceDisabled(t *testing.T) {
+	cfg := T3LaunchConfig{
+		PreferredHarnesses: []string{"codex", "opencode"}, // codex is disabled in mockCapabilitiesJSON
+	}
+	choices := GetAvailableCodingHarnessChoices(mockCapabilitiesJSON, cfg)
+	require.Len(t, choices, 2)
+
+	options := FormatHarnessOptionsForDeveloper(choices)
+	require.Len(t, options, 2)
+	require.Contains(t, options[0], "(Recommended) OpenCode")
+}
+
+type testPrompter struct {
+	response AskDeveloperResponse
+	called   bool
+}
+
+func (p *testPrompter) AskDeveloper(ctx context.Context, req AskDeveloperRequest) (AskDeveloperResponse, error) {
+	p.called = true
+	return p.response, nil
+}
+
+func TestT3ThreadLaunch_InteractivePrompt(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockScript := filepath.Join(tmpDir, "mock_t3_node.sh")
+	scriptContent := `#!/bin/sh
+for arg in "$@"; do
+    case "$prev" in
+        "acp-mcp-call") tool="$arg" ;;
+    esac
+    prev="$arg"
+done
+
+case "$tool" in
+    "orchestrator_capabilities")
+        echo '` + mockCapabilitiesJSON + `'
+        ;;
+    "t3_thread_launch")
+        echo "$*" >> ` + filepath.Join(tmpDir, "launch.log") + `
+        echo '{"threadId":"spawned-fix-thread-789"}'
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+`
+	require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+	t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+	t.Run("prompts developer and applies user selection", func(t *testing.T) {
+		r := NewRegistry()
+		r.SetT3Config(T3LaunchConfig{
+			PreferredHarnesses: []string{"antigravity", "opencode"},
+			PromptForHarness:   true,
+		})
+		prompter := &testPrompter{
+			response: AskDeveloperResponse{
+				Status:   "answered",
+				Selected: []string{"OpenCode — DeepSeek Chat"},
+			},
+		}
+		r.SetDeveloperPrompter(prompter)
+		registerT3Tools(r)
+
+		tc := llm.ToolCall{
+			ID:        "call_fix_prompt",
+			Name:      "t3_thread_launch",
+			Arguments: `{"title": "Review Fix", "message": "fix it"}`,
+		}
+
+		res, err := r.HandleCall(context.Background(), tc)
+		require.NoError(t, err)
+		require.Contains(t, res, "spawned-fix-thread-789")
+		require.True(t, prompter.called)
+
+		launchLog, err := os.ReadFile(filepath.Join(tmpDir, "launch.log"))
+		require.NoError(t, err)
+		require.Contains(t, string(launchLog), `"instanceId":"opencode"`)
+	})
+
+	t.Run("handles capabilities query failure", func(t *testing.T) {
+		failScript := filepath.Join(tmpDir, "mock_fail_node.sh")
+		fContent := `#!/bin/sh
+exit 1
+`
+		require.NoError(t, os.WriteFile(failScript, []byte(fContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", failScript)
+
+		r := NewRegistry()
+		registerT3Tools(r)
+
+		tc := llm.ToolCall{
+			ID:        "call_fix_fail",
+			Name:      "t3_thread_launch",
+			Arguments: `{"title": "Review Fix", "message": "fix it"}`,
+		}
+
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to query orchestrator capabilities")
+	})
+
+	t.Run("returns error when no enabled coding harnesses exist", func(t *testing.T) {
+		onlyCassandraScript := filepath.Join(tmpDir, "mock_only_cassandra.sh")
+		cContent := `#!/bin/sh
+echo '{"providers":[{"providerInstanceId":"cassandra","canRunChildTask":true,"constraints":[]}]}'
+`
+		require.NoError(t, os.WriteFile(onlyCassandraScript, []byte(cContent), 0o755))
+		t.Setenv("T3_ACP_MCP_NODE", onlyCassandraScript)
+
+		r := NewRegistry()
+		registerT3Tools(r)
+
+		tc := llm.ToolCall{
+			ID:        "call_no_coding_harness",
+			Name:      "t3_thread_launch",
+			Arguments: `{"title": "Review Fix", "message": "fix it"}`,
+		}
+
+		_, err := r.HandleCall(context.Background(), tc)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no enabled coding agent harnesses available")
+	})
+}

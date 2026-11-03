@@ -349,15 +349,16 @@ func GetAvailableCodingHarnessChoices(capabilitiesRaw string, cfg T3LaunchConfig
 		return nil
 	}
 
-	preferred := cfg.PreferredHarnesses
-	if len(preferred) == 0 {
-		preferred = DefaultPreferredHarnesses
+	bestMatch, _ := ResolveLaunchHarness(capabilitiesRaw, cfg, nil)
+	var bestInstanceID string
+	if bestMatch != nil {
+		bestInstanceID = bestMatch.InstanceID
 	}
 
 	var choices []CodingHarnessChoice
 	for _, p := range enabled {
 		isPref := false
-		if len(preferred) > 0 && strings.EqualFold(p.ProviderInstanceID, preferred[0]) {
+		if bestInstanceID != "" && strings.EqualFold(p.ProviderInstanceID, bestInstanceID) {
 			isPref = true
 		}
 		sel := pickModelForProvider(&p, "", cfg.PreferredModel, caps.InheritedModel, nil)
@@ -528,25 +529,55 @@ func registerT3Tools(r *Registry) {
 			args.Title = "Review Fix"
 		}
 
-		// Deterministic harness & model resolution
-		needsResolution := args.ModelSelection == nil ||
+		capOut, err := callT3McpTool(ctx, "orchestrator_capabilities", capArgs{})
+		if err != nil {
+			return "", fmt.Errorf("failed to query orchestrator capabilities: %w", err)
+		}
+
+		// Prompt developer if harness selection is missing, prompt-for-harness is true, and a prompter is available
+		needsPrompt := args.ModelSelection == nil ||
 			args.ModelSelection.InstanceID == "" ||
 			strings.EqualFold(args.ModelSelection.InstanceID, "cassandra")
 
-		if needsResolution {
-			capOut, err := callT3McpTool(ctx, "orchestrator_capabilities", capArgs{})
-			if err == nil {
-				resolved, rErr := ResolveLaunchHarness(capOut, r.t3Config, args.ModelSelection)
-				if rErr == nil && resolved != nil {
-					args.ModelSelection = resolved
+		if needsPrompt && r.t3Config.PromptForHarness && r.prompter != nil {
+			choices := GetAvailableCodingHarnessChoices(capOut, r.t3Config)
+			if len(choices) > 1 {
+				formatted := FormatHarnessOptionsForDeveloper(choices)
+				resp, pErr := r.prompter.AskDeveloper(ctx, AskDeveloperRequest{
+					Question:      "Which coding agent harness would you like to use for this fix session?",
+					Reasoning:     "Cassandra is a read-only review agent. A coding agent harness must be selected to modify files and run tests.",
+					Options:       formatted,
+					IsMultiSelect: false,
+				})
+				if pErr == nil && resp.Status == "answered" && len(resp.Selected) > 0 {
+					selectedText := resp.Selected[0]
+					for _, c := range choices {
+						cleanFormatted := strings.TrimPrefix(selectedText, "(Recommended) ")
+						name := c.DisplayName
+						if name == "" {
+							name = c.InstanceID
+						}
+						if strings.HasPrefix(cleanFormatted, name) {
+							args.ModelSelection = &ModelSelection{
+								InstanceID: c.InstanceID,
+								Model:      c.ModelID,
+							}
+							break
+						}
+					}
 				}
 			}
 		}
 
-		// Defensive check: never launch with Cassandra
-		if args.ModelSelection != nil && strings.EqualFold(args.ModelSelection.InstanceID, "cassandra") {
-			return "", fmt.Errorf("Cassandra is a read-only code review agent and cannot be chosen as the target harness. Select an active coding harness such as 'antigravity' or 'opencode'")
+		// Deterministic resolution & validation for all launch calls
+		resolved, rErr := ResolveLaunchHarness(capOut, r.t3Config, args.ModelSelection)
+		if rErr != nil {
+			return "", fmt.Errorf("failed to resolve coding agent harness: %w", rErr)
 		}
+		if resolved == nil || resolved.InstanceID == "" || strings.EqualFold(resolved.InstanceID, "cassandra") {
+			return "", fmt.Errorf("failed to resolve a valid coding agent harness: Cassandra cannot be used to execute fixes")
+		}
+		args.ModelSelection = resolved
 
 		return callT3McpTool(ctx, "t3_thread_launch", args)
 	})
