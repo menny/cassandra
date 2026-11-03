@@ -112,6 +112,13 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		},
 		cfg.MetadataJSONFile,
 	)
+	if cfg != nil {
+		registry.SetT3Config(tools.T3LaunchConfig{
+			PreferredHarnesses: cfg.T3.PreferredHarnesses,
+			PreferredModel:     cfg.T3.PreferredModel,
+			PromptForHarness:   cfg.T3.PromptForHarness,
+		})
+	}
 
 	var mcpManager *mcp.Manager
 	// Ensure we close the MCP manager if we encounter an error later in this function.

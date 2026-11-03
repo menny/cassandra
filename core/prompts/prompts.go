@@ -141,12 +141,12 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"1. **When to use**:\n"+
 			"   - Use `t3_thread_launch` when explicitly asked by the user to fix issues or create a fix session/thread.\n"+
 			"   - Proactively offer to spawn a fix session when it is clear the user wants review findings or code issues addressed. Do not spawn it without user confirmation unless explicitly instructed.\n\n"+
-			"2. **Model and Provider Selection Logic**:\n"+
-			"   - Before launching a thread, call `orchestrator_capabilities` to inspect the available providers and models.\n"+
-			"   - Identify your current active model. Look through the `providers` list in `orchestrator_capabilities` to find a provider whose `models` contains your active model, or matches `inheritedProviderInstanceId`.\n"+
-			"   - Use that provider's `providerInstanceId` as `modelSelection.instanceId`.\n"+
-			"   - Pick an appropriate model from that provider instance's available options for `modelSelection.model`, choosing as light a model as possible suitable for the task (e.g., flash/haiku tier for straightforward code fixes).\n"+
-			"   - If no provider matches, fall back to `inheritedProviderInstanceId` / `inheritedModel` or omit `modelSelection` to inherit current session settings.\n\n"+
+			"2. **Agent Harness and Model Selection Rules**:\n"+
+			"   - **NEVER select Cassandra as the fix agent**: Cassandra is exclusively a read-only code review agent and cannot edit files, run commands, or implement fixes. Its instance ID ('cassandra') must NEVER be used in `modelSelection.instanceId`.\n"+
+			"   - **Target Harness Requirements**: The target must be an active coding agent harness capable of modifying files and running builds/tests (e.g., `antigravity`, `opencode`, `claudeAgent`). Filter providers from `orchestrator_capabilities`: they must have `canRunChildTask: true`, not have disabled constraints, and not be Cassandra.\n"+
+			"   - **Interactive Clarification with `ask_developer`**: If the user did not specify which harness or model to use, and `ask_developer` is available, ask the user to choose from the enabled coding harnesses discovered via `orchestrator_capabilities`.\n"+
+			"   - **Deterministic Fallback**: If the user does not specify a harness or skips clarification, omit or leave `modelSelection` to allow Cassandra's deterministic orchestrator to select the best available coding harness based on configured priority.\n"+
+			"   - **Model Tier Selection**: Pick an appropriate model tier for the fix complexity (e.g. lightweight/fast tier for targeted fixes, high-reasoning for major refactors).\n\n"+
 			"3. **Spawned Thread Message & Context**:\n"+
 			"   - The `message` parameter must contain comprehensive initial instructions for the fixing agent:\n"+
 			"     a) Brief context of the review and files affected.\n"+

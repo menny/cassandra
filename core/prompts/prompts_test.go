@@ -268,6 +268,7 @@ func TestBuildSystemPrompt_AllowT3ThreadLaunch(t *testing.T) {
 		require.Contains(t, stable, "<t3_thread_launch_guidelines>")
 		require.Contains(t, stable, "t3_thread_launch")
 		require.Contains(t, stable, "orchestrator_capabilities")
+		require.Contains(t, stable, "NEVER select Cassandra as the fix agent")
 		require.Contains(t, stable, "Your current active model is `gemini-3.8-flash-high`.")
 		require.Contains(t, stable, "Review Fix [short description]")
 		require.Contains(t, stable, "t3-thread://v1/<threadId>")

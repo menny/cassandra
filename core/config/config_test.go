@@ -126,4 +126,46 @@ cassandraConfigFolder = "/alias/path"
 			t.Errorf("expected CassandraConfigFolder to be /alias/path, got %q", cfg.CassandraConfigFolder)
 		}
 	})
+
+	t.Run("default t3 config", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		if len(cfg.T3.PreferredHarnesses) == 0 || cfg.T3.PreferredHarnesses[0] != "antigravity" {
+			t.Errorf("expected default PreferredHarnesses starting with antigravity, got %v", cfg.T3.PreferredHarnesses)
+		}
+		if !cfg.T3.PromptForHarness {
+			t.Errorf("expected default PromptForHarness to be true")
+		}
+	})
+
+	t.Run("unmarshal t3 config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+
+[t3]
+preferred-harnesses = ["opencode", "antigravity"]
+preferred-model = "gemini-3.8-flash-high"
+prompt-for-harness = false
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if len(cfg.T3.PreferredHarnesses) != 2 || cfg.T3.PreferredHarnesses[0] != "opencode" || cfg.T3.PreferredHarnesses[1] != "antigravity" {
+			t.Errorf("unexpected preferred harnesses: %v", cfg.T3.PreferredHarnesses)
+		}
+		if cfg.T3.PreferredModel != "gemini-3.8-flash-high" {
+			t.Errorf("expected preferred-model to be gemini-3.8-flash-high, got %q", cfg.T3.PreferredModel)
+		}
+		if cfg.T3.PromptForHarness {
+			t.Errorf("expected prompt-for-harness to be false")
+		}
+	})
 }

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -305,4 +306,217 @@ echo '{"content":[{"type":"text","text":"rate limit exceeded"}],"isError":true}'
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "rate limit exceeded")
 	})
+}
+
+const mockCapabilitiesJSON = `{
+  "parentThreadId": "f672b55e-f4a6-405d-b333-cc5bd8c5766f",
+  "inheritedProviderInstanceId": "antigravity",
+  "inheritedModel": "gemini-3.8-flash-high",
+  "providers": [
+    {
+      "providerInstanceId": "codex",
+      "displayName": "Codex",
+      "canRunChildTask": false,
+      "constraints": ["Provider instance is disabled."],
+      "models": []
+    },
+    {
+      "providerInstanceId": "opencode",
+      "displayName": "OpenCode",
+      "canRunChildTask": true,
+      "constraints": [],
+      "models": [
+        {"id": "deepseek-chat", "label": "DeepSeek Chat"},
+        {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"}
+      ]
+    },
+    {
+      "providerInstanceId": "antigravity",
+      "displayName": "Antigravity",
+      "canRunChildTask": true,
+      "constraints": [],
+      "models": [
+        {"id": "gemini-4-argon-pro", "label": "Gemini 4 Argon Pro"},
+        {"id": "gemini-3.8-flash-high", "label": "Gemini 3.8 Flash High"}
+      ]
+    },
+    {
+      "providerInstanceId": "cassandra",
+      "displayName": "Cassandra",
+      "driverKind": "acpRegistry",
+      "canRunChildTask": true,
+      "constraints": [],
+      "models": [
+        {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"}
+      ]
+    }
+  ]
+}`
+
+func TestMaskCassandraInCapabilities(t *testing.T) {
+	masked := MaskCassandraInCapabilities(mockCapabilitiesJSON)
+	require.Contains(t, masked, "Cassandra is a read-only code review agent")
+
+	var caps OrchestratorCapabilities
+	require.NoError(t, json.Unmarshal([]byte(masked), &caps))
+	for _, p := range caps.Providers {
+		if p.ProviderInstanceID == "cassandra" {
+			require.False(t, p.CanRunChildTask)
+			require.Contains(t, p.Constraints, "Cassandra is a read-only code review agent and cannot execute code fixes.")
+		}
+	}
+}
+
+func TestFilterEnabledCodingProviders(t *testing.T) {
+	var caps OrchestratorCapabilities
+	require.NoError(t, json.Unmarshal([]byte(mockCapabilitiesJSON), &caps))
+
+	enabled := FilterEnabledCodingProviders(caps.Providers)
+	require.Len(t, enabled, 2)
+	ids := []string{enabled[0].ProviderInstanceID, enabled[1].ProviderInstanceID}
+	require.Contains(t, ids, "opencode")
+	require.Contains(t, ids, "antigravity")
+	require.NotContains(t, ids, "cassandra")
+	require.NotContains(t, ids, "codex")
+}
+
+func TestResolveLaunchHarness(t *testing.T) {
+	t.Run("default priority selects antigravity", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"antigravity", "opencode"},
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, nil)
+		require.NoError(t, err)
+		require.Equal(t, "antigravity", sel.InstanceID)
+		require.Equal(t, "gemini-3.8-flash-high", sel.Model) // inheritedModel matches
+	})
+
+	t.Run("custom priority selects opencode", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"opencode", "antigravity"},
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, nil)
+		require.NoError(t, err)
+		require.Equal(t, "opencode", sel.InstanceID)
+		require.Equal(t, "deepseek-chat", sel.Model) // first model in opencode
+	})
+
+	t.Run("preferred model from toml is honored", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"opencode", "antigravity"},
+			PreferredModel:     "gemini-3.8-flash",
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, nil)
+		require.NoError(t, err)
+		require.Equal(t, "opencode", sel.InstanceID)
+		require.Equal(t, "gemini-3.8-flash", sel.Model)
+	})
+
+	t.Run("ignores cassandra when requested and applies fallback", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"antigravity"},
+		}
+		req := &ModelSelection{
+			InstanceID: "cassandra",
+			Model:      "gemini-3.8-flash",
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, req)
+		require.NoError(t, err)
+		require.Equal(t, "antigravity", sel.InstanceID)
+	})
+
+	t.Run("honors requested valid coding harness", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"antigravity"},
+		}
+		req := &ModelSelection{
+			InstanceID: "opencode",
+			Model:      "deepseek-chat",
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, req)
+		require.NoError(t, err)
+		require.Equal(t, "opencode", sel.InstanceID)
+		require.Equal(t, "deepseek-chat", sel.Model)
+	})
+
+	t.Run("fallback when top preferred harness is disabled", func(t *testing.T) {
+		cfg := T3LaunchConfig{
+			PreferredHarnesses: []string{"claudeAgent", "codex", "opencode"},
+		}
+		sel, err := ResolveLaunchHarness(mockCapabilitiesJSON, cfg, nil)
+		require.NoError(t, err)
+		require.Equal(t, "opencode", sel.InstanceID)
+	})
+}
+
+func TestGetAvailableCodingHarnessChoices(t *testing.T) {
+	cfg := T3LaunchConfig{
+		PreferredHarnesses: []string{"antigravity", "opencode"},
+		PreferredModel:     "gemini-3.8-flash-high",
+	}
+	choices := GetAvailableCodingHarnessChoices(mockCapabilitiesJSON, cfg)
+	require.Len(t, choices, 2)
+
+	options := FormatHarnessOptionsForDeveloper(choices)
+	require.Len(t, options, 2)
+	require.Contains(t, options[1], "(Recommended) Antigravity — Gemini 3.8 Flash High")
+	require.Contains(t, options[0], "OpenCode — DeepSeek Chat")
+}
+
+func TestT3ThreadLaunch_DefensiveCassandraResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockScript := filepath.Join(tmpDir, "mock_t3_node.sh")
+	scriptContent := `#!/bin/sh
+for arg in "$@"; do
+    case "$prev" in
+        "acp-mcp-call") tool="$arg" ;;
+    esac
+    prev="$arg"
+done
+
+case "$tool" in
+    "orchestrator_capabilities")
+        echo '` + mockCapabilitiesJSON + `'
+        ;;
+    "t3_thread_launch")
+        echo "$*" >> ` + filepath.Join(tmpDir, "launch.log") + `
+        echo '{"threadId":"spawned-fix-thread-456"}'
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+`
+	require.NoError(t, os.WriteFile(mockScript, []byte(scriptContent), 0o755))
+	t.Setenv("T3_ACP_MCP_NODE", mockScript)
+
+	r := NewRegistry()
+	r.SetT3Config(T3LaunchConfig{
+		PreferredHarnesses: []string{"antigravity", "opencode"},
+	})
+	registerT3Tools(r)
+
+	// Simulate LLM attempting to pass cassandra as the instanceId
+	tc := llm.ToolCall{
+		ID:   "call_fix",
+		Name: "t3_thread_launch",
+		Arguments: `{
+			"title": "Fix nil dereference in auth",
+			"message": "Please fix the nil dereference",
+			"modelSelection": {
+				"instanceId": "cassandra",
+				"model": "gemini-3.8-flash"
+			}
+		}`,
+	}
+
+	res, err := r.HandleCall(context.Background(), tc)
+	require.NoError(t, err)
+	require.Contains(t, res, "spawned-fix-thread-456")
+
+	// Verify that the launch call was intercepted and rewritten with antigravity!
+	launchLog, err := os.ReadFile(filepath.Join(tmpDir, "launch.log"))
+	require.NoError(t, err)
+	require.NotContains(t, string(launchLog), `"instanceId":"cassandra"`)
+	require.Contains(t, string(launchLog), `"instanceId":"antigravity"`)
 }

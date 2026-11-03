@@ -18,6 +18,7 @@ type Registry struct {
 	handlers        map[string]ToolHandler
 	verdictListener VerdictChangeListener
 	prompter        DeveloperPrompter
+	t3Config        T3LaunchConfig
 }
 
 func NewRegistry() *Registry {
@@ -36,6 +37,10 @@ func (r *Registry) SetVerdictChangeListener(l VerdictChangeListener) {
 
 func (r *Registry) SetDeveloperPrompter(p DeveloperPrompter) {
 	r.prompter = p
+}
+
+func (r *Registry) SetT3Config(cfg T3LaunchConfig) {
+	r.t3Config = cfg
 }
 
 func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
