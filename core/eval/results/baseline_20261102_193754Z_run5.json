@@ -1,0 +1,230 @@
+[
+  {
+    "case_id": "simple-bug",
+    "case_name": "Simple Bug Fix",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric by explicitly identifying that the `Divide` function does not check for division by zero (`b == 0`), explaining the consequences (runtime panic), and providing a constructive solution (returning an error). Additionally, it suggested adding unit tests for edge cases without introducing any false positives.",
+      "findings": [
+        "Correctly identified the division-by-zero risk when `b == 0`.",
+        "Suggested an idiomatic Go fix: changing signature to `(int, error)`.",
+        "Constructively recommended adding unit tests for normal and edge case behaviors."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 5663,
+        "output": 295,
+        "thinking": 725,
+        "cached": 2560,
+        "total_input": 8223,
+        "total_output": 1020
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "interface-contract",
+    "case_name": "Interface Contract Violation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review directly addresses the core issue identified in the rubric: `CreateAndSave` passes a nil `*User` pointer to `SaveUser` when `name` is empty. The reviewer clearly explains the consequence, cites `repository.go`, and offers a concise and constructive recommendation to validate `name` beforehand.",
+      "findings": [
+        "Accurately identified that passing an empty string causes a nil pointer to be passed to SaveUser.",
+        "Correctly recognized SaveUser's requirement for a non-nil pointer in repository.go.",
+        "Provided a constructive, actionable recommendation for input validation."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 10310,
+        "output": 359,
+        "thinking": 2062,
+        "cached": 5825,
+        "total_input": 16135,
+        "total_output": 2421
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 5,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "godoc_package": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "security-path-traversal",
+    "case_name": "Security: Path Traversal",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review accurately identified the critical path traversal vulnerability in `/file` and provided clear explanations along with proper boundary-checking recommendations (including prefix validation on the cleaned path, `os.Root`, and `io/fs`). It also identified secondary issues such as unhandled errors and unbounded memory buffering without introducing any false positives.",
+      "findings": [
+        "Successfully identified the path traversal vulnerability in server.go:15-17.",
+        "Recommended boundary checks (checking prefix of cleaned path) and modern Go safe alternatives (`os.DirFS`, `os.Root`).",
+        "Helpfully noted unhandled errors on `os.ReadFile` and `http.ListenAndServe`.",
+        "Clear, constructive, and accurate feedback."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 4801,
+        "output": 522,
+        "thinking": 2083,
+        "cached": 0,
+        "total_input": 4801,
+        "total_output": 2605
+      },
+      "iterations": 1,
+      "tool_calls": {
+        "total": 0,
+        "by_tool": {}
+      }
+    }
+  },
+  {
+    "case_id": "local-agents-convention",
+    "case_name": "Local Agents Convention",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric requirement by explicitly flagging the direct use of `db.Query` instead of the mandated `SafeQuery` wrapper specified in `internal/db/AGENTS.md`. Additionally, it identified an actual critical bug in the implementation where the query result is never scanned, resulting in `0, nil` always being returned.",
+      "findings": [
+        "Directly addressed the rubric requirement by flagging the violation of `AGENTS.md` and recommending `SafeQuery`.",
+        "Correctly identified that the query results are never scanned and `0, nil` is returned silently.",
+        "Feedback is constructive, well-formatted, and accurate without any false positives."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 12323,
+        "output": 529,
+        "thinking": 964,
+        "cached": 9482,
+        "total_input": 21805,
+        "total_output": 1493
+      },
+      "iterations": 4,
+      "tool_calls": {
+        "total": 6,
+        "by_tool": {
+          "emit_reviewer_state": 3,
+          "glob_files": 1,
+          "read_file": 2
+        }
+      }
+    }
+  },
+  {
+    "case_id": "unupdated-caller-blast-radius",
+    "case_name": "Unupdated Caller Blast Radius",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly satisfies every requirement in the rubric. It searched for and identified both untouched caller locations (`cmd/worker/worker.go` and `pkg/client/http.go`), clearly explained that they multiply the return value by `time.Second`, causing a 1000x inflation of timeouts, and explicitly rejected the change. Additionally, it provided excellent constructive feedback regarding the flaws of returning a raw `int` and the contradiction in claiming sub-second precision with `strconv.Atoi`.",
+      "findings": [
+        "Identified untouched callers in both `cmd/worker/worker.go` and `pkg/client/http.go`.",
+        "Correctly explained the 1000x timeout inflation caused by multiplying milliseconds by `time.Second`.",
+        "Rejected the change as mandated by the rubric.",
+        "Provided valuable constructive feedback on using `time.Duration` and resolving the precision contradiction."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9706,
+        "output": 723,
+        "thinking": 1825,
+        "cached": 11850,
+        "total_input": 21556,
+        "total_output": 2548
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 7,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "grep_files": 1,
+          "read_file": 4
+        }
+      }
+    }
+  },
+  {
+    "case_id": "clean-pr-false-positive-restraint",
+    "case_name": "Clean PR False-Positive Restraint",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review met all criteria specified in the rubric: it accurately recognized that calling onEvict outside the lock prevents re-entrancy deadlocks, avoided false positives, and approved the change.",
+      "findings": [
+        "Approved the change as required by the rubric.",
+        "Correctly recognized that invoking onEvict outside the mutex lock prevents re-entrancy deadlocks, avoiding the common false positive.",
+        "Concise and accurate evaluation of edge cases (context cancellation, empty prefix, nil callback)."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 4546,
+        "output": 179,
+        "thinking": 881,
+        "cached": 8800,
+        "total_input": 13346,
+        "total_output": 1060
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "goroutine-leak-unbuffered-channel",
+    "case_name": "Concurrency: Goroutine Leak on Context Cancellation",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly identifies the goroutine leak described in the rubric, explaining clearly how an unbuffered channel causes the spawned goroutine to block indefinitely when ctx.Done() triggers. It recommends both suggested solutions from the rubric: buffering the channel with capacity 1 and propagating context to the backend. It also provides valuable, actionable feedback regarding unit testing with leak detection.",
+      "findings": [
+        "Accurately identified the goroutine leak caused by sending to an unbuffered channel after early return on context cancellation.",
+        "Recommended the exact fixes specified in the rubric: buffering the channel (make(chan fetchResult, 1)) and propagating context to the backend.",
+        "Highlighted additional practical concerns without false positives, such as orphaned background backend requests and lack of leak-testing."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 7668,
+        "output": 568,
+        "thinking": 936,
+        "cached": 2771,
+        "total_input": 10439,
+        "total_output": 1504
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1,
+          "read_file": 1
+        }
+      }
+    }
+  }
+]
