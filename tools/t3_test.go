@@ -61,7 +61,7 @@ case "$tool" in
         echo '{"pullRequests":[]}'
         ;;
     "orchestrator_capabilities")
-        echo '{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","models":[{"id":"gemini-3.8-flash-low"}]}]}'
+        echo '{"inheritedProviderInstanceId":"antigravity","inheritedModel":"gemini-3.8-flash-high","providers":[{"providerInstanceId":"antigravity","canRunChildTask":true,"models":[{"id":"gemini-3.8-flash-low"}]}]}'
         ;;
     "t3_thread_launch")
         echo '{"threadId":"test-thread-id-123"}'
