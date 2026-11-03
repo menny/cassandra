@@ -94,6 +94,14 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	includeAskDeveloper := allowAskDeveloper(cfg)
 	includePRComment := isACPSession(cfg)
 	includeURLFetch := allowURLFetch(cfg)
+	if cfg != nil {
+		registry.SetT3Config(tools.T3LaunchConfig{
+			PreferredHarnesses: cfg.T3.PreferredHarnesses,
+			PreferredModel:     cfg.T3.PreferredModel,
+			PromptForHarness:   cfg.T3.PromptForHarness,
+		})
+	}
+
 	tools.RegisterLocalTools(
 		registry,
 		targetDir,
@@ -186,10 +194,12 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	}
 
 	var currentModel string
+	promptForHarness := true
 	if cfg != nil {
 		currentModel = cfg.Model
+		promptForHarness = cfg.T3.PromptForHarness
 	}
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), includePRComment, includeURLFetch, currentModel)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), includePRComment, includeURLFetch, currentModel, promptForHarness)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -270,10 +280,12 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	}
 
 	var currentModel string
+	promptForHarness := true
 	if r.Config != nil {
 		currentModel = r.Config.Model
+		promptForHarness = r.Config.T3.PromptForHarness
 	}
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), isACPSession(r.Config), allowURLFetch(r.Config), currentModel)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), isACPSession(r.Config), allowURLFetch(r.Config), currentModel, promptForHarness)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}

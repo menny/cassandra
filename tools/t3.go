@@ -119,6 +119,284 @@ type ThreadLaunchArgs struct {
 	Scratch           *bool              `json:"scratch,omitempty"`
 }
 
+// T3LaunchConfig specifies launch configuration for T3 Code sessions.
+type T3LaunchConfig struct {
+	PreferredHarnesses []string
+	PreferredModel     string
+	PromptForHarness   bool
+}
+
+// DefaultPreferredHarnesses defines standard priority of coding harnesses.
+var DefaultPreferredHarnesses = []string{"antigravity", "opencode", "claudeAgent", "codex"}
+
+// OrchestratorCapabilities mirrors T3's orchestrator_capabilities payload.
+type OrchestratorCapabilities struct {
+	ParentThreadID              string               `json:"parentThreadId"`
+	InheritedProviderInstanceID string               `json:"inheritedProviderInstanceId"`
+	InheritedModel              string               `json:"inheritedModel"`
+	InheritedOptions            any                  `json:"inheritedOptions"`
+	RuntimeMode                 string               `json:"runtimeMode"`
+	InteractionMode             string               `json:"interactionMode"`
+	Providers                   []ProviderCapability `json:"providers"`
+}
+
+// ProviderCapability describes a provider instance in orchestrator_capabilities.
+type ProviderCapability struct {
+	ProviderInstanceID           string            `json:"providerInstanceId"`
+	DriverKind                   string            `json:"driverKind"`
+	DisplayName                  string            `json:"displayName"`
+	Models                       []CapabilityModel `json:"models"`
+	CanRunChildTask              bool              `json:"canRunChildTask"`
+	CanRunCrossProviderChildTask bool              `json:"canRunCrossProviderChildTask"`
+	Constraints                  []string          `json:"constraints"`
+}
+
+// CapabilityModel describes a model offered by a provider instance.
+type CapabilityModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label,omitempty"`
+}
+
+// CodingHarnessChoice describes a candidate coding harness option for the developer.
+type CodingHarnessChoice struct {
+	InstanceID  string `json:"instanceId"`
+	DisplayName string `json:"displayName"`
+	ModelID     string `json:"model"`
+	ModelLabel  string `json:"modelLabel"`
+	IsPreferred bool   `json:"isPreferred"`
+}
+
+// MaskCassandraInCapabilities marks Cassandra as non-child-task and read-only in orchestrator_capabilities output.
+func MaskCassandraInCapabilities(raw string) string {
+	var caps OrchestratorCapabilities
+	if err := json.Unmarshal([]byte(raw), &caps); err != nil {
+		return raw
+	}
+	modified := false
+	for i := range caps.Providers {
+		p := &caps.Providers[i]
+		if strings.EqualFold(p.ProviderInstanceID, "cassandra") || strings.EqualFold(p.DisplayName, "cassandra") {
+			p.CanRunChildTask = false
+			p.CanRunCrossProviderChildTask = false
+			p.Constraints = append(p.Constraints, "Cassandra is a read-only code review agent and cannot execute code fixes.")
+			modified = true
+		}
+	}
+	if !modified {
+		return raw
+	}
+	out, err := json.Marshal(caps)
+	if err != nil {
+		return raw
+	}
+	return string(out)
+}
+
+// FilterEnabledCodingProviders filters out Cassandra, read-only providers, and disabled providers.
+func FilterEnabledCodingProviders(providers []ProviderCapability) []ProviderCapability {
+	var enabled []ProviderCapability
+	for _, p := range providers {
+		if strings.EqualFold(p.ProviderInstanceID, "cassandra") || strings.EqualFold(p.DisplayName, "cassandra") {
+			continue
+		}
+		if !p.CanRunChildTask {
+			continue
+		}
+		isDisabled := false
+		for _, c := range p.Constraints {
+			lower := strings.ToLower(c)
+			if strings.Contains(lower, "disabled") || strings.Contains(lower, "read-only") {
+				isDisabled = true
+				break
+			}
+		}
+		if isDisabled {
+			continue
+		}
+		enabled = append(enabled, p)
+	}
+	return enabled
+}
+
+func pickModelForProvider(p *ProviderCapability, requestedModel, preferredModel, inheritedModel string, options any) *ModelSelection {
+	sel := &ModelSelection{
+		InstanceID: p.ProviderInstanceID,
+		Options:    options,
+	}
+
+	// 1. Requested model exists in provider models
+	if requestedModel != "" {
+		for _, m := range p.Models {
+			if m.ID == requestedModel {
+				sel.Model = requestedModel
+				return sel
+			}
+		}
+	}
+
+	// 2. Preferred model from TOML exists in provider models
+	if preferredModel != "" {
+		for _, m := range p.Models {
+			if m.ID == preferredModel {
+				sel.Model = preferredModel
+				return sel
+			}
+		}
+	}
+
+	// 3. Inherited model exists in provider models
+	if inheritedModel != "" {
+		for _, m := range p.Models {
+			if m.ID == inheritedModel {
+				sel.Model = inheritedModel
+				return sel
+			}
+		}
+	}
+
+	// 4. Default to first available model for provider
+	if len(p.Models) > 0 {
+		sel.Model = p.Models[0].ID
+	} else if requestedModel != "" {
+		sel.Model = requestedModel
+	} else if preferredModel != "" {
+		sel.Model = preferredModel
+	} else {
+		sel.Model = "default"
+	}
+
+	return sel
+}
+
+// ResolveLaunchHarness deterministically picks an enabled coding harness and model.
+func ResolveLaunchHarness(capabilitiesRaw string, cfg T3LaunchConfig, requested *ModelSelection) (*ModelSelection, error) {
+	var caps OrchestratorCapabilities
+	if err := json.Unmarshal([]byte(capabilitiesRaw), &caps); err != nil {
+		if requested != nil && requested.InstanceID != "" && !strings.EqualFold(requested.InstanceID, "cassandra") {
+			return requested, nil
+		}
+		return nil, fmt.Errorf("failed to parse orchestrator capabilities: %w", err)
+	}
+
+	enabled := FilterEnabledCodingProviders(caps.Providers)
+	if len(enabled) == 0 {
+		return nil, fmt.Errorf("no enabled coding agent harnesses available in T3 Code")
+	}
+
+	// 1. If caller requested a specific valid coding harness (not cassandra), honor it if enabled.
+	if requested != nil && requested.InstanceID != "" && !strings.EqualFold(requested.InstanceID, "cassandra") {
+		for _, p := range enabled {
+			if strings.EqualFold(p.ProviderInstanceID, requested.InstanceID) {
+				return pickModelForProvider(&p, requested.Model, cfg.PreferredModel, caps.InheritedModel, requested.Options), nil
+			}
+		}
+	}
+
+	// 2. Priority match against preferred harnesses.
+	preferred := cfg.PreferredHarnesses
+	if len(preferred) == 0 {
+		preferred = DefaultPreferredHarnesses
+	}
+
+	for _, pref := range preferred {
+		for _, p := range enabled {
+			if strings.EqualFold(p.ProviderInstanceID, pref) {
+				var reqModel string
+				var reqOptions any
+				if requested != nil {
+					reqModel = requested.Model
+					reqOptions = requested.Options
+				}
+				return pickModelForProvider(&p, reqModel, cfg.PreferredModel, caps.InheritedModel, reqOptions), nil
+			}
+		}
+	}
+
+	// 3. Fallback: match inheritedProviderInstanceId if enabled and not cassandra.
+	if caps.InheritedProviderInstanceID != "" && !strings.EqualFold(caps.InheritedProviderInstanceID, "cassandra") {
+		for _, p := range enabled {
+			if strings.EqualFold(p.ProviderInstanceID, caps.InheritedProviderInstanceID) {
+				var reqModel string
+				var reqOptions any
+				if requested != nil {
+					reqModel = requested.Model
+					reqOptions = requested.Options
+				}
+				return pickModelForProvider(&p, reqModel, cfg.PreferredModel, caps.InheritedModel, reqOptions), nil
+			}
+		}
+	}
+
+	// 4. Ultimate fallback: pick first enabled coding provider.
+	p := &enabled[0]
+	var reqModel string
+	var reqOptions any
+	if requested != nil {
+		reqModel = requested.Model
+		reqOptions = requested.Options
+	}
+	return pickModelForProvider(p, reqModel, cfg.PreferredModel, caps.InheritedModel, reqOptions), nil
+}
+
+// GetAvailableCodingHarnessChoices inspects capabilities and returns candidate coding choices.
+func GetAvailableCodingHarnessChoices(capabilitiesRaw string, cfg T3LaunchConfig) []CodingHarnessChoice {
+	var caps OrchestratorCapabilities
+	if err := json.Unmarshal([]byte(capabilitiesRaw), &caps); err != nil {
+		return nil
+	}
+	enabled := FilterEnabledCodingProviders(caps.Providers)
+	if len(enabled) == 0 {
+		return nil
+	}
+
+	bestMatch, _ := ResolveLaunchHarness(capabilitiesRaw, cfg, nil)
+	var bestInstanceID string
+	if bestMatch != nil {
+		bestInstanceID = bestMatch.InstanceID
+	}
+
+	var choices []CodingHarnessChoice
+	for _, p := range enabled {
+		isPref := false
+		if bestInstanceID != "" && strings.EqualFold(p.ProviderInstanceID, bestInstanceID) {
+			isPref = true
+		}
+		sel := pickModelForProvider(&p, "", cfg.PreferredModel, caps.InheritedModel, nil)
+		label := sel.Model
+		for _, m := range p.Models {
+			if m.ID == sel.Model && m.Label != "" {
+				label = m.Label
+				break
+			}
+		}
+		choices = append(choices, CodingHarnessChoice{
+			InstanceID:  p.ProviderInstanceID,
+			DisplayName: p.DisplayName,
+			ModelID:     sel.Model,
+			ModelLabel:  label,
+			IsPreferred: isPref,
+		})
+	}
+	return choices
+}
+
+// FormatHarnessOptionsForDeveloper converts candidate choices to string options for ask_developer.
+func FormatHarnessOptionsForDeveloper(choices []CodingHarnessChoice) []string {
+	var result []string
+	for _, c := range choices {
+		name := c.DisplayName
+		if name == "" {
+			name = c.InstanceID
+		}
+		prefix := ""
+		if c.IsPreferred {
+			prefix = "(Recommended) "
+		}
+		result = append(result, fmt.Sprintf("%s%s — %s", prefix, name, c.ModelLabel))
+	}
+	return result
+}
+
 func registerT3Tools(r *Registry) {
 	// Only expose T3-specific tools when running inside a T3 Code environment.
 	if !IsT3Session() {
@@ -191,7 +469,11 @@ func registerT3Tools(r *Registry) {
 	type capArgs struct{}
 
 	RegisterToolWithArgs(r, capDef, func(ctx context.Context, args capArgs) (string, error) {
-		return callT3McpTool(ctx, "orchestrator_capabilities", args)
+		raw, err := callT3McpTool(ctx, "orchestrator_capabilities", args)
+		if err != nil {
+			return "", err
+		}
+		return MaskCassandraInCapabilities(raw), nil
 	})
 
 	launchDef := llm.ToolDef{
@@ -214,7 +496,7 @@ func registerT3Tools(r *Registry) {
 					"properties": map[string]any{
 						"instanceId": map[string]any{
 							"type":        "string",
-							"description": "The provider instance ID (e.g., from orchestrator_capabilities).",
+							"description": "The provider instance ID (e.g., from orchestrator_capabilities). Must be an active coding agent harness (e.g. 'antigravity', 'opencode'), never 'cassandra'.",
 						},
 						"model": map[string]any{
 							"type":        "string",
@@ -246,6 +528,57 @@ func registerT3Tools(r *Registry) {
 		} else {
 			args.Title = "Review Fix"
 		}
+
+		capOut, err := callT3McpTool(ctx, "orchestrator_capabilities", capArgs{})
+		if err != nil {
+			return "", fmt.Errorf("failed to query orchestrator capabilities: %w", err)
+		}
+
+		// Prompt developer if harness selection is missing, prompt-for-harness is true, and a prompter is available
+		needsPrompt := args.ModelSelection == nil ||
+			args.ModelSelection.InstanceID == "" ||
+			strings.EqualFold(args.ModelSelection.InstanceID, "cassandra")
+
+		if needsPrompt && r.t3Config.PromptForHarness && r.prompter != nil {
+			choices := GetAvailableCodingHarnessChoices(capOut, r.t3Config)
+			if len(choices) > 1 {
+				formatted := FormatHarnessOptionsForDeveloper(choices)
+				resp, pErr := r.prompter.AskDeveloper(ctx, AskDeveloperRequest{
+					Question:      "Which coding agent harness would you like to use for this fix session?",
+					Reasoning:     "Cassandra is a read-only review agent. A coding agent harness must be selected to modify files and run tests.",
+					Options:       formatted,
+					IsMultiSelect: false,
+				})
+				if pErr == nil && resp.Status == "answered" && len(resp.Selected) > 0 {
+					selectedText := resp.Selected[0]
+					for _, c := range choices {
+						cleanFormatted := strings.TrimPrefix(selectedText, "(Recommended) ")
+						name := c.DisplayName
+						if name == "" {
+							name = c.InstanceID
+						}
+						if strings.HasPrefix(cleanFormatted, name) {
+							args.ModelSelection = &ModelSelection{
+								InstanceID: c.InstanceID,
+								Model:      c.ModelID,
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+
+		// Deterministic resolution & validation for all launch calls
+		resolved, rErr := ResolveLaunchHarness(capOut, r.t3Config, args.ModelSelection)
+		if rErr != nil {
+			return "", fmt.Errorf("failed to resolve coding agent harness: %w", rErr)
+		}
+		if resolved == nil || resolved.InstanceID == "" || strings.EqualFold(resolved.InstanceID, "cassandra") {
+			return "", fmt.Errorf("failed to resolve a valid coding agent harness: Cassandra cannot be used to execute fixes")
+		}
+		args.ModelSelection = resolved
+
 		return callT3McpTool(ctx, "t3_thread_launch", args)
 	})
 }

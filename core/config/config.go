@@ -50,6 +50,14 @@ type Config struct {
 	InteractivePostReview        bool           `mapstructure:"interactive-post-review"`
 	WaitForMessage               bool           `mapstructure:"-"`
 	CassandraConfigFolder        string         `mapstructure:"cassandra-config-folder"`
+	T3                           T3Config       `mapstructure:"t3"`
+}
+
+// T3Config specifies configuration for T3 Code orchestration sessions.
+type T3Config struct {
+	PreferredHarnesses []string `mapstructure:"preferred-harnesses"`
+	PreferredModel     string   `mapstructure:"preferred-model"`
+	PromptForHarness   bool     `mapstructure:"prompt-for-harness"`
 }
 
 // DefaultMaxDiffBytes is the default maximum diff size (10 KB) allowed in the prompt before omitting the diff.
@@ -68,6 +76,10 @@ func NewDefaultConfig() *Config {
 		AllowAskDeveloper:     false,
 		InteractivePostReview: false,
 		CassandraConfigFolder: "~/.cassandra",
+		T3: T3Config{
+			PreferredHarnesses: []string{"antigravity", "opencode", "claudeAgent", "codex"},
+			PromptForHarness:   true,
+		},
 	}
 }
 
@@ -87,6 +99,8 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
 	v.SetDefault("cassandra-config-folder", "~/.cassandra")
+	v.SetDefault("t3.preferred-harnesses", []string{"antigravity", "opencode", "claudeAgent", "codex"})
+	v.SetDefault("t3.prompt-for-harness", true)
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)

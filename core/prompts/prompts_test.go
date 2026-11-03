@@ -263,14 +263,23 @@ func TestBuildSystemPrompt_AllowT3ThreadLaunch(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowT3ThreadLaunch is true with current model", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, true, false, false, "gemini-3.8-flash-high")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, "gemini-3.8-flash-high", true)
 		require.NoError(t, err)
 		require.Contains(t, stable, "<t3_thread_launch_guidelines>")
 		require.Contains(t, stable, "t3_thread_launch")
 		require.Contains(t, stable, "orchestrator_capabilities")
+		require.Contains(t, stable, "NEVER select Cassandra as the fix agent")
+		require.Contains(t, stable, "Interactive Clarification with `ask_developer`")
 		require.Contains(t, stable, "Your current active model is `gemini-3.8-flash-high`.")
 		require.Contains(t, stable, "Review Fix [short description]")
 		require.Contains(t, stable, "t3-thread://v1/<threadId>")
+	})
+
+	t.Run("when promptForHarness is false", func(t *testing.T) {
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, "gemini-3.8-flash-high", false)
+		require.NoError(t, err)
+		require.Contains(t, stable, "Deterministic Selection")
+		require.NotContains(t, stable, "Interactive Clarification with `ask_developer`")
 	})
 
 	t.Run("when allowT3ThreadLaunch is false", func(t *testing.T) {

@@ -84,7 +84,7 @@ type PromptSummary struct {
 // Dynamic (Zone 3):
 //  10. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
 //  11. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string) (stable, dynamic string, summary PromptSummary, err error) {
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string, promptForHarness ...bool) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -136,17 +136,27 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 		if currentModel != "" {
 			currentModelText = fmt.Sprintf("Your current active model is `%s`.\n", currentModel)
 		}
+		pForHarness := true
+		if len(promptForHarness) > 0 {
+			pForHarness = promptForHarness[0]
+		}
+		var clarificationRule string
+		if pForHarness && allowAskDeveloper {
+			clarificationRule = "   - **Interactive Clarification with `ask_developer`**: If the user did not specify which harness or model to use, and `ask_developer` is available, ask the user to choose from the enabled coding harnesses discovered via `orchestrator_capabilities`.\n"
+		} else {
+			clarificationRule = "   - **Deterministic Selection**: Do NOT prompt the developer to choose a harness. Directly omit or leave `modelSelection` to allow Cassandra's deterministic orchestrator to select the best available coding harness based on configured priority.\n"
+		}
 		stable += fmt.Sprintf("\n<t3_thread_launch_guidelines>\n"+
 			"You are running inside a T3 Code session and have access to the `t3_thread_launch` and `orchestrator_capabilities` tools.\n%s\n"+
 			"1. **When to use**:\n"+
 			"   - Use `t3_thread_launch` when explicitly asked by the user to fix issues or create a fix session/thread.\n"+
 			"   - Proactively offer to spawn a fix session when it is clear the user wants review findings or code issues addressed. Do not spawn it without user confirmation unless explicitly instructed.\n\n"+
-			"2. **Model and Provider Selection Logic**:\n"+
-			"   - Before launching a thread, call `orchestrator_capabilities` to inspect the available providers and models.\n"+
-			"   - Identify your current active model. Look through the `providers` list in `orchestrator_capabilities` to find a provider whose `models` contains your active model, or matches `inheritedProviderInstanceId`.\n"+
-			"   - Use that provider's `providerInstanceId` as `modelSelection.instanceId`.\n"+
-			"   - Pick an appropriate model from that provider instance's available options for `modelSelection.model`, choosing as light a model as possible suitable for the task (e.g., flash/haiku tier for straightforward code fixes).\n"+
-			"   - If no provider matches, fall back to `inheritedProviderInstanceId` / `inheritedModel` or omit `modelSelection` to inherit current session settings.\n\n"+
+			"2. **Agent Harness and Model Selection Rules**:\n"+
+			"   - **NEVER select Cassandra as the fix agent**: Cassandra is exclusively a read-only code review agent and cannot edit files, run commands, or implement fixes. Its instance ID ('cassandra') must NEVER be used in `modelSelection.instanceId`.\n"+
+			"   - **Target Harness Requirements**: The target must be an active coding agent harness capable of modifying files and running builds/tests (e.g., `antigravity`, `opencode`, `claudeAgent`). Filter providers from `orchestrator_capabilities`: they must have `canRunChildTask: true`, not have disabled constraints, and not be Cassandra.\n"+
+			"%s"+
+			"   - **Deterministic Fallback**: If the user does not specify a harness or skips clarification, omit or leave `modelSelection` to allow Cassandra's deterministic orchestrator to select the best available coding harness based on configured priority.\n"+
+			"   - **Model Tier Selection**: Pick an appropriate model tier for the fix complexity (e.g. lightweight/fast tier for targeted fixes, high-reasoning for major refactors).\n\n"+
 			"3. **Spawned Thread Message & Context**:\n"+
 			"   - The `message` parameter must contain comprehensive initial instructions for the fixing agent:\n"+
 			"     a) Brief context of the review and files affected.\n"+
@@ -156,7 +166,7 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"   - The thread `title` must strictly follow the format: \"Review Fix [short description]\" (e.g., \"Review Fix Refactor Auth Token Validation\").\n\n"+
 			"5. **Referencing the Spawned Thread**:\n"+
 			"   - When presenting the launched thread to the user, link it using markdown: `[Review Fix ...](t3-thread://v1/<threadId>)` using the exact `threadId` returned by `t3_thread_launch`.\n"+
-			"</t3_thread_launch_guidelines>\n", currentModelText)
+			"</t3_thread_launch_guidelines>\n", currentModelText, clarificationRule)
 	}
 
 	// Zone 2: PR comment guidelines (ACP sessions only)
