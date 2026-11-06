@@ -231,6 +231,7 @@ func TestParseAnthropicResponse_RecordsStopReasonAndBlockTypes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, resp.Text)
 	assert.Equal(t, "refusal", resp.RawFinishReason)
+	assert.Equal(t, llm.FinishReasonRefusal, resp.FinishReason)
 	assert.Equal(t, []string{"thinking"}, resp.ContentTypes)
 	assert.Contains(t, resp.Describe(), `stop_reason="refusal"`)
 	assert.Contains(t, resp.Describe(), "content_blocks=[thinking]")

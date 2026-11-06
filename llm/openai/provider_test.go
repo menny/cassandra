@@ -308,6 +308,29 @@ func TestParseOpenAIResponse_UsageWithCachedAndReasoning(t *testing.T) {
 	assert.Equal(t, 10, result.Usage.ThinkingTokens)
 }
 
+func TestParseOpenAIResponse_ContentFilter(t *testing.T) {
+	raw := `{
+		"id": "chatcmpl-refusal",
+		"object": "chat.completion",
+		"created": 1700000000,
+		"model": "gpt-4o",
+		"choices": [{
+			"index": 0,
+			"finish_reason": "content_filter",
+			"message": {"role": "assistant", "content": null, "refusal": "I cannot fulfill this request."},
+			"logprobs": null
+		}],
+		"usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+	}`
+	var resp openaisdk.ChatCompletion
+	require.NoError(t, json.Unmarshal([]byte(raw), &resp))
+
+	result, err := parseOpenAIResponse(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, "content_filter", result.RawFinishReason)
+	assert.Equal(t, llm.FinishReasonRefusal, result.FinishReason)
+}
+
 // ── baseURL override ──────────────────────────────────────────────────────────
 
 // chatCompletionResponse returns a minimal valid OpenAI Chat Completion JSON

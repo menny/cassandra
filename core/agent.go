@@ -127,19 +127,27 @@ func WithSessionStore(store SessionStore, sessionID string) AgentOption {
 	}
 }
 
+// WithEmptyResponseRetryDelay configures the delay between retries when an LLM returns empty content.
+func WithEmptyResponseRetryDelay(d time.Duration) AgentOption {
+	return func(a *Agent) {
+		a.emptyResponseRetryDelay = d
+	}
+}
+
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
-	llm          llm.Model
-	registry     ToolDispatcher
-	reporter     Reporter
-	totalUsage   llm.Usage
-	toolCalls    map[string]int
-	iterations   int
-	stderr       io.Writer
-	history      []llm.Message
-	Stage        string
-	sessionStore SessionStore
-	sessionID    string
+	llm                     llm.Model
+	registry                ToolDispatcher
+	reporter                Reporter
+	totalUsage              llm.Usage
+	toolCalls               map[string]int
+	iterations              int
+	stderr                  io.Writer
+	history                 []llm.Message
+	Stage                   string
+	sessionStore            SessionStore
+	sessionID               string
+	emptyResponseRetryDelay time.Duration
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -664,6 +672,12 @@ func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxToke
 // immediately — non-empty tool-call responses are always valid.
 func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
 	var lastResp *llm.Response
+	var dumpedRefusal bool
+	delay := a.emptyResponseRetryDelay
+	if delay <= 0 {
+		delay = llm.DefaultRetryBaseDelay
+	}
+
 	for attempt := range emptyResponseMaxAttempts {
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
 		if err != nil {
@@ -674,15 +688,16 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 			return resp, nil
 		}
 		lastResp = resp
-		if attempt == 0 && resp.RawFinishReason == "refusal" {
+		if !dumpedRefusal && resp.FinishReason == llm.FinishReasonRefusal {
 			dumpRefusedRequest(messages)
+			dumpedRefusal = true
 		}
 		if attempt < emptyResponseMaxAttempts-1 {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			a.reporter.ReportEmptyResponseRetry(attempt + 2)
-			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+			if err := sleepWithContext(ctx, delay); err != nil {
 				return nil, err
 			}
 		}

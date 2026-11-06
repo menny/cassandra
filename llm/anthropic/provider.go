@@ -217,6 +217,8 @@ func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 		resp.FinishReason = llm.FinishReasonStop
 	case anthropicsdk.StopReasonMaxTokens:
 		resp.FinishReason = llm.FinishReasonLength
+	case anthropicsdk.StopReasonRefusal:
+		resp.FinishReason = llm.FinishReasonRefusal
 	default:
 		resp.FinishReason = llm.FinishReasonOther
 	}

@@ -155,9 +155,10 @@ func (r *Response) Describe() string {
 type FinishReason string
 
 const (
-	FinishReasonStop   FinishReason = "stop"   // normal termination
-	FinishReasonLength FinishReason = "length" // hit max tokens
-	FinishReasonOther  FinishReason = "other"  // safety filters, errors, etc.
+	FinishReasonStop    FinishReason = "stop"    // normal termination
+	FinishReasonLength  FinishReason = "length"  // hit max tokens
+	FinishReasonRefusal FinishReason = "refusal" // provider refused the request (safety, policy, refusal block)
+	FinishReasonOther   FinishReason = "other"   // safety filters, errors, etc.
 )
 
 // DefaultMaxTokens is the fallback max-tokens budget for LLM calls when the

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
@@ -942,7 +943,7 @@ func TestRunReview_EmptyResponseRetry(t *testing.T) {
 	}}
 
 	spy := &spyReporter{}
-	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy))
+	agent := NewAgent(lm, newMockDispatcher(), WithReporter(spy), WithEmptyResponseRetryDelay(time.Nanosecond))
 
 	got, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err != nil {
@@ -970,13 +971,24 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 	dumpDir := t.TempDir()
 	t.Setenv(refusalDumpDirEnv, dumpDir)
 	// All responses are empty (no text, no tool calls).
+	// First response is a plain empty response, second response is a refusal,
+	// verifying that dumpedRefusal works even when the refusal occurs after attempt 0.
 	responses := make([]*llm.Response, emptyResponseMaxAttempts)
 	for i := range responses {
-		responses[i] = &llm.Response{Text: "", RawFinishReason: "refusal", ContentTypes: []string{"thinking"}}
+		if i == 0 {
+			responses[i] = &llm.Response{Text: "", FinishReason: llm.FinishReasonOther}
+		} else {
+			responses[i] = &llm.Response{
+				Text:            "",
+				RawFinishReason: "refusal",
+				FinishReason:    llm.FinishReasonRefusal,
+				ContentTypes:    []string{"thinking"},
+			}
+		}
 	}
 	lm := &mockLLM{responses: responses}
 
-	agent := newTestAgent(lm, newMockDispatcher())
+	agent := NewAgent(lm, newMockDispatcher(), WithStderr(io.Discard), WithEmptyResponseRetryDelay(time.Nanosecond))
 
 	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err == nil {

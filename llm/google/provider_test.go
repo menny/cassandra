@@ -238,6 +238,35 @@ func TestParseGenaiResponse_ToolCall(t *testing.T) {
 	assert.Contains(t, result.ToolCalls[0].Arguments, "main.go")
 }
 
+func TestParseGenaiResponse_RecordsStopReasonAndBlockTypes(t *testing.T) {
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{
+			{
+				FinishReason: genai.FinishReasonSafety,
+				Content: &genai.Content{
+					Role: "model",
+					Parts: []*genai.Part{
+						{Thought: true, Text: "evaluating safety..."},
+					},
+				},
+			},
+		},
+		UsageMetadata: &genai.GenerateContentResponseUsageMetadata{
+			PromptTokenCount:     50,
+			CandidatesTokenCount: 10,
+		},
+	}
+
+	result, err := parseGenaiResponse(resp)
+	require.NoError(t, err)
+	assert.Empty(t, result.Text)
+	assert.Equal(t, "SAFETY", result.RawFinishReason)
+	assert.Equal(t, llm.FinishReasonRefusal, result.FinishReason)
+	assert.Equal(t, []string{"thought"}, result.ContentTypes)
+	assert.Contains(t, result.Describe(), `stop_reason="SAFETY"`)
+	assert.Contains(t, result.Describe(), "content_blocks=[thought]")
+}
+
 func TestParseGenaiResponse_MixedTextAndToolCall(t *testing.T) {
 	// A single part may carry both text and a function call; both must be
 	// captured independently.

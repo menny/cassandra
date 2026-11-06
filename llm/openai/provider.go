@@ -183,6 +183,7 @@ func parseOpenAIResponse(resp *openaisdk.ChatCompletion) (*llm.Response, error) 
 	}
 
 	choice := resp.Choices[0]
+	result.RawFinishReason = choice.FinishReason
 	switch choice.FinishReason {
 	case "stop":
 		result.FinishReason = llm.FinishReasonStop
@@ -193,13 +194,19 @@ func parseOpenAIResponse(resp *openaisdk.ChatCompletion) (*llm.Response, error) 
 		// which we treat as "stop" for the purposes of generating content
 		// because the model stopped to yield control.
 		result.FinishReason = llm.FinishReasonStop
+	case "content_filter":
+		result.FinishReason = llm.FinishReasonRefusal
 	default:
 		result.FinishReason = llm.FinishReasonOther
 	}
 
 	msg := choice.Message
 	result.Text = msg.Content
+	if msg.Content != "" {
+		result.ContentTypes = append(result.ContentTypes, "text")
+	}
 	for _, tc := range msg.ToolCalls {
+		result.ContentTypes = append(result.ContentTypes, "function_call")
 		result.ToolCalls = append(result.ToolCalls, llm.ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Function.Name,
