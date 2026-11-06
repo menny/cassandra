@@ -136,6 +136,19 @@ type Response struct {
 	ProviderMetadata map[string]any // opaque data to be echoed in subsequent turns
 	Usage            Usage          // token usage for this interaction
 	FinishReason     FinishReason   // why the model stopped generating
+	RawFinishReason  string         // provider-native stop reason, for diagnostics
+	ContentTypes     []string       // provider-native content block types, for diagnostics
+}
+
+// Describe summarises how the provider ended the response, for error messages
+// that need to explain an unusable (e.g. empty) reply.
+func (r *Response) Describe() string {
+	stop := r.RawFinishReason
+	if stop == "" {
+		stop = string(r.FinishReason)
+	}
+	return fmt.Sprintf("stop_reason=%q content_blocks=%v prompt_tokens=%d output_tokens=%d",
+		stop, r.ContentTypes, r.Usage.PromptTokens, r.Usage.OutputTokens)
 }
 
 // FinishReason identifies why the model stopped generating content.

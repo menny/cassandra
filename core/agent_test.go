@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -966,10 +967,12 @@ func TestRunReview_EmptyResponseRetry(t *testing.T) {
 // empty content, RunReview fails with a descriptive error rather than silently
 // returning an empty string.
 func TestRunReview_EmptyResponseExhausted(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
 	// All responses are empty (no text, no tool calls).
 	responses := make([]*llm.Response, emptyResponseMaxAttempts)
 	for i := range responses {
-		responses[i] = &llm.Response{Text: ""}
+		responses[i] = &llm.Response{Text: "", RawFinishReason: "refusal", ContentTypes: []string{"thinking"}}
 	}
 	lm := &mockLLM{responses: responses}
 
@@ -978,6 +981,12 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err == nil {
 		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+	}
+	if dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json")); len(dumps) != 1 {
+		t.Errorf("expected one refused-request dump in %s, got %v", dumpDir, dumps)
+	}
+	if !strings.Contains(err.Error(), `stop_reason="refusal"`) {
+		t.Errorf("expected error to include the provider stop reason, got %q", err.Error())
 	}
 
 	// At least emptyResponseMaxAttempts calls must have been made.

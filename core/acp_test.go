@@ -354,7 +354,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	require.NotEmpty(t, configUpdates)
 	require.Len(t, configUpdates[0].ConfigOptions, 1)
 	require.NotNil(t, configUpdates[0].ConfigOptions[0].Select)
-	require.Equal(t, acp.SessionConfigValueId("gemini-test"), configUpdates[0].ConfigOptions[0].Select.CurrentValue)
+	require.Equal(t, acp.SessionConfigValueId(acpDefaultModelID), configUpdates[0].ConfigOptions[0].Select.CurrentValue)
 
 	// Verify plan updates
 	require.NotEmpty(t, plans)
@@ -1721,4 +1721,18 @@ func TestACP_AskDeveloper_Elicitation(t *testing.T) {
 		require.Equal(t, "timeout", resp.Status)
 		require.Contains(t, resp.Message, "did not respond within")
 	})
+}
+
+func TestACPConfigOptionsAdvertisesDefaultSlugWithConfiguredModelName(t *testing.T) {
+	require.Nil(t, acpConfigOptions(""))
+
+	opts := acpConfigOptions("claude-sonnet-5-5")
+	require.Len(t, opts, 1)
+	sel := opts[0].Select
+	require.NotNil(t, sel)
+	require.Equal(t, acp.SessionConfigValueId(acpDefaultModelID), sel.CurrentValue)
+	require.NotNil(t, sel.Options.Ungrouped)
+	require.Len(t, *sel.Options.Ungrouped, 1)
+	require.Equal(t, acp.SessionConfigValueId(acpDefaultModelID), (*sel.Options.Ungrouped)[0].Value)
+	require.Equal(t, "claude-sonnet-5-5", (*sel.Options.Ungrouped)[0].Name)
 }
