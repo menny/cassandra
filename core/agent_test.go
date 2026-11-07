@@ -964,20 +964,21 @@ func TestRunReview_EmptyResponseRetry(t *testing.T) {
 	}
 }
 
-// TestRunReview_EmptyResponseExhausted verifies that when all attempts return
-// empty content, RunReview fails with a descriptive error rather than silently
-// returning an empty string.
-func TestRunReview_EmptyResponseExhausted(t *testing.T) {
+// TestRunReview_EmptyResponse_RefusalShortCircuit verifies that when a response
+// has FinishReasonRefusal, RunReview short-circuits immediately rather than
+// exhausting the remaining empty-response retries, and includes a detailed explanation
+// of what refusal means and why it was not retried.
+func TestRunReview_EmptyResponse_RefusalShortCircuit(t *testing.T) {
 	dumpDir := t.TempDir()
 	t.Setenv(refusalDumpDirEnv, dumpDir)
-	// All responses are empty (no text, no tool calls).
-	// First response is a plain empty response, second response is a refusal,
-	// verifying that dumpedRefusal works even when the refusal occurs after attempt 0.
+
 	responses := make([]*llm.Response, emptyResponseMaxAttempts)
 	for i := range responses {
 		if i == 0 {
+			// First attempt returns plain empty response
 			responses[i] = &llm.Response{Text: "", FinishReason: llm.FinishReasonOther}
 		} else {
+			// Second attempt returns a refusal
 			responses[i] = &llm.Response{
 				Text:            "",
 				RawFinishReason: "refusal",
@@ -992,18 +993,119 @@ func TestRunReview_EmptyResponseExhausted(t *testing.T) {
 
 	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err == nil {
-		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+		t.Fatal("expected error when LLM returns refusal, got nil")
 	}
 	if dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json")); len(dumps) != 1 {
 		t.Errorf("expected one refused-request dump in %s, got %v", dumpDir, dumps)
 	}
 	if !strings.Contains(err.Error(), `stop_reason="refusal"`) {
-		t.Errorf("expected error to include the provider stop reason, got %q", err.Error())
+		t.Errorf("expected error to include stop_reason, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "safety or content policy") {
+		t.Errorf("expected error to explain what refusal means, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "not retrying because policy refusals are deterministic") {
+		t.Errorf("expected error to explain why refusal is not retried, got %q", err.Error())
 	}
 
-	// At least emptyResponseMaxAttempts calls must have been made.
-	if lm.callIdx < emptyResponseMaxAttempts {
-		t.Errorf("expected at least %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	// Must short-circuit on attempt 2: exactly 2 calls made, NOT emptyResponseMaxAttempts (10).
+	if lm.callIdx != 2 {
+		t.Errorf("expected exactly 2 LLM calls due to short-circuit, got %d", lm.callIdx)
+	}
+}
+
+// TestRunReview_RefusalImmediate verifies that an immediate refusal on the first
+// attempt short-circuits without any retry.
+func TestRunReview_RefusalImmediate(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
+
+	responses := []*llm.Response{
+		{
+			Text:            "",
+			RawFinishReason: "SAFETY",
+			FinishReason:    llm.FinishReasonRefusal,
+			ContentTypes:    []string{"thought"},
+		},
+	}
+	lm := &mockLLM{responses: responses}
+
+	agent := NewAgent(lm, newMockDispatcher(), WithStderr(io.Discard), WithEmptyResponseRetryDelay(time.Nanosecond))
+
+	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err == nil {
+		t.Fatal("expected error on immediate refusal, got nil")
+	}
+	if lm.callIdx != 1 {
+		t.Errorf("expected exactly 1 LLM call on immediate refusal, got %d", lm.callIdx)
+	}
+	if !strings.Contains(err.Error(), `stop_reason="SAFETY"`) {
+		t.Errorf("expected error to contain raw finish reason SAFETY, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "safety or content policy") {
+		t.Errorf("expected error to explain what refusal means, got %q", err.Error())
+	}
+}
+
+// TestRunReview_EmptyResponseExhausted_NonRefusal verifies that when all attempts
+// return empty content without refusal, RunReview retries up to emptyResponseMaxAttempts
+// before failing.
+func TestRunReview_EmptyResponseExhausted_NonRefusal(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
+
+	responses := make([]*llm.Response, emptyResponseMaxAttempts)
+	for i := range responses {
+		responses[i] = &llm.Response{Text: "", FinishReason: llm.FinishReasonOther}
+	}
+	lm := &mockLLM{responses: responses}
+
+	agent := NewAgent(lm, newMockDispatcher(), WithStderr(io.Discard), WithEmptyResponseRetryDelay(time.Nanosecond))
+
+	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
+	if err == nil {
+		t.Fatal("expected error when empty-response retries are exhausted, got nil")
+	}
+	if dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json")); len(dumps) != 0 {
+		t.Errorf("expected 0 refused-request dumps for non-refusal empty responses, got %v", dumps)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("after %d attempts", emptyResponseMaxAttempts)) {
+		t.Errorf("expected error to mention attempt exhaustion, got %q", err.Error())
+	}
+	if lm.callIdx != emptyResponseMaxAttempts {
+		t.Errorf("expected %d LLM calls, got %d", emptyResponseMaxAttempts, lm.callIdx)
+	}
+}
+
+// TestExtractStructuredReview_RefusalShortCircuit verifies that refusal during
+// structured extraction short-circuits without retrying.
+func TestExtractStructuredReview_RefusalShortCircuit(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
+
+	lm := &mockLLM{
+		responses: []*llm.Response{
+			{
+				Text:            "",
+				RawFinishReason: "refusal",
+				FinishReason:    llm.FinishReasonRefusal,
+			},
+		},
+	}
+
+	agent := NewAgent(lm, newMockDispatcher(), WithStderr(io.Discard))
+	_, err := agent.ExtractStructuredReview(context.Background(), "sys", "raw review", llm.StructuredConfig{})
+	if err == nil {
+		t.Fatal("expected error on structured extraction refusal, got nil")
+	}
+	if lm.callIdx != 1 {
+		t.Errorf("expected exactly 1 call for extraction refusal, got %d", lm.callIdx)
+	}
+	if !strings.Contains(err.Error(), "safety or content policy") {
+		t.Errorf("expected error to explain what refusal means, got %q", err.Error())
+	}
+	if dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json")); len(dumps) != 1 {
+		t.Errorf("expected one refused-request dump, got %v", dumps)
 	}
 }
 

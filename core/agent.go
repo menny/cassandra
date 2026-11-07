@@ -388,6 +388,10 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		if resp.FinishReason == llm.FinishReasonLength {
 			a.reporter.ReportTruncated(effectiveMaxTokens)
 		}
+		if resp.FinishReason == llm.FinishReasonRefusal {
+			dumpRefusedRequest(messages)
+			return nil, fmt.Errorf("extraction failed: %w", refusalError(resp))
+		}
 
 		if resp.Text == "" {
 			lastErr = errors.New("extraction returned empty content")
@@ -668,11 +672,17 @@ func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxToke
 // hard error: the SDK call succeeds but the body is empty, which can happen
 // transiently under provider load.
 //
+// If the provider indicates a refusal (llm.FinishReasonRefusal), retrying is
+// futile because deterministic safety or content policy filters rejected the
+// request; repeating the identical prompt will be rejected again. In that case,
+// generateContentWithEmptyRetry dumps the refused request and short-circuits
+// immediately with a descriptive error explaining what refusal means and why it
+// is not retried.
+//
 // If the response has tool calls (even with empty text) it is returned
 // immediately — non-empty tool-call responses are always valid.
 func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
 	var lastResp *llm.Response
-	var dumpedRefusal bool
 	delay := a.emptyResponseRetryDelay
 	if delay <= 0 {
 		delay = llm.DefaultRetryBaseDelay
@@ -683,15 +693,17 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 		if err != nil {
 			return nil, err
 		}
+		if resp.FinishReason == llm.FinishReasonRefusal {
+			a.reporter.ReportUsage(resp.Usage)
+			a.totalUsage.Add(resp.Usage)
+			dumpRefusedRequest(messages)
+			return nil, refusalError(resp)
+		}
 		// A response with tool calls is always actionable, even if Text is empty.
 		if len(resp.ToolCalls) > 0 || resp.Text != "" {
 			return resp, nil
 		}
 		lastResp = resp
-		if !dumpedRefusal && resp.FinishReason == llm.FinishReasonRefusal {
-			dumpRefusedRequest(messages)
-			dumpedRefusal = true
-		}
 		if attempt < emptyResponseMaxAttempts-1 {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -703,6 +715,18 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 		}
 	}
 	return lastResp, nil
+}
+
+// refusalError formats a descriptive error when a provider refuses a request.
+// It explains what refusal means (safety/policy filter rejection) and why it
+// is not retried (deterministic rejections cannot be resolved by repeating the
+// same prompt).
+func refusalError(resp *llm.Response) error {
+	desc := ""
+	if resp != nil {
+		desc = resp.Describe()
+	}
+	return fmt.Errorf("provider refused the request (%s): safety or content policy filters rejected the request; not retrying because policy refusals are deterministic and repeating the identical request will produce the same refusal", desc)
 }
 
 // dumpRefusedRequest writes the messages of a request the provider refused to
