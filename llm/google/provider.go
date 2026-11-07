@@ -310,13 +310,23 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 		return nil, fmt.Errorf("google: candidate has no content")
 	}
 
-	result := &llm.Response{Usage: llm.UnknownUsage()}
+	result := &llm.Response{
+		Usage:           llm.UnknownUsage(),
+		RawFinishReason: string(candidate.FinishReason),
+	}
 
 	switch candidate.FinishReason {
 	case genai.FinishReasonStop:
 		result.FinishReason = llm.FinishReasonStop
 	case genai.FinishReasonMaxTokens:
 		result.FinishReason = llm.FinishReasonLength
+	case genai.FinishReasonSafety,
+		genai.FinishReasonBlocklist,
+		genai.FinishReasonProhibitedContent,
+		genai.FinishReasonSPII,
+		genai.FinishReasonImageSafety,
+		genai.FinishReasonImageProhibitedContent:
+		result.FinishReason = llm.FinishReasonRefusal
 	default:
 		result.FinishReason = llm.FinishReasonOther
 	}
@@ -329,6 +339,17 @@ func parseGenaiResponse(resp *genai.GenerateContentResponse) (*llm.Response, err
 	}
 
 	for _, part := range candidate.Content.Parts {
+		switch {
+		case part.Thought:
+			result.ContentTypes = append(result.ContentTypes, "thought")
+		case part.FunctionCall != nil:
+			result.ContentTypes = append(result.ContentTypes, "function_call")
+		case part.Text != "":
+			result.ContentTypes = append(result.ContentTypes, "text")
+		default:
+			result.ContentTypes = append(result.ContentTypes, "other")
+		}
+
 		// Thought and ThoughtSignature are captured for models that support
 		// explicit reasoning (e.g. Gemini 2.0 Thinking).
 		if part.Thought {

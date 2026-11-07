@@ -210,13 +210,15 @@ func schemaParamFromJSONSchema(schema map[string]any) anthropicsdk.ToolInputSche
 // parseAnthropicResponse converts an Anthropic *Message to a normalised
 // *llm.Response.
 func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
-	resp := &llm.Response{Usage: llm.UnknownUsage()}
+	resp := &llm.Response{Usage: llm.UnknownUsage(), RawFinishReason: string(msg.StopReason)}
 
 	switch msg.StopReason {
 	case anthropicsdk.StopReasonEndTurn, anthropicsdk.StopReasonToolUse:
 		resp.FinishReason = llm.FinishReasonStop
 	case anthropicsdk.StopReasonMaxTokens:
 		resp.FinishReason = llm.FinishReasonLength
+	case anthropicsdk.StopReasonRefusal:
+		resp.FinishReason = llm.FinishReasonRefusal
 	default:
 		resp.FinishReason = llm.FinishReasonOther
 	}
@@ -232,6 +234,7 @@ func parseAnthropicResponse(msg *anthropicsdk.Message) (*llm.Response, error) {
 	}
 
 	for _, block := range msg.Content {
+		resp.ContentTypes = append(resp.ContentTypes, block.Type)
 		switch block.Type {
 		case "text":
 			resp.Text += block.Text

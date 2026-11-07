@@ -214,6 +214,29 @@ func TestParseAnthropicResponse_TextOnly(t *testing.T) {
 	assert.Empty(t, resp.ToolCalls)
 }
 
+func TestParseAnthropicResponse_RecordsStopReasonAndBlockTypes(t *testing.T) {
+	raw := `{
+		"id": "msg_empty",
+		"type": "message",
+		"role": "assistant",
+		"content": [{"type": "thinking", "thinking": "hmm", "signature": "sig"}],
+		"model": "claude-opus-5-5",
+		"stop_reason": "refusal",
+		"usage": {"input_tokens": 100, "output_tokens": 0}
+	}`
+	var msg anthropicsdk.Message
+	require.NoError(t, json.Unmarshal([]byte(raw), &msg))
+
+	resp, err := parseAnthropicResponse(&msg)
+	require.NoError(t, err)
+	assert.Empty(t, resp.Text)
+	assert.Equal(t, "refusal", resp.RawFinishReason)
+	assert.Equal(t, llm.FinishReasonRefusal, resp.FinishReason)
+	assert.Equal(t, []string{"thinking"}, resp.ContentTypes)
+	assert.Contains(t, resp.Describe(), `stop_reason="refusal"`)
+	assert.Contains(t, resp.Describe(), "content_blocks=[thinking]")
+}
+
 func TestParseAnthropicResponse_ToolCalls(t *testing.T) {
 	raw := `{
 		"id": "msg_2",

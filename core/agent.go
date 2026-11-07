@@ -127,19 +127,27 @@ func WithSessionStore(store SessionStore, sessionID string) AgentOption {
 	}
 }
 
+// WithEmptyResponseRetryDelay configures the delay between retries when an LLM returns empty content.
+func WithEmptyResponseRetryDelay(d time.Duration) AgentOption {
+	return func(a *Agent) {
+		a.emptyResponseRetryDelay = d
+	}
+}
+
 // Agent orchestrates the ReAct (Reason + Act) loop between the LLM and the tool registry.
 type Agent struct {
-	llm          llm.Model
-	registry     ToolDispatcher
-	reporter     Reporter
-	totalUsage   llm.Usage
-	toolCalls    map[string]int
-	iterations   int
-	stderr       io.Writer
-	history      []llm.Message
-	Stage        string
-	sessionStore SessionStore
-	sessionID    string
+	llm                     llm.Model
+	registry                ToolDispatcher
+	reporter                Reporter
+	totalUsage              llm.Usage
+	toolCalls               map[string]int
+	iterations              int
+	stderr                  io.Writer
+	history                 []llm.Message
+	Stage                   string
+	sessionStore            SessionStore
+	sessionID               string
+	emptyResponseRetryDelay time.Duration
 }
 
 // NewAgent creates an Agent. Diagnostic / progress output goes to os.Stderr by
@@ -270,7 +278,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 		// No tool calls → LLM has produced its final review.
 		if len(resp.ToolCalls) == 0 {
 			if resp.Text == "" {
-				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
+				return "", fmt.Errorf("llm returned empty content on iteration %d after %d attempts (%s)", iter+1, emptyResponseMaxAttempts, resp.Describe())
 			}
 			if a.Stage != "" {
 				a.reporter.ReportStageFinalReview(a.Stage)
@@ -335,7 +343,11 @@ const extractionMaxAttempts = 3
 // emptyResponseMaxAttempts is the number of total attempts when a provider
 // returns a successful (nil-error) response with empty content. This is a
 // distinct failure mode from a hard error and needs its own retry budget.
-const emptyResponseMaxAttempts = 3
+const emptyResponseMaxAttempts = 10
+
+// refusalDumpDirEnv optionally overrides the directory that refused requests
+// are dumped to (defaults to the OS temp dir).
+const refusalDumpDirEnv = "CASSANDRA_REFUSAL_DUMP_DIR"
 
 const budgetNoteLastTurn = "\n\n---\n[SYSTEM NOTE] Iteration %d of %d. 1 more turn left. This is your last turn to call tools! In the next turn, you will be forced to finalize your review without tools. Formulate your final review now if you have enough information."
 
@@ -375,6 +387,10 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 		_, effectiveMaxTokens := config.Resolve("")
 		if resp.FinishReason == llm.FinishReasonLength {
 			a.reporter.ReportTruncated(effectiveMaxTokens)
+		}
+		if resp.FinishReason == llm.FinishReasonRefusal {
+			dumpRefusedRequest(messages)
+			return nil, fmt.Errorf("extraction failed: %w", refusalError(resp))
 		}
 
 		if resp.Text == "" {
@@ -514,7 +530,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 	a.totalUsage.Add(resp.Usage)
 
 	if resp.Text == "" {
-		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts", emptyResponseMaxAttempts)
+		return "", fmt.Errorf("llm returned empty content on forced-final review after %d attempts (%s)", emptyResponseMaxAttempts, resp.Describe())
 	}
 	messages = append(messages, llm.Message{
 		Role: llm.RoleAssistant,
@@ -582,7 +598,7 @@ func (a *Agent) RunChatFlight(ctx context.Context, userText string, maxIteration
 		// No tool calls → LLM has produced its reply.
 		if len(resp.ToolCalls) == 0 {
 			if resp.Text == "" {
-				return "", fmt.Errorf("llm returned empty content on chat iteration %d after %d attempts", iter+1, emptyResponseMaxAttempts)
+				return "", fmt.Errorf("llm returned empty content on chat iteration %d after %d attempts (%s)", iter+1, emptyResponseMaxAttempts, resp.Describe())
 			}
 			a.history = append(a.history, llm.Message{
 				Role: llm.RoleAssistant,
@@ -640,7 +656,7 @@ func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxToke
 	a.totalUsage.Add(resp.Usage)
 
 	if resp.Text == "" {
-		return "", fmt.Errorf("llm returned empty content on forced-final chat response after %d attempts", emptyResponseMaxAttempts)
+		return "", fmt.Errorf("llm returned empty content on forced-final chat response after %d attempts (%s)", emptyResponseMaxAttempts, resp.Describe())
 	}
 
 	a.history = append(a.history, llm.Message{
@@ -656,14 +672,32 @@ func (a *Agent) handleChatCapReached(ctx context.Context, maxIterations, maxToke
 // hard error: the SDK call succeeds but the body is empty, which can happen
 // transiently under provider load.
 //
+// If the provider indicates a refusal (llm.FinishReasonRefusal), retrying is
+// futile because deterministic safety or content policy filters rejected the
+// request; repeating the identical prompt will be rejected again. In that case,
+// generateContentWithEmptyRetry dumps the refused request and short-circuits
+// immediately with a descriptive error explaining what refusal means and why it
+// is not retried.
+//
 // If the response has tool calls (even with empty text) it is returned
 // immediately — non-empty tool-call responses are always valid.
 func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []llm.Message, tools []llm.ToolDef, maxTokens int) (*llm.Response, error) {
 	var lastResp *llm.Response
+	delay := a.emptyResponseRetryDelay
+	if delay <= 0 {
+		delay = llm.DefaultRetryBaseDelay
+	}
+
 	for attempt := range emptyResponseMaxAttempts {
 		resp, err := a.llm.GenerateContent(ctx, messages, tools, maxTokens)
 		if err != nil {
 			return nil, err
+		}
+		if resp.FinishReason == llm.FinishReasonRefusal {
+			a.reporter.ReportUsage(resp.Usage)
+			a.totalUsage.Add(resp.Usage)
+			dumpRefusedRequest(messages)
+			return nil, refusalError(resp)
 		}
 		// A response with tool calls is always actionable, even if Text is empty.
 		if len(resp.ToolCalls) > 0 || resp.Text != "" {
@@ -675,12 +709,46 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 				return nil, ctx.Err()
 			}
 			a.reporter.ReportEmptyResponseRetry(attempt + 2)
-			if err := sleepWithContext(ctx, llm.DefaultRetryBaseDelay); err != nil {
+			if err := sleepWithContext(ctx, delay); err != nil {
 				return nil, err
 			}
 		}
 	}
 	return lastResp, nil
+}
+
+// refusalError formats a descriptive error when a provider refuses a request.
+// It explains what refusal means (safety/policy filter rejection) and why it
+// is not retried (deterministic rejections cannot be resolved by repeating the
+// same prompt).
+func refusalError(resp *llm.Response) error {
+	desc := ""
+	if resp != nil {
+		desc = resp.Describe()
+	}
+	return fmt.Errorf("provider refused the request (%s): safety or content policy filters rejected the request; not retrying because policy refusals are deterministic and repeating the identical request will produce the same refusal", desc)
+}
+
+// dumpRefusedRequest writes the messages of a request the provider refused to
+// a JSON file in the temp dir so the triggering content can be inspected. It is
+// best-effort: failures are reported on stderr and never affect the review.
+func dumpRefusedRequest(messages []llm.Message) {
+	data, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to marshal refused request: %v\n", err)
+		return
+	}
+	f, err := os.CreateTemp(os.Getenv(refusalDumpDirEnv), "cassandra-refused-request-*.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create refused-request dump: %v\n", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write refused-request dump: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "provider refused the request; messages dumped to %s\n", f.Name())
 }
 
 // sleepWithContext blocks for d or until ctx is cancelled, whichever comes

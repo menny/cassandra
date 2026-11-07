@@ -62,12 +62,19 @@ func availableACPModes(desc string) []acp.SessionMode {
 	}
 }
 
+// acpDefaultModelID is the stable model identifier advertised to ACP clients.
+// Cassandra always uses its configured model regardless of what the client
+// selects, so the real model name is only shown as the display name. This keeps
+// a model remembered by the client from being rejected when the configured
+// model changes.
+const acpDefaultModelID = "default"
+
 func acpConfigOptions(modelName string) []acp.SessionConfigOption {
 	if modelName == "" {
 		return nil
 	}
 	category := acp.SessionConfigOptionCategoryModel
-	val := acp.SessionConfigValueId(modelName)
+	val := acp.SessionConfigValueId(acpDefaultModelID)
 	ungrouped := acp.SessionConfigSelectOptionsUngrouped{
 		{
 			Value: val,
@@ -965,6 +972,9 @@ func (r *acpReporter) SessionID() string {
 	return string(r.sessionID)
 }
 
+// SetSessionConfigOption accepts any requested value without applying it. The
+// reviewer keeps using its configured model, and the response reports that
+// model as the current selection.
 func (r *acpReporter) SetSessionConfigOption(_ context.Context, _ acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	r.mu.Lock()
 	var modelName string
