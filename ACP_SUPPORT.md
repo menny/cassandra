@@ -33,7 +33,7 @@ When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` w
    - On each interaction (during review iterations and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`).
 6. **Real-Time Initial Review Streaming**:
    - Immediately after `session/new` completes, Cassandra executes its context gathering and multi-stage ReAct review loop, streaming progress via `session/update`:
-     - **Thoughts & Reasoning** (`agent_thought_chunk`): Status updates, ReAct iteration markers, and `emit_reviewer_state` hypotheses.
+     - **Thoughts & Reasoning** (`agent_thought_chunk`): Status updates, ReAct iteration markers, and `emit_reviewer_state` progress updates.
      - **Tool Executions** (`tool_call` & `tool_call_update`): Live status (`in_progress` $\to$ `completed` / `failed`), tool kind (`read`, `search`, `other`), and file locations.
      - **Review Output** (`agent_message_chunk`): Optional pre-review summary and final Markdown code review report.
 7. **Interactive Post-Review Chat (`session/prompt`)**:

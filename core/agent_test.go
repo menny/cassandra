@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -93,6 +94,7 @@ func makeToolCall(id, name string, args map[string]any) llm.ToolCall {
 
 // mockDispatcher is a minimal ToolDispatcher stub.
 type mockDispatcher struct {
+	tools    []llm.ToolDef
 	handlers map[string]func(context.Context, llm.ToolCall) (string, error)
 }
 
@@ -100,7 +102,7 @@ func newMockDispatcher() *mockDispatcher {
 	return &mockDispatcher{handlers: make(map[string]func(context.Context, llm.ToolCall) (string, error))}
 }
 
-func (d *mockDispatcher) ToTools() []llm.ToolDef { return nil }
+func (d *mockDispatcher) ToTools() []llm.ToolDef { return d.tools }
 
 func (d *mockDispatcher) HandleCall(ctx context.Context, tc llm.ToolCall) (string, error) {
 	if fn, ok := d.handlers[tc.Name]; ok {
@@ -1030,7 +1032,9 @@ func TestRunReview_RefusalImmediate(t *testing.T) {
 	}
 	lm := &mockLLM{responses: responses}
 
-	agent := NewAgent(lm, newMockDispatcher(), WithStderr(io.Discard), WithEmptyResponseRetryDelay(time.Nanosecond))
+	dispatcher := newMockDispatcher()
+	dispatcher.tools = []llm.ToolDef{{Name: "test_tool", Description: "a test tool"}}
+	agent := NewAgent(lm, dispatcher, WithStderr(io.Discard), WithEmptyResponseRetryDelay(time.Nanosecond))
 
 	_, err := agent.RunReview(context.Background(), "sys", "", "request", 5, 1024)
 	if err == nil {
@@ -1044,6 +1048,19 @@ func TestRunReview_RefusalImmediate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "safety or content policy") {
 		t.Errorf("expected error to explain what refusal means, got %q", err.Error())
+	}
+	dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json"))
+	var msgDumps []string
+	for _, d := range dumps {
+		if !strings.HasSuffix(d, ".tools.json") {
+			msgDumps = append(msgDumps, d)
+		}
+	}
+	if len(msgDumps) != 1 {
+		t.Errorf("expected 1 refused-request dump, got %v", msgDumps)
+	}
+	if toolDumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.tools.json")); len(toolDumps) != 1 {
+		t.Errorf("expected 1 refused-tools dump, got %v", toolDumps)
 	}
 }
 
@@ -1107,6 +1124,100 @@ func TestExtractStructuredReview_RefusalShortCircuit(t *testing.T) {
 	if dumps, _ := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json")); len(dumps) != 1 {
 		t.Errorf("expected one refused-request dump, got %v", dumps)
 	}
+}
+
+func TestDumpRefusedRequest_WithTools(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
+
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Text: "prompt that caused refusal"},
+	}
+	tools := []llm.ToolDef{
+		{Name: "emit_reviewer_state", Description: "some tool"},
+	}
+
+	dumpRefusedRequest(messages, tools)
+
+	dumps, err := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json"))
+	if err != nil {
+		t.Fatalf("failed to glob dumps: %v", err)
+	}
+	var msgDumps []string
+	for _, d := range dumps {
+		if !strings.HasSuffix(d, ".tools.json") {
+			msgDumps = append(msgDumps, d)
+		}
+	}
+	if len(msgDumps) != 1 {
+		t.Fatalf("expected 1 messages dump, got %v", msgDumps)
+	}
+
+	msgData, err := os.ReadFile(msgDumps[0])
+	if err != nil {
+		t.Fatalf("failed to read messages dump: %v", err)
+	}
+	var readMessages []llm.Message
+	if err := json.Unmarshal(msgData, &readMessages); err != nil {
+		t.Fatalf("failed to parse messages dump JSON: %v", err)
+	}
+	if len(readMessages) != 1 || readMessages[0].Text != "prompt that caused refusal" {
+		t.Errorf("unexpected content in messages dump: %v", readMessages)
+	}
+
+	toolDumps, err := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.tools.json"))
+	if err != nil || len(toolDumps) != 1 {
+		t.Fatalf("expected 1 tools dump, got %v (err: %v)", toolDumps, err)
+	}
+	expectedToolPath := strings.TrimSuffix(dumps[0], ".json") + ".tools.json"
+	if toolDumps[0] != expectedToolPath {
+		t.Errorf("expected tools dump at %s, got %s", expectedToolPath, toolDumps[0])
+	}
+
+	toolData, err := os.ReadFile(toolDumps[0])
+	if err != nil {
+		t.Fatalf("failed to read tools dump: %v", err)
+	}
+	var readTools []llm.ToolDef
+	if err := json.Unmarshal(toolData, &readTools); err != nil {
+		t.Fatalf("failed to parse tools dump JSON: %v", err)
+	}
+	if len(readTools) != 1 || readTools[0].Name != "emit_reviewer_state" {
+		t.Errorf("unexpected content in tools dump: %v", readTools)
+	}
+}
+
+func TestDumpRefusedRequest_WithoutTools(t *testing.T) {
+	dumpDir := t.TempDir()
+	t.Setenv(refusalDumpDirEnv, dumpDir)
+
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Text: "another prompt"},
+	}
+
+	dumpRefusedRequest(messages, nil)
+
+	dumps, err := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.json"))
+	if err != nil || len(dumps) != 1 {
+		t.Fatalf("expected 1 messages dump, got %v", dumps)
+	}
+
+	toolDumps, err := filepath.Glob(filepath.Join(dumpDir, "cassandra-refused-request-*.tools.json"))
+	if err != nil || len(toolDumps) != 0 {
+		t.Errorf("expected 0 tools dumps when tools is nil, got %v", toolDumps)
+	}
+}
+
+func TestDumpRefusedRequest_CreateTempError(t *testing.T) {
+	t.Setenv(refusalDumpDirEnv, filepath.Join(t.TempDir(), "nonexistent_dir"))
+	dumpRefusedRequest([]llm.Message{{Role: llm.RoleUser, Text: "test"}}, nil)
+}
+
+func TestDumpRefusedTools_WriteError(t *testing.T) {
+	// Calling dumpRefusedTools with an invalid path should log and not panic.
+	dumpRefusedTools(filepath.Join(t.TempDir(), "nonexistent_dir", "messages.json"), []llm.ToolDef{
+		{Name: "tool1"},
+	})
 }
 
 func TestExecuteToolCalls_Parallel(t *testing.T) {

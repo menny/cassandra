@@ -35,17 +35,17 @@ type emitReviewerStateArgs struct {
 func registerEmitReviewerState(r *Registry) {
 	def := llm.ToolDef{
 		Name:        "emit_reviewer_state",
-		Description: "Use this tool to narrate your review process, formulate plans, explain why you are pivoting your search, or record intermediate findings before making a final decision. Do not use raw text for internal monologue; always use this tool.",
+		Description: "Post a short progress update for the reviewer UI: what file or area you are examining and your current finding or status.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"message": map[string]any{
 					"type":        "string",
-					"description": "Your detailed rationale, thought process, or current status.",
+					"description": "A one-line factual status, e.g. 'checking callers of get_imports' or 'found an unused import'.",
 				},
 				"focus_area": map[string]any{
 					"type":        "string",
-					"description": "The specific file, function, or domain you are currently evaluating (e.g., 'auth/token.go', 'DB connection pooling').",
+					"description": "The file, function, or area this update is about (e.g., 'auth/token.go').",
 				},
 			},
 			"required": []string{"message"},
