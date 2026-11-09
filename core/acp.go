@@ -45,6 +45,17 @@ var acpToolKinds = map[string]acp.ToolKind{
 	"post_pr_comment":           acp.ToolKindOther,
 	"get_pr_metadata":           acp.ToolKindRead,
 	"get_pr_diff":               acp.ToolKindRead,
+	"git_log":                   acp.ToolKindRead,
+	"git_blame":                 acp.ToolKindRead,
+	"git_show":                  acp.ToolKindRead,
+	"git_diff_stat":             acp.ToolKindRead,
+	"get_pr_comment":            acp.ToolKindRead,
+	"get_issue":                 acp.ToolKindRead,
+	"list_pr_commits":           acp.ToolKindRead,
+	"get_check_runs":            acp.ToolKindRead,
+	"get_workflow_run_logs":     acp.ToolKindRead,
+	"get_file_at_ref":           acp.ToolKindRead,
+	"get_pr_stack":              acp.ToolKindRead,
 	"ask_developer":             acp.ToolKindOther,
 }
 
