@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -389,7 +390,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 			a.reporter.ReportTruncated(effectiveMaxTokens)
 		}
 		if resp.FinishReason == llm.FinishReasonRefusal {
-			dumpRefusedRequest(messages)
+			dumpRefusedRequest(messages, nil)
 			return nil, fmt.Errorf("extraction failed: %w", refusalError(resp))
 		}
 
@@ -696,7 +697,7 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 		if resp.FinishReason == llm.FinishReasonRefusal {
 			a.reporter.ReportUsage(resp.Usage)
 			a.totalUsage.Add(resp.Usage)
-			dumpRefusedRequest(messages)
+			dumpRefusedRequest(messages, tools)
 			return nil, refusalError(resp)
 		}
 		// A response with tool calls is always actionable, even if Text is empty.
@@ -730,9 +731,11 @@ func refusalError(resp *llm.Response) error {
 }
 
 // dumpRefusedRequest writes the messages of a request the provider refused to
-// a JSON file in the temp dir so the triggering content can be inspected. It is
-// best-effort: failures are reported on stderr and never affect the review.
-func dumpRefusedRequest(messages []llm.Message) {
+// a JSON file in the temp dir so the triggering content can be inspected. Tool
+// definitions go to a sibling .tools.json file because they are part of the
+// refused request too. It is best-effort: failures are reported on stderr and
+// never affect the review.
+func dumpRefusedRequest(messages []llm.Message, tools []llm.ToolDef) {
 	data, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to marshal refused request: %v\n", err)
@@ -749,6 +752,23 @@ func dumpRefusedRequest(messages []llm.Message) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "provider refused the request; messages dumped to %s\n", f.Name())
+	if len(tools) > 0 {
+		dumpRefusedTools(f.Name(), tools)
+	}
+}
+
+func dumpRefusedTools(messagesPath string, tools []llm.ToolDef) {
+	data, err := json.MarshalIndent(tools, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to marshal refused request tools: %v\n", err)
+		return
+	}
+	toolsPath := strings.TrimSuffix(messagesPath, ".json") + ".tools.json"
+	if err := os.WriteFile(toolsPath, data, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write refused-request tools dump: %v\n", err)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "tool definitions dumped to %s\n", toolsPath)
 }
 
 // sleepWithContext blocks for d or until ctx is cancelled, whichever comes
