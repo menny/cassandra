@@ -14,6 +14,20 @@ extra_args=()
 # If the helper script file exists on disk, add hermetiq.bazelrc
 if [[ -f "${HELPER_SCRIPT}" ]]; then
   extra_args+=("--bazelrc=${SCRIPT_DIR}/rc/hermetiq.bazelrc")
+
+  # BES is in use: generate the invocation id ourselves (it is part of the BES
+  # results url) instead of letting Bazel pick one. --invocation_id is a command
+  # option (not a startup option), so it goes right after the command.
+  case "${1:-}" in
+    build|test|run|coverage|cquery|aquery)
+      invocation_id="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || true)"
+      if [[ -n "${invocation_id}" ]]; then
+        bazel_command="$1"
+        shift
+        set -- "${bazel_command}" "--invocation_id=$(tr '[:upper:]' '[:lower:]' <<<"${invocation_id}")" "$@"
+      fi
+      ;;
+  esac
 fi
 
 # If in CI, also add ci.bazelrc
