@@ -2,7 +2,7 @@
 
 Apply this to test files added or changed in the diff. Before flagging a test, use `read_file` on the code under test and `grep_files` for existing tests of the same behavior. Do not claim redundancy without checking.
 
-For each new or changed test ask: **what real bug would this catch that no other test, type check, or compiler would?** If there is no answer, recommend deleting or merging it. Fewer, sharper tests are a good outcome.
+For each new or changed test ask: **what real bug would this catch that no other test, type check, linter, static-check, or compiler would?** If there is no answer, recommend deleting or merging it. Fewer, sharper tests are a good outcome.
 
 ## Flag these (suggestions)
 - **Mirror tests**: expected values computed with the same logic as the code, or assertions that only restate what the code just did (e.g., "mock was called with the args we passed").
