@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -378,70 +377,31 @@ func getMetadata(ctx context.Context, client *github.Client, owner, repo string,
 		metadata.Stack = stack
 	}
 
-	opts := &github.IssueListCommentsOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
+	// Conversation and inline review comments, already sorted chronologically for context. Every page
+	// is read and any API error is fatal: the review must see the complete discussion.
+	comments, _, err := tools.FetchPRComments(ctx, client, owner, repo, prNumber, tools.FetchPRCommentsOptions{})
+	if err != nil {
+		return nil, err
 	}
-
-	for {
-		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, prNumber, opts)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list issue comments: %w", err)
+	for _, c := range comments {
+		pc := core.PRComment{
+			ID:     c.ID,
+			Author: c.Author,
+			Body:   c.Body,
+			Date:   c.Created,
 		}
-
-		for _, c := range comments {
-			body := c.GetBody()
-			isSelf := tag != "" && (strings.Contains(body, mainTag) || strings.Contains(body, reviewTag))
-			metadata.Comments = append(metadata.Comments, core.PRComment{
-				ID:     c.GetID(),
-				Author: c.GetUser().GetLogin(),
-				Body:   body,
-				IsSelf: isSelf,
-				Date:   getCreatedAt(c.CreatedAt),
-			})
+		switch c.Kind {
+		case tools.PRCommentKindIssue:
+			pc.IsSelf = tag != "" && (strings.Contains(c.Body, mainTag) || strings.Contains(c.Body, reviewTag))
+		case tools.PRCommentKindReview:
+			pc.IsSelf = tag != "" && strings.Contains(c.Body, inlineTag)
+			pc.Path = c.Path
+			pc.Line = c.Line
+			pc.StartLine = c.StartLine
+			pc.IsOutdated = c.Outdated
 		}
-
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+		metadata.Comments = append(metadata.Comments, pc)
 	}
-
-	// Fetch PR Review Comments (inline code comments)
-	reviewOpts := &github.PullRequestListCommentsOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
-	}
-	for {
-		comments, resp, err := client.PullRequests.ListComments(ctx, owner, repo, prNumber, reviewOpts)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list review comments: %w", err)
-		}
-
-		for _, c := range comments {
-			body := c.GetBody()
-			isSelf := tag != "" && strings.Contains(body, inlineTag)
-			metadata.Comments = append(metadata.Comments, core.PRComment{
-				ID:         c.GetID(),
-				Author:     c.GetUser().GetLogin(),
-				Body:       body,
-				IsSelf:     isSelf,
-				Date:       getCreatedAt(c.CreatedAt),
-				Path:       c.GetPath(),
-				Line:       c.GetLine(),
-				StartLine:  c.GetStartLine(),
-				IsOutdated: c.Position == nil && c.OriginalPosition != nil,
-			})
-		}
-
-		if resp.NextPage == 0 {
-			break
-		}
-		reviewOpts.Page = resp.NextPage
-	}
-
-	// Sort comments by date to provide chronological context
-	sort.Slice(metadata.Comments, func(i, j int) bool {
-		return metadata.Comments[i].Date.Before(metadata.Comments[j].Date)
-	})
 
 	return metadata, nil
 }

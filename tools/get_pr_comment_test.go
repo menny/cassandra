@@ -318,6 +318,20 @@ func TestGetPRCommentToolListMode(t *testing.T) {
 		require.NotContains(t, out, "id=1 ")
 	})
 
+	t.Run("says when fetching stopped at the page limit", func(t *testing.T) {
+		f := newFakeGitHub(t)
+		commentPages(f, "/repos/o/r/issues/7/comments", maxCommentListPages*100+50, 100, issueCommentItem)
+		f.json("GET /repos/o/r/pulls/7/comments", http.StatusOK, `[]`)
+		f.install()
+		r := NewRegistry()
+		registerGetPRCommentTool(r, "", "")
+
+		out, err := callTool(ctx, t, r, "get_pr_comment", map[string]any{"pr_number": 7, "repo": "o/r"})
+		require.NoError(t, err)
+		require.Contains(t, out, fmt.Sprintf("only the first %d comments of each kind were fetched", maxCommentListPages*100))
+		require.LessOrEqual(t, len(out), maxToolOutputBytes)
+	})
+
 	t.Run("API failure is reported", func(t *testing.T) {
 		f := newFakeGitHub(t)
 		f.json("GET /repos/o/r/issues/7/comments", http.StatusInternalServerError, `{"message":"boom"}`)

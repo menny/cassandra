@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +14,9 @@ import (
 )
 
 const (
-	commentKindIssue         = "issue"
-	commentKindReview        = "review"
-	commentKindReviewSummary = "review_summary"
+	commentKindIssue         = PRCommentKindIssue
+	commentKindReview        = PRCommentKindReview
+	commentKindReviewSummary = PRCommentKindReviewSummary
 
 	// maxCommentListPages bounds list mode: 10 pages x 100 comments per comment type.
 	maxCommentListPages = 10
@@ -90,23 +89,7 @@ func parseGitHubCommentURL(raw string) (*commentRef, error) {
 	return ref, nil
 }
 
-// commentView is the normalized form of an issue comment, review comment or review summary.
-type commentView struct {
-	Kind     string
-	ID       int64
-	Number   int
-	Author   string
-	Created  time.Time
-	Updated  time.Time
-	URL      string
-	Body     string
-	Path     string
-	Line     int
-	Outdated bool
-	State    string
-}
-
-func formatCommentView(owner, repo string, v commentView) string {
+func formatCommentView(owner, repo string, v PRCommentRecord) string {
 	var sb strings.Builder
 	label := map[string]string{
 		commentKindIssue:         "Conversation comment",
@@ -128,8 +111,8 @@ func formatCommentView(owner, repo string, v commentView) string {
 	}
 	if v.Path != "" {
 		loc := v.Path
-		if v.Line > 0 {
-			loc = fmt.Sprintf("%s:%d", v.Path, v.Line)
+		if line := v.DisplayLine(); line > 0 {
+			loc = fmt.Sprintf("%s:%d", v.Path, line)
 		}
 		fmt.Fprintf(&sb, "- **Location**: %s\n", loc)
 	}
@@ -141,80 +124,44 @@ func formatCommentView(owner, repo string, v commentView) string {
 	return sb.String()
 }
 
-func timeOf(ts *github.Timestamp) time.Time {
-	if ts == nil {
-		return time.Time{}
-	}
-	return ts.Time
-}
-
-func issueCommentView(c *github.IssueComment) commentView {
-	return commentView{
-		Kind: commentKindIssue, ID: c.GetID(), Number: numberFromAPIURL(c.GetIssueURL()),
-		Author: c.GetUser().GetLogin(), Created: timeOf(c.CreatedAt), Updated: timeOf(c.UpdatedAt),
-		URL: c.GetHTMLURL(), Body: c.GetBody(),
-	}
-}
-
-func reviewCommentView(c *github.PullRequestComment) commentView {
-	line := c.GetLine()
-	if line == 0 {
-		line = c.GetOriginalLine()
-	}
-	return commentView{
-		Kind: commentKindReview, ID: c.GetID(), Number: numberFromAPIURL(c.GetPullRequestURL()),
-		Author: c.GetUser().GetLogin(), Created: timeOf(c.CreatedAt), Updated: timeOf(c.UpdatedAt),
-		URL: c.GetHTMLURL(), Body: c.GetBody(), Path: c.GetPath(), Line: line,
-		Outdated: c.Position == nil && c.OriginalPosition != nil,
-	}
-}
-
-func reviewSummaryView(rv *github.PullRequestReview, number int) commentView {
-	return commentView{
-		Kind: commentKindReviewSummary, ID: rv.GetID(), Number: number,
-		Author: rv.GetUser().GetLogin(), Created: timeOf(rv.SubmittedAt), URL: rv.GetHTMLURL(),
-		Body: rv.GetBody(), State: rv.GetState(),
-	}
-}
-
-func fetchIssueComment(ctx context.Context, client *github.Client, owner, repo string, id int64) (commentView, *github.Response, error) {
+func fetchIssueComment(ctx context.Context, client *github.Client, owner, repo string, id int64) (PRCommentRecord, *github.Response, error) {
 	c, resp, err := client.Issues.GetComment(ctx, owner, repo, id)
 	if err != nil {
-		return commentView{}, resp, err
+		return PRCommentRecord{}, resp, err
 	}
-	return issueCommentView(c), resp, nil
+	return issueCommentRecord(c), resp, nil
 }
 
-func fetchReviewComment(ctx context.Context, client *github.Client, owner, repo string, id int64) (commentView, *github.Response, error) {
+func fetchReviewComment(ctx context.Context, client *github.Client, owner, repo string, id int64) (PRCommentRecord, *github.Response, error) {
 	c, resp, err := client.PullRequests.GetComment(ctx, owner, repo, id)
 	if err != nil {
-		return commentView{}, resp, err
+		return PRCommentRecord{}, resp, err
 	}
-	return reviewCommentView(c), resp, nil
+	return reviewCommentRecord(c), resp, nil
 }
 
 // fetchSingleComment fetches one comment. With an empty kind it tries a conversation comment first
 // and falls back to an inline review comment on 404.
-func fetchSingleComment(ctx context.Context, client *github.Client, owner, repo, kind string, id int64, prNumber int) (commentView, error) {
+func fetchSingleComment(ctx context.Context, client *github.Client, owner, repo, kind string, id int64, prNumber int) (PRCommentRecord, error) {
 	switch kind {
 	case commentKindIssue:
 		v, resp, err := fetchIssueComment(ctx, client, owner, repo, id)
 		if err != nil {
-			return commentView{}, githubAPIError(fmt.Sprintf("get issue comment %d", id), resp, err)
+			return PRCommentRecord{}, githubAPIError(fmt.Sprintf("get issue comment %d", id), resp, err)
 		}
 		return v, nil
 	case commentKindReview:
 		v, resp, err := fetchReviewComment(ctx, client, owner, repo, id)
 		if err != nil {
-			return commentView{}, githubAPIError(fmt.Sprintf("get review comment %d", id), resp, err)
+			return PRCommentRecord{}, githubAPIError(fmt.Sprintf("get review comment %d", id), resp, err)
 		}
 		return v, nil
 	case commentKindReviewSummary:
 		rv, resp, err := client.PullRequests.GetReview(ctx, owner, repo, prNumber, id)
 		if err != nil {
-			return commentView{}, githubAPIError(fmt.Sprintf("get review %d", id), resp, err)
+			return PRCommentRecord{}, githubAPIError(fmt.Sprintf("get review %d", id), resp, err)
 		}
-		return reviewSummaryView(rv, prNumber), nil
+		return reviewSummaryRecord(rv, prNumber), nil
 	}
 
 	v, resp, err := fetchIssueComment(ctx, client, owner, repo, id)
@@ -222,63 +169,22 @@ func fetchSingleComment(ctx context.Context, client *github.Client, owner, repo,
 		return v, nil
 	}
 	if !isNotFound(resp) {
-		return commentView{}, githubAPIError(fmt.Sprintf("get issue comment %d", id), resp, err)
+		return PRCommentRecord{}, githubAPIError(fmt.Sprintf("get issue comment %d", id), resp, err)
 	}
 	v, resp, err = fetchReviewComment(ctx, client, owner, repo, id)
 	if err == nil {
 		return v, nil
 	}
 	if !isNotFound(resp) {
-		return commentView{}, githubAPIError(fmt.Sprintf("get review comment %d", id), resp, err)
+		return PRCommentRecord{}, githubAPIError(fmt.Sprintf("get review comment %d", id), resp, err)
 	}
-	return commentView{}, fmt.Errorf("comment %d not found in %s/%s as a conversation comment or an inline review comment", id, owner, repo)
-}
-
-// listAllComments lists the conversation comments and inline review comments of a pull request or
-// issue, oldest first. Review comments are skipped silently when the number is a plain issue.
-func listAllComments(ctx context.Context, client *github.Client, owner, repo string, number int) ([]commentView, error) {
-	var views []commentView
-
-	issueOpts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for page := 0; page < maxCommentListPages; page++ {
-		comments, resp, err := client.Issues.ListComments(ctx, owner, repo, number, issueOpts)
-		if err != nil {
-			return nil, githubAPIError("list issue comments", resp, err)
-		}
-		for _, c := range comments {
-			views = append(views, issueCommentView(c))
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		issueOpts.Page = resp.NextPage
-	}
-
-	reviewOpts := &github.PullRequestListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
-	for page := 0; page < maxCommentListPages; page++ {
-		comments, resp, err := client.PullRequests.ListComments(ctx, owner, repo, number, reviewOpts)
-		if err != nil {
-			if isNotFound(resp) {
-				break
-			}
-			return nil, githubAPIError("list review comments", resp, err)
-		}
-		for _, c := range comments {
-			views = append(views, reviewCommentView(c))
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		reviewOpts.Page = resp.NextPage
-	}
-
-	sort.SliceStable(views, func(i, j int) bool { return views[i].Created.Before(views[j].Created) })
-	return views, nil
+	return PRCommentRecord{}, fmt.Errorf("comment %d not found in %s/%s as a conversation comment or an inline review comment", id, owner, repo)
 }
 
 // formatCommentList renders a compact one-line-per-comment listing. When the listing exceeds the
-// output cap, the oldest comments are dropped so the most recent ones survive.
-func formatCommentList(owner, repo string, number int, views []commentView) string {
+// output cap, the oldest comments are dropped so the most recent ones survive. fetchLimited says
+// that fetching itself stopped early, so even older comments exist that were never read.
+func formatCommentList(owner, repo string, number int, views []PRCommentRecord, fetchLimited bool) string {
 	var issueCount, reviewCount int
 	lines := make([]string, len(views))
 	for i, v := range views {
@@ -286,8 +192,8 @@ func formatCommentList(owner, repo string, number int, views []commentView) stri
 		if v.Kind == commentKindReview {
 			reviewCount++
 			loc := v.Path
-			if v.Line > 0 {
-				loc = fmt.Sprintf("%s:%d", v.Path, v.Line)
+			if line := v.DisplayLine(); line > 0 {
+				loc = fmt.Sprintf("%s:%d", v.Path, line)
 			}
 			outdated := ""
 			if v.Outdated {
@@ -318,6 +224,9 @@ func formatCommentList(owner, repo string, number int, views []commentView) stri
 	}
 	if start > 0 {
 		fmt.Fprintf(&sb, "... (%d older comments omitted)\n", start)
+	}
+	if fetchLimited {
+		fmt.Fprintf(&sb, "... (only the first %d comments of each kind were fetched; more exist)\n", maxCommentListPages*100)
 	}
 	for _, l := range lines[start:] {
 		sb.WriteString(l)
@@ -435,11 +344,14 @@ func registerGetPRCommentTool(r *Registry, rootDir, metadataFile string) {
 			if err != nil {
 				return "", err
 			}
-			views, err := listAllComments(ctx, client, owner, repo, number)
+			views, limited, err := FetchPRComments(ctx, client, owner, repo, number, FetchPRCommentsOptions{
+				MaxPagesPerKind:             maxCommentListPages,
+				IgnoreMissingReviewComments: true,
+			})
 			if err != nil {
 				return "", err
 			}
-			return truncateOutput(formatCommentList(owner, repo, number, views)), nil
+			return truncateOutput(formatCommentList(owner, repo, number, views, limited)), nil
 		}
 	})
 }
