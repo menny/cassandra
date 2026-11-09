@@ -110,6 +110,9 @@ func RegisterLocalTools(r *Registry, root, base, head string, ignoredLockFiles [
 	registerT3Tools(r)
 	registerGetPRMetadataTool(r, root, metaFile, ignoredLockFiles)
 	registerGetPRDiffTool(r, root, metaFile, ignoredLockFiles)
+	registerGetPRCommentTool(r, root, metaFile)
+	registerGetIssueTool(r, root, metaFile)
+	registerListPRCommitsTool(r, root, metaFile)
 	if allowPRComment {
 		registerPRCommentTool(r, root, metaFile)
 	}
