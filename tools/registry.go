@@ -115,6 +115,8 @@ func RegisterLocalTools(r *Registry, root, base, head string, ignoredLockFiles [
 	registerListPRCommitsTool(r, root, metaFile)
 	registerGetCheckRunsTool(r, root, metaFile)
 	registerGetWorkflowRunLogsTool(r, root, metaFile)
+	registerGetFileAtRefTool(r, root, metaFile)
+	registerGetPRStackTool(r, root, metaFile)
 	if allowPRComment {
 		registerPRCommentTool(r, root, metaFile)
 	}
