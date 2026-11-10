@@ -62,16 +62,18 @@ func registerGitBlame(r *Registry, root string) {
 		if end-args.StartLine+1 > maxGitBlameLines {
 			return "", fmt.Errorf("line range too large: at most %d lines per call", maxGitBlameLines)
 		}
-		rel, err := relPathInRoot(root, args.Path)
+		if args.Ref != "" {
+			if err := validateGitRev("ref", args.Ref); err != nil {
+				return "", err
+			}
+		}
+		rel, err := relFilePathInRoot(ctx, root, args.Path, args.Ref)
 		if err != nil {
 			return "", err
 		}
 
 		cmdArgs := []string{"blame", "--date=short", "-w", "-L", fmt.Sprintf("%d,%d", args.StartLine, end)}
 		if args.Ref != "" {
-			if err := validateGitRev("ref", args.Ref); err != nil {
-				return "", err
-			}
 			cmdArgs = append(cmdArgs, args.Ref)
 		}
 		cmdArgs = append(cmdArgs, "--", rel)

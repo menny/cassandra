@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -94,6 +95,41 @@ func relPathInRoot(root, p string) (string, error) {
 	if strings.HasPrefix(rel, ":") {
 		rel = "./" + rel
 	}
+	return rel, nil
+}
+
+// relFilePathInRoot validates that p stays inside root (resolving symlinks) and confirms
+// that p targets a file (not a directory), checking both the working tree on disk and
+// the git object database at ref (or HEAD if ref is empty).
+func relFilePathInRoot(ctx context.Context, root, p, ref string) (string, error) {
+	rel, err := relPathInRoot(root, p)
+	if err != nil {
+		return "", err
+	}
+	cleanRel := strings.TrimPrefix(rel, "./")
+	if cleanRel == "" || cleanRel == "." {
+		return "", fmt.Errorf("invalid path %q: path is a directory, not a file", p)
+	}
+
+	// 1. Check if the path targets a directory on disk.
+	targetPath := filepath.Join(root, cleanRel)
+	if info, err := os.Stat(targetPath); err == nil && info.IsDir() {
+		return "", fmt.Errorf("invalid path %q: path is a directory, not a file", p)
+	}
+
+	// 2. Check if the path targets a directory (tree) in git at ref.
+	rev := ref
+	if rev == "" {
+		rev = "HEAD"
+	}
+	objType, err := util.RunGit(ctx, root, "cat-file", "-t", rev+":"+cleanRel)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", ctxErr
+	}
+	if err == nil && strings.TrimSpace(string(objType)) == "tree" {
+		return "", fmt.Errorf("invalid path %q: path is a directory, not a file", p)
+	}
+
 	return rel, nil
 }
 

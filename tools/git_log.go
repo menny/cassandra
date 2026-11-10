@@ -101,7 +101,13 @@ func registerGitLog(r *Registry, root string) {
 		}
 		cmdArgs = append(cmdArgs, rev)
 		if args.Path != "" {
-			rel, err := relPathInRoot(root, args.Path)
+			var rel string
+			var err error
+			if args.Follow {
+				rel, err = relFilePathInRoot(ctx, root, args.Path, rev)
+			} else {
+				rel, err = relPathInRoot(root, args.Path)
+			}
 			if err != nil {
 				return "", err
 			}

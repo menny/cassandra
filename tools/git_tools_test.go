@@ -52,6 +52,79 @@ func newShallowClone(t *testing.T, src string) string {
 	return dst
 }
 
+type gitPathEscapeFixtures struct {
+	traversalPaths       []string
+	validDirSymlink      string
+	validDirFileSymlink  string
+	validFileSymlink     string
+	brokenOutsideSymlink string
+	brokenInsideSymlink  string
+	trampolineSymlink    string
+}
+
+func setupGitPathEscapeFixtures(t *testing.T, dir string) gitPathEscapeFixtures {
+	t.Helper()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "secret.txt")
+	require.NoError(t, os.WriteFile(outsideFile, []byte("SENSITIVE DATA\n"), 0o644))
+
+	// 1. Valid symlink pointing outside workspace root (both directory and file symlinks)
+	evilDirSymlink := filepath.Join(dir, "evil_symlink")
+	require.NoError(t, os.Symlink(outside, evilDirSymlink))
+	evilFileSymlink := filepath.Join(dir, "evil_file.txt")
+	require.NoError(t, os.Symlink(outsideFile, evilFileSymlink))
+
+	// 2. Broken symlink pointing to a non-existent target outside/inside the root
+	brokenOutside := filepath.Join(dir, "broken_outside")
+	require.NoError(t, os.Symlink(filepath.Join(outside, "nonexistent"), brokenOutside))
+	brokenInside := filepath.Join(dir, "broken_inside")
+	require.NoError(t, os.Symlink(filepath.Join(dir, "nonexistent"), brokenInside))
+
+	// 3. Circular / trampoline symlink (e.g. a symlink pointing to itself)
+	trampoline := filepath.Join(dir, "trampoline")
+	require.NoError(t, os.Symlink(trampoline, trampoline))
+
+	return gitPathEscapeFixtures{
+		traversalPaths:       []string{"../etc/passwd", "../../secret.txt", "a/../../etc/passwd"},
+		validDirSymlink:      "evil_symlink",
+		validDirFileSymlink:  "evil_symlink/secret.txt",
+		validFileSymlink:     "evil_file.txt",
+		brokenOutsideSymlink: "broken_outside",
+		brokenInsideSymlink:  "broken_inside",
+		trampolineSymlink:    "trampoline",
+	}
+}
+
+func runPathEscapeSubtests(t *testing.T, fixtures gitPathEscapeFixtures, allowsDirectory bool, testFn func(t *testing.T, path string)) {
+	t.Helper()
+
+	t.Run("path traversal outside root should error", func(t *testing.T) {
+		for _, p := range fixtures.traversalPaths {
+			testFn(t, p)
+		}
+	})
+
+	t.Run("valid symlink pointing outside should be blocked", func(t *testing.T) {
+		targets := []string{fixtures.validDirFileSymlink, fixtures.validFileSymlink}
+		if allowsDirectory {
+			targets = append(targets, fixtures.validDirSymlink)
+		}
+		for _, p := range targets {
+			testFn(t, p)
+		}
+	})
+
+	t.Run("broken symlink should be blocked", func(t *testing.T) {
+		for _, p := range []string{fixtures.brokenOutsideSymlink, fixtures.brokenInsideSymlink} {
+			testFn(t, p)
+		}
+	})
+
+	t.Run("trampoline symlink should be blocked", func(t *testing.T) {
+		testFn(t, fixtures.trampolineSymlink)
+	})
+}
+
 func TestGitCommonHelpers(t *testing.T) {
 	t.Run("validateGitRev", func(t *testing.T) {
 		for _, ok := range []string{"main", "HEAD", "HEAD~3", "origin/feature-x", "v1.2.3", "a1b2c3d", "main..HEAD", "main...HEAD", "@{u}", "v1^{commit}"} {
@@ -101,10 +174,41 @@ func TestGitCommonHelpers(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "./:(top)x", rel, "pathspec magic must be neutralized")
 
-		for _, bad := range []string{"", "  ", "../etc/passwd", "a/../../etc/passwd", "/etc/passwd"} {
+		for _, bad := range []string{"", "  ", "/etc/passwd"} {
 			_, err = relPathInRoot(dir, bad)
 			require.Error(t, err, bad)
 		}
+
+		fixtures := setupGitPathEscapeFixtures(t, dir)
+		runPathEscapeSubtests(t, fixtures, true, func(t *testing.T, path string) {
+			t.Helper()
+			_, err := relPathInRoot(dir, path)
+			require.ErrorContains(t, err, "invalid path", path)
+		})
+	})
+
+	t.Run("relFilePathInRoot", func(t *testing.T) {
+		ctx := context.Background()
+		dir := newGitToolRepo(t)
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "subdir"), 0o755))
+		commitFile(t, dir, "subdir/nested.txt", []byte("nested\n"), "add nested")
+
+		rel, err := relFilePathInRoot(ctx, dir, "subdir/nested.txt", "HEAD")
+		require.NoError(t, err)
+		require.Equal(t, "subdir/nested.txt", rel)
+
+		// Directory on disk / in git should be rejected
+		for _, dirPath := range []string{".", "subdir"} {
+			_, err = relFilePathInRoot(ctx, dir, dirPath, "HEAD")
+			require.ErrorContains(t, err, "path is a directory, not a file")
+		}
+
+		fixtures := setupGitPathEscapeFixtures(t, dir)
+		runPathEscapeSubtests(t, fixtures, false, func(t *testing.T, path string) {
+			t.Helper()
+			_, err := relFilePathInRoot(ctx, dir, path, "HEAD")
+			require.ErrorContains(t, err, "invalid path", path)
+		})
 	})
 }
 
@@ -176,6 +280,22 @@ func TestGitLogTool(t *testing.T) {
 		require.ErrorContains(t, err, "requires 'path'")
 	})
 
+	t.Run("follow rejects directory", func(t *testing.T) {
+		repo := newGitToolRepo(t)
+		require.NoError(t, os.Mkdir(filepath.Join(repo, "sub"), 0o755))
+		commitFile(t, repo, "sub/file.txt", []byte("x\n"), "add file")
+		rr := NewRegistry()
+		registerGitLog(rr, repo)
+
+		_, err := callTool(ctx, t, rr, "git_log", map[string]any{"path": "sub", "follow": true})
+		require.ErrorContains(t, err, "path is a directory, not a file")
+
+		// Directory without follow succeeds
+		out, err := callTool(ctx, t, rr, "git_log", map[string]any{"path": "sub"})
+		require.NoError(t, err)
+		require.Contains(t, out, "add file")
+	})
+
 	t.Run("rejects option-like and malformed refs", func(t *testing.T) {
 		for _, ref := range []string{"--output=" + filepath.Join(dir, "pwned"), "-n1", "a b"} {
 			_, err := callTool(ctx, t, r, "git_log", map[string]any{"ref": ref})
@@ -198,21 +318,11 @@ func TestGitLogTool(t *testing.T) {
 		require.ErrorContains(t, err, "does-not-exist")
 	})
 
-	t.Run("path traversal is rejected", func(t *testing.T) {
-		_, err := callTool(ctx, t, r, "git_log", map[string]any{"path": "../etc/passwd"})
-		require.ErrorContains(t, err, "invalid path")
-	})
-
-	t.Run("symlink escaping the root is rejected", func(t *testing.T) {
-		outside := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("x"), 0o644))
-		require.NoError(t, os.Symlink(outside, filepath.Join(dir, "escape")))
-		require.NoError(t, os.Symlink(filepath.Join(outside, "missing"), filepath.Join(dir, "broken")))
-
-		for _, p := range []string{"escape/secret.txt", "escape", "broken"} {
-			_, err := callTool(ctx, t, r, "git_log", map[string]any{"path": p})
-			require.ErrorContains(t, err, "invalid path", p)
-		}
+	fixtures := setupGitPathEscapeFixtures(t, dir)
+	runPathEscapeSubtests(t, fixtures, true, func(t *testing.T, path string) {
+		t.Helper()
+		_, err := callTool(ctx, t, r, "git_log", map[string]any{"path": path})
+		require.ErrorContains(t, err, "invalid path", path)
 	})
 
 	t.Run("malformed arguments", func(t *testing.T) {
@@ -282,15 +392,17 @@ func TestGitBlameTool(t *testing.T) {
 		require.ErrorContains(t, err, "git_blame failed")
 	})
 
-	t.Run("path traversal and symlinks are rejected", func(t *testing.T) {
-		_, err := callTool(ctx, t, r, "git_blame", map[string]any{"path": "../../etc/passwd", "start_line": 1})
-		require.ErrorContains(t, err, "invalid path")
+	t.Run("rejects directory path", func(t *testing.T) {
+		commitFile(t, dir, "blame_sub/file.txt", []byte("blame\n"), "add blame sub")
+		_, err := callTool(ctx, t, r, "git_blame", map[string]any{"path": "blame_sub", "start_line": 1})
+		require.ErrorContains(t, err, "path is a directory, not a file")
+	})
 
-		outside := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(outside, "f.txt"), []byte("x\n"), 0o644))
-		require.NoError(t, os.Symlink(filepath.Join(outside, "f.txt"), filepath.Join(dir, "link.txt")))
-		_, err = callTool(ctx, t, r, "git_blame", map[string]any{"path": "link.txt", "start_line": 1})
-		require.ErrorContains(t, err, "invalid path")
+	fixtures := setupGitPathEscapeFixtures(t, dir)
+	runPathEscapeSubtests(t, fixtures, false, func(t *testing.T, path string) {
+		t.Helper()
+		_, err := callTool(ctx, t, r, "git_blame", map[string]any{"path": path, "start_line": 1})
+		require.ErrorContains(t, err, "invalid path", path)
 	})
 
 	t.Run("rejects option-like ref", func(t *testing.T) {
@@ -371,6 +483,17 @@ func TestGitShowTool(t *testing.T) {
 		require.Equal(t, "line two", out)
 	})
 
+	t.Run("contents on directory is rejected", func(t *testing.T) {
+		commitFile(t, dir, "show_sub/file.txt", []byte("show\n"), "add show sub")
+		_, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": "show_sub", "contents": true})
+		require.ErrorContains(t, err, "path is a directory, not a file")
+
+		// Patch on directory with contents: false succeeds
+		out, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": "show_sub", "contents": false})
+		require.NoError(t, err)
+		require.Contains(t, out, "show_sub/file.txt")
+	})
+
 	t.Run("binary contents are not dumped", func(t *testing.T) {
 		out, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": "blob.bin", "contents": true})
 		require.NoError(t, err)
@@ -421,16 +544,16 @@ func TestGitShowTool(t *testing.T) {
 		require.ErrorContains(t, err, "invalid ref")
 	})
 
-	t.Run("path traversal and symlinks are rejected", func(t *testing.T) {
-		for _, contents := range []bool{false, true} {
-			_, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": "../etc/passwd", "contents": contents})
-			require.ErrorContains(t, err, "invalid path")
-		}
-		outside := t.TempDir()
-		require.NoError(t, os.Symlink(outside, filepath.Join(dir, "escape")))
-		_, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": "escape/x", "contents": true})
-		require.ErrorContains(t, err, "invalid path")
-	})
+	fixtures := setupGitPathEscapeFixtures(t, dir)
+	for _, contents := range []bool{false, true} {
+		t.Run(fmt.Sprintf("contents=%v", contents), func(t *testing.T) {
+			runPathEscapeSubtests(t, fixtures, !contents, func(t *testing.T, path string) {
+				t.Helper()
+				_, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD", "path": path, "contents": contents})
+				require.ErrorContains(t, err, "invalid path", path)
+			})
+		})
+	}
 
 	t.Run("pathspec magic in path cannot widen the query", func(t *testing.T) {
 		out, err := callTool(ctx, t, r, "git_show", map[string]any{"ref": "HEAD~1", "path": ":(top)lines.txt"})
@@ -517,9 +640,11 @@ func TestGitDiffStatTool(t *testing.T) {
 		require.ErrorContains(t, err, "git_diff_stat failed")
 	})
 
-	t.Run("path traversal is rejected", func(t *testing.T) {
-		_, err := callTool(ctx, t, r, "git_diff_stat", map[string]any{"base": "main", "path": "../x"})
-		require.ErrorContains(t, err, "invalid path")
+	fixtures := setupGitPathEscapeFixtures(t, dir)
+	runPathEscapeSubtests(t, fixtures, true, func(t *testing.T, path string) {
+		t.Helper()
+		_, err := callTool(ctx, t, r, "git_diff_stat", map[string]any{"base": "main", "path": path})
+		require.ErrorContains(t, err, "invalid path", path)
 	})
 
 	t.Run("cancelled context", func(t *testing.T) {

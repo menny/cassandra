@@ -87,7 +87,7 @@ func showFileAtRef(ctx context.Context, root string, args gitShowArgs) (string, 
 	if args.Path == "" {
 		return "", errors.New("'path' is required when 'contents' is true")
 	}
-	rel, err := relPathInRoot(root, args.Path)
+	rel, err := relFilePathInRoot(ctx, root, args.Path, args.Ref)
 	if err != nil {
 		return "", err
 	}
