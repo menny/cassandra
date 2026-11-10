@@ -17,7 +17,20 @@ import (
 	"github.com/menny/cassandra/llm"
 )
 
-const maxOmnigentToolOutputBytes = 40 * 1024
+const (
+	maxOmnigentToolOutputBytes = 40 * 1024
+	maxRelayConfigFileBytes    = 64 * 1024
+)
+
+// omnigentHTTPClient is used for calling Omnigent tool relay HTTP endpoints.
+// A bounded timeout and disabled keep-alives prevent leaked background connections
+// and unbounded hangs if the relay process becomes unresponsive.
+var omnigentHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 // IsOmnigentSession returns true if Cassandra is currently running inside an Omnigent environment.
 func IsOmnigentSession() bool {
@@ -40,7 +53,13 @@ type omnigentRelayConfig struct {
 }
 
 func readRelayConfigFile(path string) (*omnigentRelayConfig, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxRelayConfigFileBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +74,13 @@ func readRelayConfigFile(path string) (*omnigentRelayConfig, error) {
 }
 
 func readRelayEnvFile(path string) (*omnigentRelayConfig, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxRelayConfigFileBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -78,46 +103,59 @@ func readRelayEnvFile(path string) (*omnigentRelayConfig, error) {
 }
 
 func findActiveToolRelay(omnigentRoot string, targetSessionID string) *omnigentRelayConfig {
-	var candidates []string
-	matches, err := filepath.Glob(filepath.Join(omnigentRoot, "*", "*", "tool_relay.json"))
-	if err == nil {
-		candidates = append(candidates, matches...)
-	}
-
-	// Sort candidates by modification time (newest first)
 	type fileCandidate struct {
 		path    string
 		modTime time.Time
 	}
-	var fileList []fileCandidate
-	for _, c := range candidates {
-		info, err := os.Stat(c)
-		if err == nil {
-			fileList = append(fileList, fileCandidate{path: c, modTime: info.ModTime()})
-		}
-	}
-	sort.Slice(fileList, func(i, j int) bool {
-		return fileList[i].modTime.After(fileList[j].modTime)
-	})
 
-	for _, fc := range fileList {
+	collectFiles := func(pattern string) []fileCandidate {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil
+		}
+		var list []fileCandidate
+		for _, m := range matches {
+			info, err := os.Stat(m)
+			if err == nil {
+				list = append(list, fileCandidate{path: m, modTime: info.ModTime()})
+			}
+		}
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].modTime.After(list[j].modTime)
+		})
+		return list
+	}
+
+	jsonFiles := collectFiles(filepath.Join(omnigentRoot, "*", "*", "tool_relay.json"))
+
+	var untaggedFallback *omnigentRelayConfig
+
+	for _, fc := range jsonFiles {
 		cfg, err := readRelayConfigFile(fc.path)
 		if err != nil {
 			continue
 		}
-		if targetSessionID != "" && cfg.SessionID != "" {
+		if targetSessionID != "" {
 			if cfg.SessionID == targetSessionID {
 				return cfg
+			}
+			// Keep the newest untagged candidate as fallback if target session ID is not found.
+			if cfg.SessionID == "" && untaggedFallback == nil {
+				untaggedFallback = cfg
 			}
 		} else {
 			return cfg
 		}
 	}
 
-	// Fallback to checking tool_relay.env
-	envMatches, _ := filepath.Glob(filepath.Join(omnigentRoot, "*", "*", "tool_relay.env"))
-	for _, em := range envMatches {
-		cfg, err := readRelayEnvFile(em)
+	if targetSessionID != "" && untaggedFallback != nil {
+		return untaggedFallback
+	}
+
+	// Fallback to checking tool_relay.env, sorted by modTime (newest first).
+	envFiles := collectFiles(filepath.Join(omnigentRoot, "*", "*", "tool_relay.env"))
+	for _, ef := range envFiles {
+		cfg, err := readRelayEnvFile(ef.path)
 		if err == nil {
 			return cfg
 		}
@@ -185,7 +223,7 @@ func callOmnigentTool(ctx context.Context, tool string, args any) (string, error
 	httpReq.Header.Set("Authorization", "Bearer "+relay.Token)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := omnigentHTTPClient.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("calling Omnigent tool %q failed: %w", tool, err)
 	}
@@ -200,43 +238,9 @@ func callOmnigentTool(ctx context.Context, tool string, args any) (string, error
 		return "", fmt.Errorf("calling Omnigent tool %q failed with HTTP %d: %s", tool, resp.StatusCode, string(body))
 	}
 
-	result := string(body)
-
-	// Unpack standard MCP tool call envelope if present.
-	var env struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		StructuredContent json.RawMessage `json:"structuredContent"`
-		IsError           bool            `json:"isError"`
-	}
-	if err := json.Unmarshal(body, &env); err == nil && (len(env.Content) > 0 || len(env.StructuredContent) > 0 || env.IsError) {
-		if env.IsError {
-			var errMsgs []string
-			for _, c := range env.Content {
-				if c.Text != "" {
-					errMsgs = append(errMsgs, c.Text)
-				}
-			}
-			if len(errMsgs) > 0 {
-				return "", fmt.Errorf("calling Omnigent tool %q failed: %s", tool, strings.Join(errMsgs, "; "))
-			}
-			return "", fmt.Errorf("calling Omnigent tool %q failed", tool)
-		}
-		if len(env.StructuredContent) > 0 && string(env.StructuredContent) != "null" {
-			result = string(env.StructuredContent)
-		} else if len(env.Content) > 0 {
-			var texts []string
-			for _, c := range env.Content {
-				if c.Text != "" {
-					texts = append(texts, c.Text)
-				}
-			}
-			if len(texts) > 0 {
-				result = strings.Join(texts, "\n")
-			}
-		}
+	result, err := unpackMCPTextEnvelope(body, fmt.Sprintf("Omnigent tool %q", tool))
+	if err != nil {
+		return "", err
 	}
 
 	if len(result) > maxOmnigentToolOutputBytes {
@@ -287,25 +291,60 @@ type OmnigentAgentChoice struct {
 	IsPreferred bool   `json:"isPreferred"`
 }
 
+func maskCassandraInAgentSlice(agents []OmnigentAgentEntry) []OmnigentAgentEntry {
+	var filtered []OmnigentAgentEntry
+	for _, a := range agents {
+		if strings.EqualFold(a.Name, "cassandra") || strings.EqualFold(a.Harness, "cassandra") || strings.HasPrefix(strings.ToLower(a.Harness), "acp:cassandra") {
+			continue
+		}
+		filtered = append(filtered, a)
+	}
+	return filtered
+}
+
 // MaskCassandraInOmnigentAgents removes or masks Cassandra from sys_agent_list output.
 func MaskCassandraInOmnigentAgents(raw string) string {
 	var resp OmnigentAgentListResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		return raw
 	}
-	var filteredBuiltins []OmnigentAgentEntry
-	for _, a := range resp.Builtins {
-		if strings.EqualFold(a.Name, "cassandra") || strings.EqualFold(a.Harness, "cassandra") || strings.HasPrefix(strings.ToLower(a.Harness), "acp:cassandra") {
-			continue
-		}
-		filteredBuiltins = append(filteredBuiltins, a)
-	}
-	resp.Builtins = filteredBuiltins
+	resp.Builtins = maskCassandraInAgentSlice(resp.Builtins)
+	resp.SessionAgents = maskCassandraInAgentSlice(resp.SessionAgents)
+	resp.LocalConfigs = maskCassandraInAgentSlice(resp.LocalConfigs)
 	out, err := json.Marshal(resp)
 	if err != nil {
 		return raw
 	}
 	return string(out)
+}
+
+// allOmnigentAgents aggregates agents across LocalConfigs, SessionAgents, and Builtins.
+// LocalConfigs take precedence over SessionAgents, which take precedence over Builtins.
+func allOmnigentAgents(resp *OmnigentAgentListResponse) []OmnigentAgentEntry {
+	seen := make(map[string]bool)
+	var all []OmnigentAgentEntry
+
+	addAgents := func(entries []OmnigentAgentEntry) {
+		for _, a := range entries {
+			key := a.AgentID
+			if key == "" {
+				key = a.Name
+			}
+			keyLower := strings.ToLower(key)
+			if keyLower != "" && seen[keyLower] {
+				continue
+			}
+			if keyLower != "" {
+				seen[keyLower] = true
+			}
+			all = append(all, a)
+		}
+	}
+
+	addAgents(resp.LocalConfigs)
+	addAgents(resp.SessionAgents)
+	addAgents(resp.Builtins)
+	return all
 }
 
 // FilterEnabledOmnigentAgents filters out Cassandra and unavailable harnesses.
@@ -353,7 +392,7 @@ func ResolveOmnigentLaunchAgent(agentListRaw string, cfg OmnigentLaunchConfig, r
 		return nil, fmt.Errorf("failed to parse agent list: %w", err)
 	}
 
-	enabled := FilterEnabledOmnigentAgents(resp.Builtins)
+	enabled := FilterEnabledOmnigentAgents(allOmnigentAgents(&resp))
 	if len(enabled) == 0 {
 		return nil, errors.New("no enabled coding agent harnesses available in Omnigent")
 	}
@@ -391,7 +430,7 @@ func GetAvailableOmnigentAgentChoices(agentListRaw string, cfg OmnigentLaunchCon
 	if err := json.Unmarshal([]byte(agentListRaw), &resp); err != nil {
 		return nil
 	}
-	enabled := FilterEnabledOmnigentAgents(resp.Builtins)
+	enabled := FilterEnabledOmnigentAgents(allOmnigentAgents(&resp))
 	if len(enabled) == 0 {
 		return nil
 	}
@@ -509,19 +548,7 @@ func registerOmnigentTools(r *Registry) {
 	}
 
 	RegisterToolWithArgs(r, launchDef, func(ctx context.Context, args OmnigentSessionLaunchArgs) (string, error) {
-		trimmed := strings.TrimSpace(args.Title)
-		if strings.HasPrefix(trimmed, "Review Fix") {
-			rest := strings.TrimLeft(strings.TrimPrefix(trimmed, "Review Fix"), " -:")
-			if rest != "" {
-				args.Title = "Review Fix " + rest
-			} else {
-				args.Title = "Review Fix"
-			}
-		} else if trimmed != "" {
-			args.Title = "Review Fix " + trimmed
-		} else {
-			args.Title = "Review Fix"
-		}
+		args.Title = normalizeReviewFixTitle(args.Title)
 
 		agentListRaw, err := callOmnigentTool(ctx, "sys_agent_list", map[string]any{})
 		if err != nil {
@@ -543,13 +570,14 @@ func registerOmnigentTools(r *Registry) {
 				})
 				if pErr == nil && resp.Status == "answered" && len(resp.Selected) > 0 {
 					selectedText := resp.Selected[0]
+					cleanFormatted := strings.TrimSpace(strings.TrimPrefix(selectedText, "(Recommended) "))
 					for _, c := range choices {
-						cleanFormatted := strings.TrimPrefix(selectedText, "(Recommended) ")
 						name := c.DisplayName
 						if name == "" {
 							name = c.AgentID
 						}
-						if strings.HasPrefix(cleanFormatted, name) {
+						expectedFormatted := fmt.Sprintf("%s (%s)", name, c.Harness)
+						if cleanFormatted == expectedFormatted || cleanFormatted == name {
 							args.AgentID = c.AgentID
 							break
 						}

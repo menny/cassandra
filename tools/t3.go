@@ -45,43 +45,9 @@ func callT3McpTool(ctx context.Context, tool string, args any) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("calling T3 MCP tool %q failed: %w (output: %s)", tool, err, string(out))
 	}
-	result := string(out)
-
-	// Unpack standard MCP tool call envelope if present.
-	var env struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-		StructuredContent json.RawMessage `json:"structuredContent"`
-		IsError           bool            `json:"isError"`
-	}
-	if err := json.Unmarshal(out, &env); err == nil && (len(env.Content) > 0 || len(env.StructuredContent) > 0 || env.IsError) {
-		if env.IsError {
-			var errMsgs []string
-			for _, c := range env.Content {
-				if c.Text != "" {
-					errMsgs = append(errMsgs, c.Text)
-				}
-			}
-			if len(errMsgs) > 0 {
-				return "", fmt.Errorf("calling T3 MCP tool %q failed: %s", tool, strings.Join(errMsgs, "; "))
-			}
-			return "", fmt.Errorf("calling T3 MCP tool %q failed", tool)
-		}
-		if len(env.StructuredContent) > 0 && string(env.StructuredContent) != "null" {
-			result = string(env.StructuredContent)
-		} else if len(env.Content) > 0 {
-			var texts []string
-			for _, c := range env.Content {
-				if c.Text != "" {
-					texts = append(texts, c.Text)
-				}
-			}
-			if len(texts) > 0 {
-				result = strings.Join(texts, "\n")
-			}
-		}
+	result, err := unpackMCPTextEnvelope(out, fmt.Sprintf("T3 MCP tool %q", tool))
+	if err != nil {
+		return "", err
 	}
 
 	if len(result) > maxT3ToolOutputBytes {
@@ -515,19 +481,7 @@ func registerT3Tools(r *Registry) {
 	}
 
 	RegisterToolWithArgs(r, launchDef, func(ctx context.Context, args ThreadLaunchArgs) (string, error) {
-		trimmed := strings.TrimSpace(args.Title)
-		if strings.HasPrefix(trimmed, "Review Fix") {
-			rest := strings.TrimLeft(strings.TrimPrefix(trimmed, "Review Fix"), " -:")
-			if rest != "" {
-				args.Title = "Review Fix " + rest
-			} else {
-				args.Title = "Review Fix"
-			}
-		} else if trimmed != "" {
-			args.Title = "Review Fix " + trimmed
-		} else {
-			args.Title = "Review Fix"
-		}
+		args.Title = normalizeReviewFixTitle(args.Title)
 
 		capOut, err := callT3McpTool(ctx, "orchestrator_capabilities", capArgs{})
 		if err != nil {
@@ -551,13 +505,14 @@ func registerT3Tools(r *Registry) {
 				})
 				if pErr == nil && resp.Status == "answered" && len(resp.Selected) > 0 {
 					selectedText := resp.Selected[0]
+					cleanFormatted := strings.TrimSpace(strings.TrimPrefix(selectedText, "(Recommended) "))
 					for _, c := range choices {
-						cleanFormatted := strings.TrimPrefix(selectedText, "(Recommended) ")
 						name := c.DisplayName
 						if name == "" {
 							name = c.InstanceID
 						}
-						if strings.HasPrefix(cleanFormatted, name) {
+						expectedFormatted := fmt.Sprintf("%s — %s", name, c.ModelLabel)
+						if cleanFormatted == expectedFormatted || cleanFormatted == name {
 							args.ModelSelection = &ModelSelection{
 								InstanceID: c.InstanceID,
 								Model:      c.ModelID,

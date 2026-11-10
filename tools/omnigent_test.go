@@ -620,3 +620,225 @@ func TestSessionTitlePrefix(t *testing.T) {
 		require.False(t, renameCalled)
 	})
 }
+
+func TestFindActiveToolRelay(t *testing.T) {
+	t.Run("matches target session ID among multiple sessions", func(t *testing.T) {
+		root := t.TempDir()
+
+		dir1 := filepath.Join(root, "host1", "session1")
+		require.NoError(t, os.MkdirAll(dir1, 0o755))
+		cfg1 := map[string]string{"url": "http://127.0.0.1:1001", "token": "tok1", "session_id": "sess-1"}
+		raw1, _ := json.Marshal(cfg1)
+		require.NoError(t, os.WriteFile(filepath.Join(dir1, "tool_relay.json"), raw1, 0o600))
+
+		dir2 := filepath.Join(root, "host1", "session2")
+		require.NoError(t, os.MkdirAll(dir2, 0o755))
+		cfg2 := map[string]string{"url": "http://127.0.0.1:1002", "token": "tok2", "session_id": "sess-2"}
+		raw2, _ := json.Marshal(cfg2)
+		require.NoError(t, os.WriteFile(filepath.Join(dir2, "tool_relay.json"), raw2, 0o600))
+
+		// Even if dir1 was written earlier, requesting sess-2 must find sess-2
+		res := findActiveToolRelay(root, "sess-2")
+		require.NotNil(t, res)
+		require.Equal(t, "sess-2", res.SessionID)
+		require.Equal(t, "http://127.0.0.1:1002", res.URL)
+	})
+
+	t.Run("falls back to untagged candidate if target session ID not found", func(t *testing.T) {
+		root := t.TempDir()
+
+		dirTagged := filepath.Join(root, "host1", "sess_tagged")
+		require.NoError(t, os.MkdirAll(dirTagged, 0o755))
+		cfgTagged := map[string]string{"url": "http://127.0.0.1:2001", "token": "tok-t", "session_id": "other-sess"}
+		rawTagged, _ := json.Marshal(cfgTagged)
+		require.NoError(t, os.WriteFile(filepath.Join(dirTagged, "tool_relay.json"), rawTagged, 0o600))
+
+		dirUntagged := filepath.Join(root, "host1", "sess_untagged")
+		require.NoError(t, os.MkdirAll(dirUntagged, 0o755))
+		cfgUntagged := map[string]string{"url": "http://127.0.0.1:2002", "token": "tok-u"}
+		rawUntagged, _ := json.Marshal(cfgUntagged)
+		require.NoError(t, os.WriteFile(filepath.Join(dirUntagged, "tool_relay.json"), rawUntagged, 0o600))
+
+		// Requesting non-existent target should NOT return other-sess, but instead return untagged
+		res := findActiveToolRelay(root, "target-not-found")
+		require.NotNil(t, res)
+		require.Equal(t, "http://127.0.0.1:2002", res.URL)
+		require.Empty(t, res.SessionID)
+	})
+
+	t.Run("returns nil if target session ID not found and no untagged candidate exists", func(t *testing.T) {
+		root := t.TempDir()
+
+		dirTagged := filepath.Join(root, "host1", "sess_tagged")
+		require.NoError(t, os.MkdirAll(dirTagged, 0o755))
+		cfgTagged := map[string]string{"url": "http://127.0.0.1:2001", "token": "tok-t", "session_id": "only-sess"}
+		rawTagged, _ := json.Marshal(cfgTagged)
+		require.NoError(t, os.WriteFile(filepath.Join(dirTagged, "tool_relay.json"), rawTagged, 0o600))
+
+		res := findActiveToolRelay(root, "unknown-sess")
+		require.Nil(t, res)
+	})
+
+	t.Run("falls back to newest tool_relay.env when no json config exists", func(t *testing.T) {
+		root := t.TempDir()
+
+		dirOld := filepath.Join(root, "host1", "old_sess")
+		require.NoError(t, os.MkdirAll(dirOld, 0o755))
+		envOld := "OMNIGENT_RELAY_URL=http://127.0.0.1:3001\nOMNIGENT_RELAY_TOKEN=old-tok\n"
+		pathOld := filepath.Join(dirOld, "tool_relay.env")
+		require.NoError(t, os.WriteFile(pathOld, []byte(envOld), 0o600))
+
+		dirNew := filepath.Join(root, "host1", "new_sess")
+		require.NoError(t, os.MkdirAll(dirNew, 0o755))
+		envNew := "OMNIGENT_RELAY_URL=http://127.0.0.1:3002\nOMNIGENT_RELAY_TOKEN=new-tok\n"
+		pathNew := filepath.Join(dirNew, "tool_relay.env")
+		require.NoError(t, os.WriteFile(pathNew, []byte(envNew), 0o600))
+
+		pastTime := time.Now().Add(-10 * time.Minute)
+		require.NoError(t, os.Chtimes(pathOld, pastTime, pastTime))
+
+		res := findActiveToolRelay(root, "")
+		require.NotNil(t, res)
+		require.Equal(t, "http://127.0.0.1:3002", res.URL)
+		require.Equal(t, "new-tok", res.Token)
+	})
+
+	t.Run("bounded read does not panic on oversized file", func(t *testing.T) {
+		root := t.TempDir()
+		oversized := filepath.Join(root, "huge.json")
+		data := make([]byte, 128*1024)
+		for i := range data {
+			data[i] = ' '
+		}
+		require.NoError(t, os.WriteFile(oversized, data, 0o600))
+
+		cfg, err := readRelayConfigFile(oversized)
+		require.Error(t, err)
+		require.Nil(t, cfg)
+	})
+}
+
+func TestMultiSourceOmnigentAgents(t *testing.T) {
+	bTrue := true
+	resp := OmnigentAgentListResponse{
+		Builtins: []OmnigentAgentEntry{
+			{AgentID: "ag-builtin-1", Name: "antigravity-native-ui", Harness: "antigravity-native", AvailableOnHost: &bTrue},
+			{AgentID: "ag-cassandra-1", Name: "cassandra", Harness: "acp:cassandra", AvailableOnHost: &bTrue},
+		},
+		SessionAgents: []OmnigentAgentEntry{
+			{AgentID: "ag-session-1", Name: "custom-session-agent", Harness: "custom-session", AvailableOnHost: &bTrue},
+			{AgentID: "ag-cassandra-2", Name: "cassandra-session", Harness: "cassandra", AvailableOnHost: &bTrue},
+		},
+		LocalConfigs: []OmnigentAgentEntry{
+			{AgentID: "ag-local-1", Name: "override-agent", Harness: "local-override", AvailableOnHost: &bTrue},
+			{AgentID: "ag-builtin-1", Name: "antigravity-override", Harness: "local-antigravity", AvailableOnHost: &bTrue},
+			{AgentID: "ag-cassandra-3", Name: "cassandra-local", Harness: "acp:cassandra-native", AvailableOnHost: &bTrue},
+		},
+	}
+	raw, err := json.Marshal(resp)
+	require.NoError(t, err)
+
+	t.Run("MaskCassandraInOmnigentAgents masks Cassandra across all sources", func(t *testing.T) {
+		masked := MaskCassandraInOmnigentAgents(string(raw))
+		var unmarshaled OmnigentAgentListResponse
+		require.NoError(t, json.Unmarshal([]byte(masked), &unmarshaled))
+
+		for _, a := range unmarshaled.Builtins {
+			require.False(t, strings.Contains(strings.ToLower(a.Name), "cassandra"))
+		}
+		for _, a := range unmarshaled.SessionAgents {
+			require.False(t, strings.Contains(strings.ToLower(a.Name), "cassandra"))
+		}
+		for _, a := range unmarshaled.LocalConfigs {
+			require.False(t, strings.Contains(strings.ToLower(a.Name), "cassandra"))
+		}
+	})
+
+	t.Run("ResolveOmnigentLaunchAgent discovers and prioritizes local and session agents", func(t *testing.T) {
+		cfg := OmnigentLaunchConfig{
+			PreferredHarnesses: []string{"custom-session"},
+		}
+		resolved, err := ResolveOmnigentLaunchAgent(string(raw), cfg, "")
+		require.NoError(t, err)
+		require.Equal(t, "ag-session-1", resolved.AgentID)
+		require.Equal(t, "custom-session-agent", resolved.Name)
+	})
+
+	t.Run("LocalConfigs take precedence over Builtins on duplicate agent ID", func(t *testing.T) {
+		cfg := OmnigentLaunchConfig{
+			PreferredHarnesses: []string{"antigravity"},
+		}
+		resolved, err := ResolveOmnigentLaunchAgent(string(raw), cfg, "")
+		require.NoError(t, err)
+		require.Equal(t, "ag-builtin-1", resolved.AgentID)
+		require.Equal(t, "antigravity-override", resolved.Name)
+		require.Equal(t, "local-antigravity", resolved.Harness)
+	})
+}
+
+func TestOmnigentSessionLaunch_ExactOptionMatching(t *testing.T) {
+	bTrue := true
+	resp := OmnigentAgentListResponse{
+		Builtins: []OmnigentAgentEntry{
+			{AgentID: "claude-cli", Name: "claude", Harness: "claude-cli-harness", AvailableOnHost: &bTrue},
+			{AgentID: "claude-native", Name: "claude-native-ui", Harness: "claude-native-harness", AvailableOnHost: &bTrue},
+		},
+	}
+	rawAgents, err := json.Marshal(resp)
+	require.NoError(t, err)
+
+	var launchedAgentID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		if payload.Name == "sys_agent_list" {
+			resp := map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": string(rawAgents)},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		} else if payload.Name == "sys_session_create" {
+			launchedAgentID = payload.Arguments["agent_id"].(string)
+			resp := map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": `{"conversation_id": "conv-exact-1"}`},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("OMNIGENT", "1")
+	t.Setenv("OMNIGENT_RELAY_URL", server.URL)
+	t.Setenv("OMNIGENT_RELAY_TOKEN", "test-token")
+
+	r := NewRegistry()
+	r.SetOmnigentConfig(OmnigentLaunchConfig{
+		PromptForHarness: true,
+	})
+	prompter := &testPrompter{
+		response: AskDeveloperResponse{
+			Status:   "answered",
+			Selected: []string{"claude-native-ui (claude-native-harness)"},
+		},
+	}
+	r.SetDeveloperPrompter(prompter)
+	registerOmnigentTools(r)
+
+	launchCall := llm.ToolCall{
+		ID:        "c_exact",
+		Name:      "omnigent_session_launch",
+		Arguments: `{"title": "Fix Prefix", "message": "fix it"}`,
+	}
+	out, err := r.HandleCall(context.Background(), launchCall)
+	require.NoError(t, err)
+	require.Contains(t, out, "conv-exact-1")
+	require.True(t, prompter.called)
+	// Must have chosen claude-native, NOT claude
+	require.Equal(t, "claude-native", launchedAgentID)
+}
