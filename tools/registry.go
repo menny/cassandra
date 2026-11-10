@@ -19,6 +19,7 @@ type Registry struct {
 	verdictListener VerdictChangeListener
 	prompter        DeveloperPrompter
 	t3Config        T3LaunchConfig
+	omnigentConfig  OmnigentLaunchConfig
 }
 
 func NewRegistry() *Registry {
@@ -41,6 +42,10 @@ func (r *Registry) SetDeveloperPrompter(p DeveloperPrompter) {
 
 func (r *Registry) SetT3Config(cfg T3LaunchConfig) {
 	r.t3Config = cfg
+}
+
+func (r *Registry) SetOmnigentConfig(cfg OmnigentLaunchConfig) {
+	r.omnigentConfig = cfg
 }
 
 func (r *Registry) RegisterTool(def llm.ToolDef, handler ToolHandler) {
@@ -108,6 +113,7 @@ func RegisterLocalTools(r *Registry, root, base, head string, ignoredLockFiles [
 	registerEmitReviewerState(r)
 	registerUpdateReviewVerdict(r)
 	registerT3Tools(r)
+	registerOmnigentTools(r)
 	registerGetPRMetadataTool(r, root, metaFile, ignoredLockFiles)
 	registerGetPRDiffTool(r, root, metaFile, ignoredLockFiles)
 	registerGetPRCommentTool(r, root, metaFile)

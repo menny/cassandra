@@ -24,3 +24,12 @@ preferred-model = "gemini-3.8-flash-high"
 # Prompt the developer via ask_developer to choose the harness/model if multiple are available
 prompt-for-harness = true
 
+# Omnigent orchestration settings (applied when running inside Omnigent)
+[omnigent]
+# Priority list of coding agent harnesses to launch for code fixes
+preferred-harnesses = ["antigravity-native-ui", "opencode-native-ui", "claude-native-ui", "codex-native-ui"]
+# Preferred model tier or exact model (leave empty to pick provider's default model)
+preferred-model = "gemini-3.8-flash-high"
+# Prompt the developer via ask_developer to choose the harness/model if multiple are available
+prompt-for-harness = true
+

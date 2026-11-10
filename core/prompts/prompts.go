@@ -78,13 +78,14 @@ type PromptSummary struct {
 //  5. <personal_review_guidelines>     — semi-static, optional
 //  6. <ask_developer_guidelines>       — semi-static, optional
 //  7. <t3_thread_launch_guidelines>    — semi-static, optional (T3 Code sessions only)
-//  8. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
-//  9. <url_fetch_guidelines>           — semi-static, optional
+//  8. <omnigent_session_launch_guidelines> — semi-static, optional (Omnigent sessions only)
+//  9. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
+//  10. <url_fetch_guidelines>           — semi-static, optional
 //
 // Dynamic (Zone 3):
-//  10. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  11. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string, promptForHarness ...bool) (stable, dynamic string, summary PromptSummary, err error) {
+//  11. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  12. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowOmnigentLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string, promptForHarness ...bool) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -167,6 +168,45 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"5. **Referencing the Spawned Thread**:\n"+
 			"   - When presenting the launched thread to the user, link it using markdown: `[Review Fix ...](t3-thread://v1/<threadId>)` using the exact `threadId` returned by `t3_thread_launch`.\n"+
 			"</t3_thread_launch_guidelines>\n", currentModelText, clarificationRule)
+	}
+
+	if allowOmnigentLaunch {
+		currentModelText := ""
+		if currentModel != "" {
+			currentModelText = fmt.Sprintf("Your current active model is `%s`.\n", currentModel)
+		}
+		pForHarness := true
+		if len(promptForHarness) > 0 {
+			pForHarness = promptForHarness[0]
+		}
+		var clarificationRule string
+		if pForHarness && allowAskDeveloper {
+			clarificationRule = "   - **Interactive Clarification with `ask_developer`**: If the user did not specify which harness or model to use, and `ask_developer` is available, ask the user to choose from the enabled coding harnesses discovered via `omnigent_agent_capabilities`.\n"
+		} else {
+			clarificationRule = "   - **Deterministic Selection**: Do NOT prompt the developer to choose a harness. Directly omit or leave `agentId` to allow Cassandra's deterministic orchestrator to select the best available coding harness based on configured priority.\n"
+		}
+		stable += fmt.Sprintf("\n<omnigent_session_launch_guidelines>\n"+
+			"You are running inside an Omnigent session and have access to the `omnigent_session_launch` and `omnigent_agent_capabilities` tools.\n%s\n"+
+			"1. **When to use**:\n"+
+			"   - Use `omnigent_session_launch` when explicitly asked by the user to fix issues or create a fix session/thread.\n"+
+			"   - Proactively offer to spawn a fix session when it is clear the user wants review findings or code issues addressed. Do not spawn it without user confirmation unless explicitly instructed.\n\n"+
+			"2. **Agent Harness and Model Selection Rules**:\n"+
+			"   - **NEVER select Cassandra as the fix agent**: Cassandra is exclusively a read-only code review agent and cannot edit files, run commands, or implement fixes. Its ID ('cassandra') must NEVER be used in `agentId`.\n"+
+			"   - **Target Harness Requirements**: The target must be an active coding agent harness capable of modifying files and running builds/tests (e.g., `antigravity-native-ui`, `opencode-native-ui`, `claude-native-ui`, `codex-native-ui`). Discovered via `omnigent_agent_capabilities`.\n"+
+			"%s"+
+			"   - **Deterministic Fallback**: If the user does not specify an agent or skips clarification, omit or leave `agentId` to allow Cassandra's deterministic orchestrator to select the best available coding harness based on configured priority.\n"+
+			"   - **Model Tier Selection**: Pick an appropriate model tier for the fix complexity if overriding model (e.g. lightweight/fast tier for targeted fixes, high-reasoning for major refactors).\n"+
+			"   - **Placement**: Defaults to \"child\" (nested in the current conversation tree). Can be overridden to \"same_host\" (independent top-level session on the same workspace) if requested by the user.\n\n"+
+			"3. **Spawned Session Message & Context**:\n"+
+			"   - The `message` parameter must contain comprehensive initial instructions for the fixing agent:\n"+
+			"     a) Brief context of the review and files affected.\n"+
+			"     b) The user's goals, directions, and specific items to fix.\n"+
+			"     c) Technical guidelines and constraints necessary to complete the fix accurately.\n\n"+
+			"4. **Session Title**:\n"+
+			"   - The session `title` must strictly follow the format: \"Review Fix [short description]\" (e.g., \"Review Fix Refactor Auth Token Validation\").\n\n"+
+			"5. **Referencing the Spawned Session**:\n"+
+			"   - When presenting the launched session to the user, link it using markdown: `[Review Fix ...](omnigent-session://<conversationId>)` using the exact `conversationId` returned by `omnigent_session_launch`.\n"+
+			"</omnigent_session_launch_guidelines>\n", currentModelText, clarificationRule)
 	}
 
 	// Zone 2: PR comment guidelines (ACP sessions only)

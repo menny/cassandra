@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -277,4 +279,59 @@ esac
 	require.NoError(t, err)
 	require.Contains(t, string(logBytes), "t3_thread_update")
 	require.Contains(t, string(logBytes), ReviewStateApproved)
+}
+
+func TestUpdateReviewVerdict_OmnigentSession(t *testing.T) {
+	renamedTitle := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+
+		if payload.Name == "sys_session_get_info" {
+			resp := map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": `{"title": "⏳ Review Add cool feature"}`},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		} else if payload.Name == "sys_session_rename" {
+			renamedTitle = payload.Arguments["title"].(string)
+			resp := map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": `{"status": "ok"}`},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		}
+	}))
+	defer server.Close()
+
+	t.Setenv("T3_ACP_MCP_NODE", "")
+	t.Setenv("OMNIGENT", "1")
+	t.Setenv("OMNIGENT_RELAY_URL", server.URL)
+	t.Setenv("OMNIGENT_RELAY_TOKEN", "test-token")
+
+	r := NewRegistry()
+	registerUpdateReviewVerdict(r)
+
+	argsBytes, err := json.Marshal(map[string]any{
+		"verdict":   "approved",
+		"rationale": "Author resolved all blockers in Omnigent.",
+	})
+	require.NoError(t, err)
+
+	tc := llm.ToolCall{
+		ID:        "call_omni",
+		Name:      "update_review_verdict",
+		Arguments: string(argsBytes),
+	}
+
+	res, err := r.HandleCall(context.Background(), tc)
+	require.NoError(t, err)
+	require.Contains(t, res, "approved")
+	require.Contains(t, res, ReviewStateApproved)
+	require.Equal(t, "✅ Review Add cool feature", renamedTitle)
 }

@@ -100,6 +100,11 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 			PreferredModel:     cfg.T3.PreferredModel,
 			PromptForHarness:   cfg.T3.PromptForHarness,
 		})
+		registry.SetOmnigentConfig(tools.OmnigentLaunchConfig{
+			PreferredHarnesses: cfg.Omnigent.PreferredHarnesses,
+			PreferredModel:     cfg.Omnigent.PreferredModel,
+			PromptForHarness:   cfg.Omnigent.PromptForHarness,
+		})
 	}
 
 	tools.RegisterLocalTools(
@@ -197,9 +202,13 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 	promptForHarness := true
 	if cfg != nil {
 		currentModel = cfg.Model
-		promptForHarness = cfg.T3.PromptForHarness
+		if tools.IsOmnigentSession() {
+			promptForHarness = cfg.Omnigent.PromptForHarness
+		} else {
+			promptForHarness = cfg.T3.PromptForHarness
+		}
 	}
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), includePRComment, includeURLFetch, currentModel, promptForHarness)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), tools.IsOmnigentSession(), includePRComment, includeURLFetch, currentModel, promptForHarness)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -283,9 +292,13 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	promptForHarness := true
 	if r.Config != nil {
 		currentModel = r.Config.Model
-		promptForHarness = r.Config.T3.PromptForHarness
+		if tools.IsOmnigentSession() {
+			promptForHarness = r.Config.Omnigent.PromptForHarness
+		} else {
+			promptForHarness = r.Config.T3.PromptForHarness
+		}
 	}
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), isACPSession(r.Config), allowURLFetch(r.Config), currentModel, promptForHarness)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), tools.IsOmnigentSession(), isACPSession(r.Config), allowURLFetch(r.Config), currentModel, promptForHarness)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}

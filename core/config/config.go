@@ -51,10 +51,18 @@ type Config struct {
 	WaitForMessage               bool           `mapstructure:"-"`
 	CassandraConfigFolder        string         `mapstructure:"cassandra-config-folder"`
 	T3                           T3Config       `mapstructure:"t3"`
+	Omnigent                     OmnigentConfig `mapstructure:"omnigent"`
 }
 
 // T3Config specifies configuration for T3 Code orchestration sessions.
 type T3Config struct {
+	PreferredHarnesses []string `mapstructure:"preferred-harnesses"`
+	PreferredModel     string   `mapstructure:"preferred-model"`
+	PromptForHarness   bool     `mapstructure:"prompt-for-harness"`
+}
+
+// OmnigentConfig specifies configuration for Omnigent orchestration sessions.
+type OmnigentConfig struct {
 	PreferredHarnesses []string `mapstructure:"preferred-harnesses"`
 	PreferredModel     string   `mapstructure:"preferred-model"`
 	PromptForHarness   bool     `mapstructure:"prompt-for-harness"`
@@ -78,6 +86,10 @@ func NewDefaultConfig() *Config {
 		CassandraConfigFolder: "~/.cassandra",
 		T3: T3Config{
 			PreferredHarnesses: []string{"antigravity", "opencode", "claudeAgent", "codex"},
+			PromptForHarness:   true,
+		},
+		Omnigent: OmnigentConfig{
+			PreferredHarnesses: []string{"antigravity-native-ui", "opencode-native-ui", "claude-native-ui", "codex-native-ui", "cursor-native-ui", "pi-native-ui"},
 			PromptForHarness:   true,
 		},
 	}
