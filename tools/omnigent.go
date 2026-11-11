@@ -291,10 +291,19 @@ type OmnigentAgentChoice struct {
 	IsPreferred bool   `json:"isPreferred"`
 }
 
+func isCassandraAgent(a OmnigentAgentEntry) bool {
+	idLower := strings.ToLower(a.AgentID)
+	nameLower := strings.ToLower(a.Name)
+	harnessLower := strings.ToLower(a.Harness)
+	return strings.Contains(idLower, "cassandra") ||
+		strings.Contains(nameLower, "cassandra") ||
+		strings.Contains(harnessLower, "cassandra")
+}
+
 func maskCassandraInAgentSlice(agents []OmnigentAgentEntry) []OmnigentAgentEntry {
 	var filtered []OmnigentAgentEntry
 	for _, a := range agents {
-		if strings.EqualFold(a.Name, "cassandra") || strings.EqualFold(a.Harness, "cassandra") || strings.HasPrefix(strings.ToLower(a.Harness), "acp:cassandra") {
+		if isCassandraAgent(a) {
 			continue
 		}
 		filtered = append(filtered, a)
@@ -351,9 +360,7 @@ func allOmnigentAgents(resp *OmnigentAgentListResponse) []OmnigentAgentEntry {
 func FilterEnabledOmnigentAgents(agents []OmnigentAgentEntry) []OmnigentAgentEntry {
 	var enabled []OmnigentAgentEntry
 	for _, a := range agents {
-		lowerName := strings.ToLower(a.Name)
-		lowerHarness := strings.ToLower(a.Harness)
-		if strings.Contains(lowerName, "cassandra") || strings.Contains(lowerHarness, "cassandra") {
+		if isCassandraAgent(a) {
 			continue
 		}
 		if a.AvailableOnHost != nil && !*a.AvailableOnHost {

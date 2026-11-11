@@ -113,6 +113,8 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("cassandra-config-folder", "~/.cassandra")
 	v.SetDefault("t3.preferred-harnesses", []string{"antigravity", "opencode", "claudeAgent", "codex"})
 	v.SetDefault("t3.prompt-for-harness", true)
+	v.SetDefault("omnigent.preferred-harnesses", []string{"antigravity-native-ui", "opencode-native-ui", "claude-native-ui", "codex-native-ui", "cursor-native-ui", "pi-native-ui"})
+	v.SetDefault("omnigent.prompt-for-harness", true)
 
 	if configFile != "" {
 		v.SetConfigFile(configFile)

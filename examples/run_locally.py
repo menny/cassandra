@@ -76,11 +76,12 @@ def absolutize_config_paths(data: dict, target_dir: Path, cassandra_root: Path) 
 
 
 def serialize_flat_toml(data: dict) -> str:
-    """Serializes a flat dictionary back into TOML format."""
+    """Serializes a dictionary back into TOML format, supporting nested tables."""
     lines = []
+    nested = {}
     for k, v in data.items():
         if isinstance(v, dict):
-            raise ValueError(f"Nested TOML tables are not supported for configuration key '{k}'")
+            nested[k] = v
         elif isinstance(v, list):
             lines.append(f"{k} = [")
             for item in v:
@@ -92,6 +93,21 @@ def serialize_flat_toml(data: dict) -> str:
             lines.append(f"{k} = {v}")
         else:
             lines.append(f'{k} = "{v}"')
+
+    for section, table in nested.items():
+        lines.append(f"\n[{section}]")
+        for k, v in table.items():
+            if isinstance(v, list):
+                lines.append(f"{k} = [")
+                for item in v:
+                    lines.append(f'    "{item}",')
+                lines.append("]")
+            elif isinstance(v, bool):
+                lines.append(f"{k} = {'true' if v else 'false'}")
+            elif isinstance(v, (int, float)):
+                lines.append(f"{k} = {v}")
+            else:
+                lines.append(f'{k} = "{v}"')
     return "\n".join(lines)
 
 
@@ -113,6 +129,10 @@ def merge_tomls(base_path: Path, override_path: Path) -> dict:
             if isinstance(merged[k], list) and isinstance(v, list):
                 # Join lists and deduplicate preserving order
                 merged[k] = list(dict.fromkeys(merged[k] + v))
+            elif isinstance(merged[k], dict) and isinstance(v, dict):
+                sub = dict(merged[k])
+                sub.update(v)
+                merged[k] = sub
             else:
                 merged[k] = v
         else:

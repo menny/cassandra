@@ -210,4 +210,34 @@ prompt-for-harness = false
 			t.Errorf("expected prompt-for-harness to be false")
 		}
 	})
+
+	t.Run("minimal toml preserves omnigent and t3 defaults", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if len(cfg.Omnigent.PreferredHarnesses) == 0 || cfg.Omnigent.PreferredHarnesses[0] != "antigravity-native-ui" {
+			t.Errorf("expected default Omnigent PreferredHarnesses starting with antigravity-native-ui, got %v", cfg.Omnigent.PreferredHarnesses)
+		}
+		if !cfg.Omnigent.PromptForHarness {
+			t.Errorf("expected default Omnigent PromptForHarness to be true")
+		}
+		if len(cfg.T3.PreferredHarnesses) == 0 || cfg.T3.PreferredHarnesses[0] != "antigravity" {
+			t.Errorf("expected default T3 PreferredHarnesses, got %v", cfg.T3.PreferredHarnesses)
+		}
+		if !cfg.T3.PromptForHarness {
+			t.Errorf("expected default T3 PromptForHarness to be true")
+		}
+	})
 }
