@@ -601,6 +601,36 @@ esac
 		require.Contains(t, string(launchLog), `"instanceId":"opencode"`)
 	})
 
+	t.Run("prompts developer and correctly matches exact formatted choice", func(t *testing.T) {
+		_ = os.Remove(filepath.Join(tmpDir, "launch.log"))
+		r := NewRegistry()
+		r.SetT3Config(T3LaunchConfig{
+			PromptForHarness: true,
+		})
+		prompter := &testPrompter{
+			response: AskDeveloperResponse{
+				Status:   "answered",
+				Selected: []string{"Antigravity — Gemini 3.8 Flash High"},
+			},
+		}
+		r.SetDeveloperPrompter(prompter)
+		registerT3Tools(r)
+
+		tc := llm.ToolCall{
+			ID:        "call_fix_exact",
+			Name:      "t3_thread_launch",
+			Arguments: `{"title": "Review Fix", "message": "fix it"}`,
+		}
+
+		res, err := r.HandleCall(context.Background(), tc)
+		require.NoError(t, err)
+		require.Contains(t, res, "spawned-fix-thread-789")
+
+		launchLog, err := os.ReadFile(filepath.Join(tmpDir, "launch.log"))
+		require.NoError(t, err)
+		require.Contains(t, string(launchLog), `"instanceId":"antigravity"`)
+	})
+
 	t.Run("handles capabilities query failure", func(t *testing.T) {
 		failScript := filepath.Join(tmpDir, "mock_fail_node.sh")
 		fContent := `#!/bin/sh

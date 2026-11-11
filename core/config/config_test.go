@@ -168,4 +168,76 @@ prompt-for-harness = false
 			t.Errorf("expected prompt-for-harness to be false")
 		}
 	})
+
+	t.Run("default omnigent config", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		if len(cfg.Omnigent.PreferredHarnesses) == 0 || cfg.Omnigent.PreferredHarnesses[0] != "antigravity-native-ui" {
+			t.Errorf("expected default PreferredHarnesses starting with antigravity-native-ui, got %v", cfg.Omnigent.PreferredHarnesses)
+		}
+		if !cfg.Omnigent.PromptForHarness {
+			t.Errorf("expected default PromptForHarness to be true")
+		}
+	})
+
+	t.Run("unmarshal omnigent config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+
+[omnigent]
+preferred-harnesses = ["opencode-native-ui", "claude-native-ui"]
+preferred-model = "gemini-3.8-flash-high"
+prompt-for-harness = false
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if len(cfg.Omnigent.PreferredHarnesses) != 2 || cfg.Omnigent.PreferredHarnesses[0] != "opencode-native-ui" || cfg.Omnigent.PreferredHarnesses[1] != "claude-native-ui" {
+			t.Errorf("unexpected preferred harnesses: %v", cfg.Omnigent.PreferredHarnesses)
+		}
+		if cfg.Omnigent.PreferredModel != "gemini-3.8-flash-high" {
+			t.Errorf("expected preferred-model to be gemini-3.8-flash-high, got %q", cfg.Omnigent.PreferredModel)
+		}
+		if cfg.Omnigent.PromptForHarness {
+			t.Errorf("expected prompt-for-harness to be false")
+		}
+	})
+
+	t.Run("minimal toml preserves omnigent and t3 defaults", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "cassandra.toml")
+		content := `
+provider = "google"
+model = "gemini-3.1-pro-preview"
+`
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		cfg, err := Load(configPath)
+		if err != nil {
+			t.Fatalf("failed to load config: %v", err)
+		}
+
+		if len(cfg.Omnigent.PreferredHarnesses) == 0 || cfg.Omnigent.PreferredHarnesses[0] != "antigravity-native-ui" {
+			t.Errorf("expected default Omnigent PreferredHarnesses starting with antigravity-native-ui, got %v", cfg.Omnigent.PreferredHarnesses)
+		}
+		if !cfg.Omnigent.PromptForHarness {
+			t.Errorf("expected default Omnigent PromptForHarness to be true")
+		}
+		if len(cfg.T3.PreferredHarnesses) == 0 || cfg.T3.PreferredHarnesses[0] != "antigravity" {
+			t.Errorf("expected default T3 PreferredHarnesses, got %v", cfg.T3.PreferredHarnesses)
+		}
+		if !cfg.T3.PromptForHarness {
+			t.Errorf("expected default T3 PromptForHarness to be true")
+		}
+	})
 }

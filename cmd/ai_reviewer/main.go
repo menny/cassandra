@@ -118,6 +118,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
 	v.SetDefault("cassandra-config-folder", "~/.cassandra")
+	v.SetDefault("t3.preferred-harnesses", []string{"antigravity", "opencode", "claudeAgent", "codex"})
+	v.SetDefault("t3.prompt-for-harness", true)
+	v.SetDefault("omnigent.preferred-harnesses", []string{"antigravity-native-ui", "opencode-native-ui", "claude-native-ui", "codex-native-ui", "cursor-native-ui", "pi-native-ui"})
+	v.SetDefault("omnigent.prompt-for-harness", true)
 
 	fs.VisitAll(func(f *flag.Flag) {
 		if f.Name == "acp" || f.Name == "wait-for-message" {
@@ -369,11 +373,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	if len(changedFiles) == 0 {
-		if tools.IsT3Session() {
-			if err := tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStateElse); err != nil {
-				stderr.Printf("Warning: failed to update thread title: %v\n", err)
-			}
-		}
+		updateSessionOrThreadTitlePrefix(ctx, tools.ReviewStateElse, stderr)
 		reporter.ReportNoChanges()
 		if cfg.InteractivePostReview {
 			if cfg.Render != "acp" {
@@ -420,17 +420,11 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		requestText = formatMetadata(*metadata) + "\n\n" + requestText
 	}
 
-	if tools.IsT3Session() {
-		if err := tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStatePending); err != nil {
-			stderr.Printf("Warning: failed to update thread title: %v\n", err)
-		}
-	}
+	updateSessionOrThreadTitlePrefix(ctx, tools.ReviewStatePending, stderr)
 
 	result, err := reviewer.Run(sessionCtx, changedFiles, requestText)
 	if err != nil {
-		if tools.IsT3Session() {
-			_ = tools.UpdateThreadTitlePrefix(ctx, tools.ReviewStateElse)
-		}
+		updateSessionOrThreadTitlePrefix(ctx, tools.ReviewStateElse, stderr)
 		if acpMode && sessionCtx.Err() != nil && ctx.Err() == nil {
 			return nil
 		}
@@ -455,18 +449,14 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	}
 
 	verdict := reviewer.GetVerdict()
-	if tools.IsT3Session() {
-		emoji := tools.ReviewStateElse
-		switch verdict {
-		case core.VerdictApproved:
-			emoji = tools.ReviewStateApproved
-		case core.VerdictRejected:
-			emoji = tools.ReviewStateRejected
-		}
-		if err := tools.UpdateThreadTitlePrefix(ctx, emoji); err != nil {
-			stderr.Printf("Warning: failed to update thread title: %v\n", err)
-		}
+	emoji := tools.ReviewStateElse
+	switch verdict {
+	case core.VerdictApproved:
+		emoji = tools.ReviewStateApproved
+	case core.VerdictRejected:
+		emoji = tools.ReviewStateRejected
 	}
+	updateSessionOrThreadTitlePrefix(ctx, emoji, stderr)
 
 	if cfg.ReviewOutputFile != "" {
 		if err := util.WriteFileWithDirs(cfg.ReviewOutputFile, []byte(result)); err != nil {
@@ -502,9 +492,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 			}
 			if verdict != reviewer.GetVerdict() {
 				reviewer.SetVerdict(verdict)
-				if tools.IsT3Session() {
-					_ = tools.UpdateThreadTitlePrefix(ctx, emoji)
-				}
+				updateSessionOrThreadTitlePrefix(ctx, emoji, stderr)
 			}
 		}
 
@@ -546,6 +534,8 @@ func formatMetadata(metadata core.PRMetadata) string {
 		fmt.Fprintf(&sb, "- **PR Number**: #%d\n", metadata.PRNumber)
 		if tools.IsT3Session() {
 			sb.WriteString("- **PR Linking**: This pull request is already registered and linked to this thread.\n")
+		} else if tools.IsOmnigentSession() {
+			sb.WriteString("- **PR Linking**: This pull request is tracked within the Omnigent session context.\n")
 		}
 	}
 	fmt.Fprintf(&sb, "- **Author**: %s\n", metadata.Author)
@@ -648,4 +638,16 @@ func formatOmittedDiffNotice(reason string, changedFiles []string, fileSizes map
 	}
 	sb.WriteString("\nUse the `get_file_diff` tool to fetch diffs for specific files of interest, or `read_file` to inspect complete file contents.")
 	return sb.String()
+}
+
+func updateSessionOrThreadTitlePrefix(ctx context.Context, emoji string, stderr *log.Logger) {
+	if tools.IsT3Session() {
+		if err := tools.UpdateThreadTitlePrefix(ctx, emoji); err != nil {
+			stderr.Printf("Warning: failed to update thread title: %v\n", err)
+		}
+	} else if tools.IsOmnigentSession() {
+		if err := tools.UpdateSessionTitlePrefix(ctx, emoji); err != nil {
+			stderr.Printf("Warning: failed to update session title: %v\n", err)
+		}
+	}
 }

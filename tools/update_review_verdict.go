@@ -102,6 +102,11 @@ func registerUpdateReviewVerdict(r *Registry) {
 				// Non-fatal: title update failure shouldn't abort the tool execution.
 				return fmt.Sprintf("Updated verdict to %q (%s), but failed to update thread title prefix: %v", normalized, emoji, err), nil
 			}
+		} else if IsOmnigentSession() {
+			if err := UpdateSessionTitlePrefix(ctx, emoji); err != nil {
+				// Non-fatal: title update failure shouldn't abort the tool execution.
+				return fmt.Sprintf("Updated verdict to %q (%s), but failed to update session title prefix: %v", normalized, emoji, err), nil
+			}
 		}
 
 		return fmt.Sprintf("Successfully updated review verdict to %q (%s). Rationale: %s", normalized, emoji, args.Rationale), nil
