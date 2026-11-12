@@ -1,10 +1,16 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -285,4 +291,119 @@ func TestParseAnthropicResponse_MultipleToolCalls(t *testing.T) {
 	require.Len(t, resp.ToolCalls, 2)
 	assert.Equal(t, "tc1", resp.ToolCalls[0].ID)
 	assert.Equal(t, "tc2", resp.ToolCalls[1].ID)
+}
+
+// ── Bedrock vs Anthropic client construction ──────────────────────────────────
+
+const stubMessagesResponse = `{"id":"msg_1","type":"message","role":"assistant","model":"m",` +
+	`"content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn",` +
+	`"usage":{"input_tokens":1,"output_tokens":1}}`
+
+type capturedRequest struct {
+	path    string
+	headers http.Header
+	body    map[string]any
+}
+
+// stubMessagesServer records the last request it receives and replies with a
+// minimal successful Messages response.
+func stubMessagesServer(t *testing.T) (*httptest.Server, *capturedRequest) {
+	t.Helper()
+	captured := &capturedRequest{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		captured.path = r.URL.EscapedPath()
+		captured.headers = r.Header.Clone()
+		require.NoError(t, json.Unmarshal(raw, &captured.body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(stubMessagesResponse))
+	}))
+	t.Cleanup(server.Close)
+	return server, captured
+}
+
+// isolateAWSEnv points the AWS default chain at fake static credentials and
+// blocks every other source (shared files, IMDS, bearer token).
+func isolateAWSEnv(t *testing.T, region string) {
+	t.Helper()
+	missing := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("AWS_CONFIG_FILE", missing)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", missing)
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "secret")
+	t.Setenv("AWS_SESSION_TOKEN", "")
+	t.Setenv("AWS_REGION", region)
+	t.Setenv("AWS_DEFAULT_REGION", region)
+}
+
+func TestNewBedrock_RoutesToInvokeEndpoint(t *testing.T) {
+	tests := []struct {
+		name     string
+		model    string
+		wantPath string
+	}{
+		{"inference profile", "us.anthropic.claude-opus-5-5", "/model/us.anthropic.claude-opus-5-5/invoke"},
+		{"id with version suffix", "us.anthropic.claude-haiku-4-5-20251001-v1:0", "/model/us.anthropic.claude-haiku-4-5-20251001-v1%3A0/invoke"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateAWSEnv(t, "us-east-1")
+			server, captured := stubMessagesServer(t)
+
+			p, err := NewBedrock(context.Background(), tt.model, nil, option.WithBaseURL(server.URL))
+			require.NoError(t, err)
+
+			resp, err := p.GenerateContent(context.Background(), []llm.Message{{Role: llm.RoleUser, Text: "hello"}}, nil, 256)
+			require.NoError(t, err)
+			assert.Equal(t, "hi", resp.Text)
+
+			assert.Equal(t, tt.wantPath, captured.path)
+			assert.Equal(t, "bedrock-2023-05-31", captured.body["anthropic_version"])
+			assert.NotContains(t, captured.body, "model", "Bedrock takes the model from the URL, not the body")
+			assert.NotContains(t, captured.body, "stream")
+			assert.EqualValues(t, 256, captured.body["max_tokens"])
+			assert.Contains(t, captured.headers.Get("Authorization"), "AWS4-HMAC-SHA256", "request must be SigV4 signed")
+			assert.Contains(t, captured.headers.Get("Authorization"), "/us-east-1/bedrock/")
+			assert.Empty(t, captured.headers.Get("X-Api-Key"), "no Anthropic API key should be sent to Bedrock")
+		})
+	}
+}
+
+func TestNewBedrock_BearerTokenFromEnv(t *testing.T) {
+	isolateAWSEnv(t, "us-east-1")
+	t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "tok-123")
+	server, captured := stubMessagesServer(t)
+
+	p, err := NewBedrock(context.Background(), "us.anthropic.claude-opus-5-5", nil, option.WithBaseURL(server.URL))
+	require.NoError(t, err)
+	_, err = p.GenerateContent(context.Background(), []llm.Message{{Role: llm.RoleUser, Text: "hello"}}, nil, 64)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Bearer tok-123", captured.headers.Get("Authorization"))
+}
+
+func TestNewBedrock_FailsWithoutRegion(t *testing.T) {
+	isolateAWSEnv(t, "")
+
+	_, err := NewBedrock(context.Background(), "us.anthropic.claude-opus-5-5", nil)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "AWS_REGION")
+}
+
+func TestNew_UsesAnthropicEndpointWithAPIKey(t *testing.T) {
+	server, captured := stubMessagesServer(t)
+
+	p := New("sk-test", "claude-opus-5-5", nil, option.WithBaseURL(server.URL))
+	_, err := p.GenerateContent(context.Background(), []llm.Message{{Role: llm.RoleUser, Text: "hello"}}, nil, 64)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/v1/messages", captured.path)
+	assert.Equal(t, "sk-test", captured.headers.Get("X-Api-Key"))
+	assert.Equal(t, "claude-opus-5-5", captured.body["model"])
+	assert.NotContains(t, captured.body, "anthropic_version")
 }

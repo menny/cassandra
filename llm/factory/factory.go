@@ -19,10 +19,17 @@ import (
 type Provider string
 
 const (
-	ProviderAnthropic Provider = "anthropic"
-	ProviderGoogle    Provider = "google"
-	ProviderOpenAI    Provider = "openai"
+	ProviderAnthropic        Provider = "anthropic"
+	ProviderAnthropicBedrock Provider = "anthropic-bedrock"
+	ProviderGoogle           Provider = "google"
+	ProviderOpenAI           Provider = "openai"
 )
+
+// RequiresAPIKey reports whether the provider authenticates with a
+// --provider-api-key. Bedrock uses AWS credentials from the environment.
+func RequiresAPIKey(provider string) bool {
+	return Provider(provider) != ProviderAnthropicBedrock
+}
 
 // providerFactory constructs a provider-specific llm.Model. Implementations
 // may use ctx (e.g. to dial eagerly) or ignore it. baseURL overrides the
@@ -40,6 +47,15 @@ var providers = map[Provider]providerFactory{
 		// Anthropic client is constructed synchronously; ctx is unused at
 		// construction time (the SDK dials lazily per request).
 		return anthropic.New(apiKey, modelName, options), nil
+	},
+	ProviderAnthropicBedrock: func(ctx context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error) {
+		if baseURL != "" {
+			fmt.Fprintf(os.Stderr, "Warning: baseURL %q is ignored by the anthropic-bedrock provider\n", baseURL)
+		}
+		if apiKey != "" {
+			fmt.Fprintln(os.Stderr, "Warning: the API key is ignored by the anthropic-bedrock provider; it uses AWS credentials")
+		}
+		return anthropic.NewBedrock(ctx, modelName, options)
 	},
 	ProviderGoogle: func(ctx context.Context, apiKey, modelName, baseURL string, options map[string]any) (llm.Model, error) {
 		if baseURL != "" {

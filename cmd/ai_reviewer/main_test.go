@@ -302,6 +302,20 @@ func TestRun_ConfigDiscovery(t *testing.T) {
 		require.Contains(t, err.Error(), "--provider-api-key")
 	})
 
+	t.Run("anthropic-bedrock does not require a provider API key", func(t *testing.T) {
+		cwd, err := os.Getwd()
+		require.NoError(t, err)
+		defer func() { _ = os.Chdir(cwd) }()
+
+		t.Setenv("BUILD_WORKSPACE_DIRECTORY", t.TempDir())
+
+		err = run(ctx, []string{"--provider", "anthropic-bedrock"}, stderr)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "missing required arguments")
+		require.Contains(t, err.Error(), "--model")
+		require.NotContains(t, err.Error(), "--provider-api-key")
+	})
+
 	t.Run("metadata-json resolves base branch before reviewer initialization", func(t *testing.T) {
 		cwd, err := os.Getwd()
 		require.NoError(t, err)

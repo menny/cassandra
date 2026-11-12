@@ -9,6 +9,7 @@ Configuration:
     - Automatically resolves the required API key based on the `provider` setting in TOML:
         - provider = "google"    -> GEMINI_API_KEY or GOOGLE_API_KEY
         - provider = "anthropic" -> ANTHROPIC_API_KEY
+        - provider = "anthropic-bedrock" -> no API key; uses AWS credentials and AWS_REGION
         - provider = "openai"    -> OPENAI_API_KEY
         - custom/fallback        -> LLM_API_KEY
 
@@ -31,6 +32,9 @@ PROVIDER_ENV_VARS = {
     "anthropic": ["ANTHROPIC_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
 }
+
+# Providers that authenticate with ambient credentials instead of an API key.
+KEYLESS_PROVIDERS = {"anthropic-bedrock"}
 
 # Config keys holding a single file path / dir that may be repo-relative.
 PATH_KEYS = (
@@ -279,6 +283,9 @@ def resolve_api_key(
     provider: str, remaining_args: list[str], api_key_env: str | None = None
 ) -> str | None:
     """Resolves the API key for the given provider from environment variables."""
+    if provider.lower() in KEYLESS_PROVIDERS:
+        return None
+
     # Check if --provider-api-key was passed directly in remaining args (e.g. --provider-api-key KEY or --provider-api-key=KEY)
     if any(arg.startswith("--provider-api-key") for arg in remaining_args):
         return None
