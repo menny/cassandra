@@ -9,8 +9,10 @@ go_library(
         "//llm",
         "//llm/internal/util",
         "@com_github_anthropics_anthropic_sdk_go//:anthropic-sdk-go",
+        "@com_github_anthropics_anthropic_sdk_go//bedrock",
         "@com_github_anthropics_anthropic_sdk_go//option",
         "@com_github_anthropics_anthropic_sdk_go//packages/param",
+        "@com_github_aws_aws_sdk_go_v2_config//:config",
     ],
 )
 
@@ -21,6 +23,7 @@ go_test(
     deps = [
         "//llm",
         "@com_github_anthropics_anthropic_sdk_go//:anthropic-sdk-go",
+        "@com_github_anthropics_anthropic_sdk_go//option",
         "@com_github_stretchr_testify//assert",
         "@com_github_stretchr_testify//require",
     ],

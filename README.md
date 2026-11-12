@@ -56,9 +56,9 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--cwd` | Working directory | |
 | `--base` | Base commit/branch for diff | `main` |
 | `--head` | Head commit/branch for diff | `HEAD` |
-| `--provider` | LLM provider to use (`google`, `anthropic`, `openai`) | |
+| `--provider` | LLM provider to use (`google`, `anthropic`, `anthropic-bedrock`, `openai`) | |
 | `--model` | LLM provider's specific model ID | |
-| `--provider-api-key` | API key for the selected provider | |
+| `--provider-api-key` | API key for the selected provider (not used by `anthropic-bedrock`) | |
 | `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | |
 | `--config` | Path to a configuration file (toml) | `cassandra.toml` |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` |
@@ -210,6 +210,15 @@ For a full list of available models and their IDs, refer to the official documen
 - **Google Gemini**: [Gemini API Model Documentation](https://ai.google.dev/gemini-api/docs/models/gemini)
 - **Anthropic Claude**: [Anthropic Claude Model Documentation](https://docs.anthropic.com/en/docs/about-claude/models)
 - **OpenAI**: [OpenAI Models Documentation](https://platform.openai.com/docs/models)
+
+### Claude on Amazon Bedrock
+
+`--provider anthropic-bedrock` runs the same Claude provider against Amazon Bedrock's `bedrock-runtime` endpoint.
+
+- `--model` is passed through verbatim, so use a Bedrock model or inference profile ID (for example `us.anthropic.claude-opus-5-5`), not an Anthropic API model name. The same applies to `--pre-review-model` and `--extraction-model`.
+- No `--provider-api-key` is needed. Credentials come from the default AWS credential chain, or from `AWS_BEARER_TOKEN_BEDROCK` when set.
+- The region comes from `AWS_REGION` / `AWS_DEFAULT_REGION` or your shared AWS config, and startup fails if none is set.
+- `--provider-url` is ignored.
 
 ## GitHub Actions Integration
 

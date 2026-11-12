@@ -21,6 +21,7 @@ import (
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/core/prompts"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/llm/factory"
 	"github.com/menny/cassandra/tools"
 	"github.com/menny/cassandra/util"
 )
@@ -76,9 +77,9 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.CassandraConfigFolder, "cassandra-config-folder", "~/.cassandra", "Path to cassandra configuration folder for session persistence (empty string disables persistence)")
 	fs.StringVar(&cfg.CassandraConfigFolder, "cassandraConfigFolder", "~/.cassandra", "Alias for --cassandra-config-folder")
 
-	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219)")
-	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, openai)")
-	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required)")
+	fs.StringVar(&cfg.Model, "model", "", "LLM provider's model id (e.g. gemini-3-flash-preview, claude-3-7-sonnet-20250219; for anthropic-bedrock, a Bedrock model or inference profile id such as us.anthropic.claude-opus-5-5)")
+	fs.StringVar(&cfg.Provider, "provider", "", "LLM provider to use (google, anthropic, anthropic-bedrock, openai)")
+	fs.StringVar(&cfg.ProviderAPIKey, "provider-api-key", "", "API key for the selected provider (required, except for anthropic-bedrock, which uses AWS credentials and AWS_REGION)")
 	fs.StringVar(&cfg.ProviderURL, "provider-url", "", "Optional API endpoint URL override (e.g. for OpenAI-compatible providers like Ollama)")
 	fs.StringVar(&cfg.ProviderOptionsFile, "provider-options-file", "", "Path to a JSON file containing provider-specific options")
 	fs.StringVar(&cfg.Render, "render", "raw", "Output render format: 'raw' (default), 'markdown', or 'tui'")
@@ -201,7 +202,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	if cfg.Model == "" {
 		missing = append(missing, "--model")
 	}
-	if cfg.ProviderAPIKey == "" {
+	if cfg.ProviderAPIKey == "" && factory.RequiresAPIKey(cfg.Provider) {
 		missing = append(missing, "--provider-api-key")
 	}
 

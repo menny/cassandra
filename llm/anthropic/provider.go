@@ -4,11 +4,14 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/bedrock"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
+	"github.com/aws/aws-sdk-go-v2/config"
 
 	"github.com/menny/cassandra/llm"
 	"github.com/menny/cassandra/llm/internal/util"
@@ -35,8 +38,33 @@ type Provider struct {
 // support model-specific tuning via the configuration file.
 func New(apiKey, modelName string, options map[string]any, opts ...option.RequestOption) *Provider {
 	allOpts := append([]option.RequestOption{option.WithAPIKey(apiKey)}, opts...)
+	return newProvider(modelName, options, allOpts)
+}
+
+// NewBedrock creates a Provider that reaches Claude through Amazon Bedrock's
+// bedrock-runtime endpoint instead of the Anthropic API. Everything past client
+// construction is shared with New.
+//
+// modelName is a Bedrock model ID or inference profile ID (for example
+// "us.anthropic.claude-opus-5-5"); it is passed through verbatim.
+// Credentials come from the default AWS chain, or AWS_BEARER_TOKEN_BEDROCK
+// when set. The region comes from AWS_REGION / AWS_DEFAULT_REGION or the
+// shared AWS config, and the call fails if none resolves.
+func NewBedrock(ctx context.Context, modelName string, options map[string]any, opts ...option.RequestOption) (*Provider, error) {
+	awsCfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("anthropic-bedrock: loading AWS config: %w", err)
+	}
+	if awsCfg.Region == "" {
+		return nil, errors.New("anthropic-bedrock: no AWS region resolved; set AWS_REGION")
+	}
+	allOpts := append([]option.RequestOption{bedrock.WithConfig(awsCfg)}, opts...)
+	return newProvider(modelName, options, allOpts), nil
+}
+
+func newProvider(modelName string, options map[string]any, clientOpts []option.RequestOption) *Provider {
 	return &Provider{
-		client:    anthropicsdk.NewClient(allOpts...),
+		client:    anthropicsdk.NewClient(clientOpts...),
 		modelName: modelName,
 		options:   options,
 	}

@@ -10,6 +10,7 @@ go_library(
         "//core/config",
         "//core/prompts",
         "//llm",
+        "//llm/factory",
         "//tools",
         "//util",
         "@com_github_google_uuid//:uuid",
