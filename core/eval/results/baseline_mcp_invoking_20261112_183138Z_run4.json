@@ -1,0 +1,68 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric by identifying that `ExecuteAsync` is not a valid method on `*db.DB`. It accurately referenced the `lib/db` package API (identifying that only `Execute` is available) and provided clear, actionable recommendations.",
+      "findings": [
+        "Correctly identified that `ExecuteAsync` does not exist on `*db.DB` and would cause a compilation failure.",
+        "Verified the package definition in `lib/db` and provided the actual available method signature `func (d *DB) Execute(query string) error`.",
+        "Provided clear and constructive suggestions for fixing the issue."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9665,
+        "output": 287,
+        "thinking": 768,
+        "cached": 5251,
+        "total_input": 14916,
+        "total_output": 1055
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 4,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "glob_files": 1,
+          "godoc_package": 1,
+          "godoc_symbol": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The rubric explicitly required that the agent MUST fetch the specified URL (https://ai.google.dev/api/generate-content#v1beta.models.generateContent) and verify/confirm API usage against the documentation. The reviewer failed to fetch the URL, noting that the fetch tool was unavailable, and instead merely parroted the comment already written in the code. Because the core requirement of the rubric was not met, the review cannot receive a passing grade.",
+      "findings": [
+        "Failed to fetch the required external documentation URL specified in the rubric.",
+        "Correctly flagged the unresolved BUG comment present directly in the code diff.",
+        "Provided sensible general feedback regarding the stub implementation in main()."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9787,
+        "output": 532,
+        "thinking": 1723,
+        "cached": 5332,
+        "total_input": 15119,
+        "total_output": 2255
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "wishlist_tool": 1
+        }
+      }
+    }
+  }
+]

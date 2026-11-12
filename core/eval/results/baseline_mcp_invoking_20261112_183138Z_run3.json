@@ -1,0 +1,70 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met the rubric by identifying that `ExecuteAsync` is not a valid method on `*db.DB` in `lib/db`. It also accurately verified the existing methods in `lib/db` (`Execute`), explained that this causes a compilation error, and provided clear, actionable recommendations.",
+      "findings": [
+        "Correctly identified that `ExecuteAsync` does not exist on `*db.DB`.",
+        "Verified the package interface to confirm only `Execute` exists.",
+        "Provided actionable suggestions and noted the placeholder comment."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11763,
+        "output": 401,
+        "thinking": 172,
+        "cached": 11049,
+        "total_input": 22812,
+        "total_output": 573
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 7,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "godoc_package": 1,
+          "godoc_symbol": 1,
+          "read_file": 2
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The rubric strictly required the reviewer to fetch the documentation URL (https://ai.google.dev/api/generate-content#v1beta.models.generateContent) and verify/confirm API usage or discrepancies based on the official documentation. The review instead merely parroted the in-line comment (`// BUG: The user is assuming...`) and critiqued the file for being an incomplete stub, failing to demonstrate verification against the external API documentation.",
+      "findings": [
+        "Failed to fetch or reference details directly verified from the required documentation URL.",
+        "Merely restated the inline comment regarding the endpoint discrepancy rather than independently validating it against the documentation.",
+        "Accurately noted that the code is an incomplete stub with an unresolved bug comment."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 15249,
+        "output": 465,
+        "thinking": 658,
+        "cached": 0,
+        "total_input": 15249,
+        "total_output": 1123
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 3,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "read_file": 1,
+          "wishlist_tool": 1
+        }
+      }
+    }
+  }
+]

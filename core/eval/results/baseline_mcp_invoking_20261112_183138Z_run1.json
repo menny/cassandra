@@ -1,0 +1,69 @@
+[
+  {
+    "case_id": "library-godoc-verification",
+    "case_name": "Library API Verification",
+    "subject_result": {
+      "score": 5,
+      "rationale": "The review perfectly met all rubric requirements. It explicitly verified against lib/db/db.go that `ExecuteAsync` does not exist on `*db.DB`, cited the exact existing method (`func (d *DB) Execute(query string) error`), and provided an accurate, actionable fix.",
+      "findings": [
+        "Accurately identified that ExecuteAsync does not exist on *db.DB and causes a compilation error.",
+        "Verified the issue against lib/db/db.go and provided the exact valid method signature.",
+        "Provided clear and constructive remediation steps, including removing placeholder bug comments."
+      ],
+      "met_rubric": true
+    },
+    "metrics": {
+      "tokens": {
+        "input": 11950,
+        "output": 345,
+        "thinking": 174,
+        "cached": 10737,
+        "total_input": 22687,
+        "total_output": 519
+      },
+      "iterations": 3,
+      "tool_calls": {
+        "total": 6,
+        "by_tool": {
+          "emit_reviewer_state": 2,
+          "glob_files": 1,
+          "godoc_package": 1,
+          "godoc_symbol": 1,
+          "read_file": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "external-url-verification",
+    "case_name": "External URL Verification",
+    "subject_result": {
+      "score": 2,
+      "rationale": "The rubric strictly required the agent to fetch the documentation URL (https://ai.google.dev/api/generate-content#v1beta.models.generateContent) and verify API usage or identify discrepancies against it. The review explicitly stated that it could not fetch the URL due to tool unavailability and therefore failed to perform the required verification against the live documentation.",
+      "findings": [
+        "Failed to fetch the required documentation URL as specified in the rubric.",
+        "Did not verify the API endpoint (/v1 vs /v1beta) or parameters against official documentation.",
+        "Identified that the file is an unimplemented stub with technical debt and an unresolved BUG comment."
+      ],
+      "met_rubric": false
+    },
+    "metrics": {
+      "tokens": {
+        "input": 9829,
+        "output": 496,
+        "thinking": 1278,
+        "cached": 5297,
+        "total_input": 15126,
+        "total_output": 1774
+      },
+      "iterations": 2,
+      "tool_calls": {
+        "total": 2,
+        "by_tool": {
+          "emit_reviewer_state": 1,
+          "wishlist_tool": 1
+        }
+      }
+    }
+  }
+]
