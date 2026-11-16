@@ -35,7 +35,9 @@ type toolStatusMsg struct {
 }
 
 type toolCallsMsg struct {
-	tcs []llm.ToolCall
+	tcs   []llm.ToolCall
+	stage string
+	iter  int
 }
 
 type iterationMsg struct {
@@ -44,18 +46,33 @@ type iterationMsg struct {
 }
 
 type llmStatusMsg struct {
+	stage      string
+	iter       int
 	status     string
 	llmWaiting bool
 }
 
 type warningMsg struct {
+	stage   string
 	warning string
+}
+
+// usageSummaryMsg carries a cumulative snapshot, not an incremental token count.
+type usageSummaryMsg struct {
+	stage string
+	total llm.Usage
 }
 
 type quitMsg struct{}
 
-type preReviewSummaryMsg struct {
-	summary string
+type stageReviewMsg struct {
+	title  string
+	result string
+}
+
+type stageReviewState struct {
+	stageReviewMsg
+	afterIterations int
 }
 
 // TUI state representation
@@ -89,17 +106,18 @@ type iterationState struct {
 }
 
 type tuiModel struct {
-	mcpServers       map[string]*mcpServerState
-	mcpList          []string
-	iterations       []*iterationState
-	warnings         []string
-	quitting         bool
-	spinner          spinner.Model
-	viewport         viewport.Model
-	ready            bool
-	configText       string
-	userAborted      bool
-	preReviewSummary string
+	mcpServers     map[string]*mcpServerState
+	mcpList        []string
+	iterations     []*iterationState
+	warnings       []string
+	quitting       bool
+	spinner        spinner.Model
+	viewport       viewport.Model
+	ready          bool
+	configText     string
+	userAborted    bool
+	stageReviews   []stageReviewState
+	usageSummaries []usageSummaryMsg
 }
 
 func (m *tuiModel) Init() tea.Cmd {
@@ -158,8 +176,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		autoScroll = true
 
 	case toolCallsMsg:
-		if len(m.iterations) > 0 {
-			current := m.iterations[len(m.iterations)-1]
+		if current := m.findIteration(msg.stage, msg.iter); current != nil {
 			current.llmWaiting = false
 
 			var standardCalls []*toolCallState
@@ -195,27 +212,32 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toolStatusMsg:
 		if len(m.iterations) > 0 {
-			current := m.iterations[len(m.iterations)-1]
 			matchesCall := func(tc *toolCallState) bool {
-				if msg.id != "" && tc.id != "" {
+				if msg.id != "" {
 					return tc.id == msg.id
 				}
 				return tc.name == msg.name
 			}
-			if msg.status == "started" {
-				for _, tc := range current.toolCalls {
-					if matchesCall(tc) && tc.status == "queued" {
-						tc.status = "started"
-						break
+			// Namespaced IDs identify calls even after another stage starts an iteration.
+			// Without an ID, preserve the legacy current-iteration name fallback.
+		iterations:
+			for i := len(m.iterations) - 1; i >= 0; i-- {
+				for _, tc := range m.iterations[i].toolCalls {
+					if !matchesCall(tc) {
+						continue
 					}
-				}
-			} else if msg.status == "completed" || msg.status == "failed" {
-				for _, tc := range current.toolCalls {
-					if matchesCall(tc) && (tc.status == "started" || tc.status == "queued") {
+					if msg.status == "started" && tc.status == "queued" {
+						tc.status = msg.status
+						break iterations
+					}
+					if (msg.status == "completed" || msg.status == "failed") && (tc.status == "started" || tc.status == "queued") {
 						tc.status = msg.status
 						tc.err = msg.err
-						break
+						break iterations
 					}
+				}
+				if msg.id == "" {
+					break
 				}
 			}
 		}
@@ -231,19 +253,42 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		autoScroll = true
 
 	case llmStatusMsg:
-		if len(m.iterations) > 0 {
-			current := m.iterations[len(m.iterations)-1]
+		if current := m.findIteration(msg.stage, msg.iter); current != nil {
 			current.llmStatus = msg.status
 			current.llmWaiting = msg.llmWaiting
 		}
 		autoScroll = true
 
 	case warningMsg:
-		m.warnings = append(m.warnings, msg.warning)
+		warning := msg.warning
+		if msg.stage != "" {
+			warning = fmt.Sprintf("[%s] %s", msg.stage, warning)
+		}
+		m.warnings = append(m.warnings, warning)
 		autoScroll = true
 
-	case preReviewSummaryMsg:
-		m.preReviewSummary = msg.summary
+	case usageSummaryMsg:
+		if msg.total.PromptTokens <= 0 && msg.total.OutputTokens <= 0 && msg.total.CachedTokens <= 0 && msg.total.ThinkingTokens <= 0 {
+			break
+		}
+		found := false
+		for i := range m.usageSummaries {
+			if m.usageSummaries[i].stage == msg.stage {
+				m.usageSummaries[i] = msg
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.usageSummaries = append(m.usageSummaries, msg)
+		}
+		autoScroll = true
+
+	case stageReviewMsg:
+		m.stageReviews = append(m.stageReviews, stageReviewState{
+			stageReviewMsg:  msg,
+			afterIterations: len(m.iterations),
+		})
 		autoScroll = true
 
 	case quitMsg:
@@ -258,6 +303,19 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, cmd
+}
+
+// findIteration resolves stage-scoped callbacks without moving other stages' state.
+// Empty stage retains the legacy stage-agnostic behavior; zero iter selects
+// the most recent iteration for a stage. A nonzero iter must always match.
+func (m *tuiModel) findIteration(stage string, iter int) *iterationState {
+	for i := len(m.iterations) - 1; i >= 0; i-- {
+		current := m.iterations[i]
+		if (stage == "" || current.stage == stage) && (iter == 0 || current.iter == iter) {
+			return current
+		}
+	}
+	return nil
 }
 
 func (m *tuiModel) View() string {
@@ -313,13 +371,8 @@ func (m *tuiModel) renderContent() string {
 	}
 
 	// Section 2: LLM Loop Progress (Iteration Blocks)
-	var renderedSummary bool
-	for _, it := range m.iterations {
-		if it.stage == "AI Code Review" && !renderedSummary && m.preReviewSummary != "" {
-			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("📋 Pre-Review Summary:") + "\n")
-			sb.WriteString(indentText(renderMarkdown(m.preReviewSummary, os.Stderr), 2) + "\n\n")
-			renderedSummary = true
-		}
+	for i, it := range m.iterations {
+		m.renderStageReviews(&sb, i)
 
 		label := fmt.Sprintf("🔍 [Iteration %d]", it.iter)
 		if it.stage != "" {
@@ -390,10 +443,7 @@ func (m *tuiModel) renderContent() string {
 		}
 	}
 
-	if !renderedSummary && m.preReviewSummary != "" {
-		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render("📋 Pre-Review Summary:") + "\n")
-		sb.WriteString(indentText(renderMarkdown(m.preReviewSummary, os.Stderr), 2) + "\n\n")
-	}
+	m.renderStageReviews(&sb, len(m.iterations))
 
 	// Section 3: Warnings
 	if len(m.warnings) > 0 {
@@ -404,7 +454,26 @@ func (m *tuiModel) renderContent() string {
 		sb.WriteString("\n")
 	}
 
+	for _, summary := range m.usageSummaries {
+		label := ""
+		if summary.stage != "" {
+			label = fmt.Sprintf("[%s] ", summary.stage)
+		}
+		fmt.Fprintf(&sb, "📈 %s%d in, %d out (total)\n", label, summary.total.TotalInput(), summary.total.TotalOutput())
+	}
+
 	return sb.String()
+}
+
+func (m *tuiModel) renderStageReviews(sb *strings.Builder, afterIterations int) {
+	for _, review := range m.stageReviews {
+		if review.afterIterations != afterIterations {
+			continue
+		}
+		title := fmt.Sprintf("📋 %s:", review.title)
+		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("108")).Render(title) + "\n")
+		sb.WriteString(indentText(renderMarkdown(review.result, os.Stderr), 2) + "\n\n")
+	}
 }
 
 func compactToolCallArgsString(args string) string {
@@ -619,7 +688,12 @@ func (r *tuiReporter) ReportStageIteration(stage string, iter int) {
 
 func (r *tuiReporter) ReportToolCalls(tcs []llm.ToolCall) {
 	r.send(toolCallsMsg{tcs: tcs})
-	r.send(llmStatusMsg{status: "Executing tool calls...", llmWaiting: false})
+}
+
+// ReportStageToolCalls associates tool batches with the originating pipeline
+// stage when concurrent subagents interleave their reporting callbacks.
+func (r *tuiReporter) ReportStageToolCalls(stage string, iter int, calls []llm.ToolCall) {
+	r.send(toolCallsMsg{stage: stage, iter: iter, tcs: calls})
 }
 
 func (r *tuiReporter) ReportUsage(usage llm.Usage) {
@@ -627,9 +701,12 @@ func (r *tuiReporter) ReportUsage(usage llm.Usage) {
 }
 
 func (r *tuiReporter) ReportUsageSummary(total llm.Usage) {
-	if total.PromptTokens > 0 || total.OutputTokens > 0 {
-		fmt.Fprintf(r.stderr, "📈 %d in, %d out (total)\n", total.TotalInput(), total.TotalOutput())
-	}
+	r.ReportStageUsageSummary("", total)
+}
+
+// ReportStageUsageSummary replaces the displayed cumulative total for a stage.
+func (r *tuiReporter) ReportStageUsageSummary(stage string, total llm.Usage) {
+	r.send(usageSummaryMsg{stage: stage, total: total})
 }
 
 func (r *tuiReporter) ReportFinalReview() {
@@ -637,7 +714,7 @@ func (r *tuiReporter) ReportFinalReview() {
 }
 
 func (r *tuiReporter) ReportStageFinalReview(stage string) {
-	r.send(llmStatusMsg{status: fmt.Sprintf("Formulating final %s...", strings.ToLower(stage)), llmWaiting: true})
+	r.send(llmStatusMsg{stage: stage, status: fmt.Sprintf("Formulating final %s...", strings.ToLower(stage)), llmWaiting: true})
 }
 
 func (r *tuiReporter) ReportExtraction() {
@@ -652,12 +729,35 @@ func (r *tuiReporter) ReportEmptyResponseRetry(attempt int) {
 	r.send(llmStatusMsg{status: fmt.Sprintf("Retrying empty response (attempt %d)...", attempt), llmWaiting: true})
 }
 
+// ReportStageEmptyResponseRetry targets the iteration that produced the empty reply.
+func (r *tuiReporter) ReportStageEmptyResponseRetry(stage string, iter int, attempt int) {
+	r.send(llmStatusMsg{stage: stage, iter: iter, status: fmt.Sprintf("Retrying empty response (attempt %d)...", attempt), llmWaiting: true})
+}
+
 func (r *tuiReporter) ReportCapReached(maxIterations int) {
-	r.send(warningMsg{warning: fmt.Sprintf("Reached maximum ReAct iterations (%d). Forcing final review.", maxIterations)})
+	r.ReportStageCapReached("", maxIterations)
+}
+
+// ReportStageCapReached attributes the iteration-limit warning to its stage.
+func (r *tuiReporter) ReportStageCapReached(stage string, cap int) {
+	r.ReportStageWarning(stage, fmt.Sprintf("Reached maximum ReAct iterations (%d). Forcing final review.", cap), nil)
 }
 
 func (r *tuiReporter) ReportTruncated(maxTokens int) {
-	r.send(warningMsg{warning: fmt.Sprintf("LLM response truncated (hit max-tokens limit of %d).", maxTokens)})
+	r.ReportStageTruncated("", maxTokens)
+}
+
+// ReportStageTruncated attributes the token-limit warning to its stage.
+func (r *tuiReporter) ReportStageTruncated(stage string, tokens int) {
+	r.ReportStageWarning(stage, fmt.Sprintf("LLM response truncated (hit max-tokens limit of %d).", tokens), nil)
+}
+
+// ReportStageWarning keeps stage diagnostics within the Bubble Tea event loop.
+func (r *tuiReporter) ReportStageWarning(stage, msg string, err error) {
+	if err != nil {
+		msg = fmt.Sprintf("%s: %v", msg, err)
+	}
+	r.send(warningMsg{stage: stage, warning: msg})
 }
 
 func (r *tuiReporter) ReportMCPStatus(name string, status string, err error) {
@@ -684,7 +784,7 @@ func (r *tuiReporter) ReportReview(result string) error {
 }
 
 func (r *tuiReporter) ReportStageReview(stage, result string) error {
-	r.send(preReviewSummaryMsg{summary: result})
+	r.send(stageReviewMsg{title: stage, result: result})
 	return nil
 }
 

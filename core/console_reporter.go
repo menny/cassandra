@@ -24,15 +24,20 @@ type consoleWriter interface {
 
 // rawWriter writes strings directly to stdout/stderr.
 type rawWriter struct {
+	mu     sync.Mutex
 	stdout io.Writer
 	stderr io.Writer
 }
 
 func (w *rawWriter) WriteStdout(s string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	fmt.Fprint(w.stdout, s)
 }
 
 func (w *rawWriter) WriteStderr(s string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	fmt.Fprint(w.stderr, s)
 }
 
@@ -332,11 +337,8 @@ func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 	if cfg.ApprovalEvaluationPromptFile != "" {
 		t.Row("Approval Evaluation Prompt File", cfg.ApprovalEvaluationPromptFile)
 	}
-	if cfg.PreReviewPromptFile != "" {
-		t.Row("Pre-Review Prompt File", cfg.PreReviewPromptFile)
-	}
-	if cfg.PreReviewModel != "" {
-		t.Row("Pre-Review Model", cfg.PreReviewModel)
+	if cfg.ReviewPipelineFile != "" {
+		t.Row("Review Pipeline File", cfg.ReviewPipelineFile)
 	}
 	t.Row("API Key", "[PROVIDED]")
 	return t

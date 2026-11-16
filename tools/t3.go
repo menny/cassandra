@@ -399,7 +399,7 @@ func registerT3Tools(r *Registry) {
 
 	RegisterToolWithArgs(r, linkDef, func(ctx context.Context, args linkArgs) (string, error) {
 		return callT3McpTool(ctx, "link_pull_request", args)
-	})
+	}, ToolPolicy{AllowSubagents: false})
 
 	listDef := llm.ToolDef{
 		Name:        "list_thread_pull_requests",
@@ -421,7 +421,7 @@ func registerT3Tools(r *Registry) {
 
 	RegisterToolWithArgs(r, listDef, func(ctx context.Context, args listArgs) (string, error) {
 		return callT3McpTool(ctx, "list_thread_pull_requests", args)
-	})
+	}, ToolPolicy{AllowSubagents: false})
 
 	capDef := llm.ToolDef{
 		Name:        "orchestrator_capabilities",
@@ -440,7 +440,7 @@ func registerT3Tools(r *Registry) {
 			return "", err
 		}
 		return MaskCassandraInCapabilities(raw), nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 
 	launchDef := llm.ToolDef{
 		Name:        "t3_thread_launch",
@@ -535,7 +535,7 @@ func registerT3Tools(r *Registry) {
 		args.ModelSelection = resolved
 
 		return callT3McpTool(ctx, "t3_thread_launch", args)
-	})
+	}, ToolPolicy{AllowSubagents: false})
 }
 
 const (

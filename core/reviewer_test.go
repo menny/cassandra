@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -197,25 +197,13 @@ func TestReviewer_RunInteractivePostReview_Cancellation(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestReviewer_Run_PreReviewSummary(t *testing.T) {
+func TestReviewer_Run_PipelineSummary(t *testing.T) {
 	tmpDir := t.TempDir()
-	preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
-	preReviewPromptContent := "Pre-review prompt content here."
-	err := os.WriteFile(preReviewPromptFile, []byte(preReviewPromptContent), 0o644)
-	require.NoError(t, err)
-
+	preReviewPromptContent := "Summary instructions."
 	cfg := config.NewDefaultConfig()
-	cfg.PreReviewPromptFile = preReviewPromptFile
 
 	lm := &mockLLM{
 		responses: []*llm.Response{
-			{
-				Text: "This is the generated pre-review summary report.",
-				Usage: llm.Usage{
-					PromptTokens: 100,
-					OutputTokens: 200,
-				},
-			},
 			{
 				Text: "This is the final AI code review.",
 				Usage: llm.Usage{
@@ -237,15 +225,22 @@ func TestReviewer_Run_PreReviewSummary(t *testing.T) {
 		ApprovalEvaluationPrompt: "approval rules",
 	}
 
-	result, err := reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+	subLLM := &mockLLM{responses: []*llm.Response{{Text: "Summary report.", Usage: llm.Usage{PromptTokens: 100, OutputTokens: 200}}}}
+	reviewer.Pipeline = &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{{
+		Title: "Summary", Description: "Summarize changes", Prompt: preReviewPromptContent, UserVisible: true, ReviewerInput: true,
+	}}}
+	reviewer.llmFactory = func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+		return subLLM, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result, err := reviewer.Run(ctx, []string{"file1.go"}, "original request text")
 	require.NoError(t, err)
 	require.Equal(t, "This is the final AI code review.", result)
 
-	// Verify that the LLM was called exactly twice
-	require.Equal(t, 2, len(lm.calls))
-
-	// Verify the first call (Pre-Review Summary phase)
-	firstCallMsgs := lm.calls[0]
+	require.Len(t, lm.calls, 1)
+	require.Len(t, subLLM.calls, 1)
+	firstCallMsgs := subLLM.calls[0]
 	// The first message is the stable pre-review prompt (Zone 1)
 	require.Equal(t, llm.RoleSystem, firstCallMsgs[0].Role)
 	require.Equal(t, preReviewPromptContent, firstCallMsgs[0].Text)
@@ -254,30 +249,30 @@ func TestReviewer_Run_PreReviewSummary(t *testing.T) {
 	require.Equal(t, "original request text", firstCallMsgs[len(firstCallMsgs)-1].Text)
 
 	// Verify the second call (AI Code Review phase)
-	secondCallMsgs := lm.calls[1]
-	// The user request in the second phase should contain the pre-review summary prepended
+	secondCallMsgs := lm.calls[0]
+	// Reports follow the original request.
 	lastMsg := secondCallMsgs[len(secondCallMsgs)-1]
 	require.Equal(t, llm.RoleUser, lastMsg.Role)
-	require.Contains(t, lastMsg.Text, "### Pre-Review Summary")
-	require.Contains(t, lastMsg.Text, "This is the generated pre-review summary report.")
-	require.Contains(t, lastMsg.Text, "original request text")
+	reports := pipelineReports(t, "original request text", lastMsg.Text)
+	require.Equal(t, []map[string]string{{"title": "Summary", "description": "Summarize changes", "output": "Summary report."}}, reports)
 
 	// Verify that stage transitions were reported correctly
 	require.Equal(t, 2, len(spy.stageIterations))
-	require.Equal(t, "Pre-Review Summary", spy.stageIterations[0].stage)
+	require.Equal(t, "Subagent: Summary", spy.stageIterations[0].stage)
 	require.Equal(t, 1, spy.stageIterations[0].iter)
 	require.Equal(t, "AI Code Review", spy.stageIterations[1].stage)
 	require.Equal(t, 1, spy.stageIterations[1].iter)
 
 	require.Equal(t, 2, len(spy.stageFinalReviews))
-	require.Equal(t, "Pre-Review Summary", spy.stageFinalReviews[0])
+	require.Equal(t, "Subagent: Summary", spy.stageFinalReviews[0])
 	require.Equal(t, "AI Code Review", spy.stageFinalReviews[1])
 
 	// Verify that metrics were collected for both phases independently
 	metrics := reviewer.GetMetrics()
 	require.Equal(t, 2, len(metrics.Phases))
 
-	require.Equal(t, "pre_review", metrics.Phases[0].Phase)
+	require.Equal(t, "subagent", metrics.Phases[0].Phase)
+	require.Equal(t, "Summary", metrics.Phases[0].Title)
 	require.Equal(t, 100, metrics.Phases[0].Metrics.Tokens.Input)
 	require.Equal(t, 200, metrics.Phases[0].Metrics.Tokens.Output)
 	require.Equal(t, 1, metrics.Phases[0].Metrics.Iterations)
@@ -288,17 +283,10 @@ func TestReviewer_Run_PreReviewSummary(t *testing.T) {
 	require.Equal(t, 1, metrics.Phases[1].Metrics.Iterations)
 }
 
-func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {
+func TestReviewer_Run_PipelineModelOverride(t *testing.T) {
 	tmpDir := t.TempDir()
-	preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
-	preReviewPromptContent := "Pre-review prompt."
-	err := os.WriteFile(preReviewPromptFile, []byte(preReviewPromptContent), 0o644)
-	require.NoError(t, err)
-
 	cfg := config.NewDefaultConfig()
-	cfg.PreReviewPromptFile = preReviewPromptFile
 	cfg.Model = "main-model"
-	cfg.PreReviewModel = "pre-review-model-override"
 	cfg.Provider = "google"
 
 	lm := &mockLLM{
@@ -324,14 +312,17 @@ func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {
 		ApprovalEvaluationPrompt: "approval rules",
 	}
 
-	// Setup custom factory to return preLLM when pre-review-model-override is requested
+	reviewer.Pipeline = &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{{
+		Title: "Summary", Prompt: "Summary instructions", ReviewerInput: true,
+		LLM: config.LLMOverrides{Model: stringPointer("pre-review-model-override")},
+	}}}
 	var preReviewModelUsed bool
 	reviewer.llmFactory = func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error) {
 		if modelName == "pre-review-model-override" {
 			preReviewModelUsed = true
-			return preLLM, nil
+			return preLLM, ctx.Err()
 		}
-		return lm, nil
+		return nil, errors.New("unexpected subagent model")
 	}
 
 	result, err := reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
@@ -348,14 +339,9 @@ func TestReviewer_Run_PreReviewModelOverride(t *testing.T) {
 }
 
 func TestReviewer_MetricsPreservedOnError(t *testing.T) {
-	t.Run("PreReviewError", func(t *testing.T) {
+	t.Run("RequiredSubagentError", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		preReviewPromptFile := filepath.Join(tmpDir, "pre-review-prompt.md")
-		err := os.WriteFile(preReviewPromptFile, []byte("Pre-review prompt."), 0o644)
-		require.NoError(t, err)
-
 		cfg := config.NewDefaultConfig()
-		cfg.PreReviewPromptFile = preReviewPromptFile
 		cfg.Provider = "google"
 
 		lm := &mockLLM{
@@ -386,13 +372,22 @@ func TestReviewer_MetricsPreservedOnError(t *testing.T) {
 			ApprovalEvaluationPrompt: "approval rules",
 		}
 
-		// Run with short context / constraints so it fails, or it will fail because the mock has no more responses
-		_, err = reviewer.Run(context.Background(), []string{"file1.go"}, "original request text")
+		main := &mockLLM{}
+		reviewer.Agent.llm = main
+		reviewer.Pipeline = &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{{Title: "Required", Prompt: "instructions", Required: true}}}
+		reviewer.llmFactory = func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+			return lm, ctx.Err()
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := reviewer.Run(ctx, []string{"file1.go"}, "original request text")
+		require.Empty(t, main.calls)
 		require.Error(t, err)
 
 		metrics := reviewer.GetMetrics()
 		require.Equal(t, 1, len(metrics.Phases))
-		require.Equal(t, "pre_review", metrics.Phases[0].Phase)
+		require.Equal(t, "subagent", metrics.Phases[0].Phase)
+		require.Equal(t, "Required", metrics.Phases[0].Title)
 		require.Equal(t, 50, metrics.Phases[0].Metrics.Tokens.Input)
 		require.Equal(t, 100, metrics.Phases[0].Metrics.Tokens.Output)
 	})
@@ -541,10 +536,10 @@ func TestReviewer_RunInteractivePostReview_MultiTurnMetrics(t *testing.T) {
 	require.Equal(t, 2, metrics.Phases[0].Metrics.Iterations)
 }
 
-func TestReviewer_Run_PreReviewErrors(t *testing.T) {
-	t.Run("PromptFileReadError", func(t *testing.T) {
+func TestReviewer_Run_PipelineErrors(t *testing.T) {
+	t.Run("PipelineFileReadError", func(t *testing.T) {
 		cfg := config.NewDefaultConfig()
-		cfg.PreReviewPromptFile = "/nonexistent/path/to/prompt.md"
+		cfg.ReviewPipelineFile = filepath.Join(t.TempDir(), "missing.json")
 
 		reviewer := &Reviewer{
 			Agent:      NewAgent(&mockLLM{}, newMockDispatcher(), WithReporter(&spyReporter{})),
@@ -555,18 +550,12 @@ func TestReviewer_Run_PreReviewErrors(t *testing.T) {
 
 		_, err := reviewer.Run(context.Background(), []string{"file1.go"}, "req")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to read pre-review prompt file")
+		require.Contains(t, err.Error(), "missing.json")
 	})
 
-	t.Run("PreReviewLLMFactoryError", func(t *testing.T) {
+	t.Run("RequiredSubagentLLMFactoryError", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		promptFile := filepath.Join(tmpDir, "prompt.md")
-		err := os.WriteFile(promptFile, []byte("Pre-review prompt"), 0o644)
-		require.NoError(t, err)
-
 		cfg := config.NewDefaultConfig()
-		cfg.PreReviewPromptFile = promptFile
-		cfg.PreReviewModel = "model-override"
 		cfg.Model = "model-main"
 
 		originalLM := &mockLLM{}
@@ -580,11 +569,106 @@ func TestReviewer_Run_PreReviewErrors(t *testing.T) {
 			},
 		}
 
-		_, err = reviewer.Run(context.Background(), []string{"file1.go"}, "req")
+		reviewer.Pipeline = &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{{Title: "Required", Prompt: "instructions", Required: true}}}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_, err := reviewer.Run(ctx, []string{"file1.go"}, "req")
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to initialize pre-review LLM")
+		require.Contains(t, err.Error(), "factory init failure")
+		require.Empty(t, originalLM.calls)
 		require.Equal(t, originalLM, reviewer.Agent.llm)
 	})
+}
+
+type pipelineFocusReporter struct {
+	pipelineReporter
+	waits int
+}
+
+func (s *pipelineFocusReporter) WaitForFirstMessage(ctx context.Context) (string, error) {
+	s.waits++
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "explicit focus", nil
+}
+
+func (s *pipelineFocusReporter) ServePostReview(ctx context.Context, handler func(context.Context, string) error) error {
+	return handler(ctx, "discussion")
+}
+
+func (s *pipelineFocusReporter) SignalReviewFailed(err error) error { return err }
+
+func TestReviewer_PipelineACPWaitIsExplicit(t *testing.T) {
+	for _, wait := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wait=%t", wait), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			r, main, _ := newPipelineReviewer(t, &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{{Title: "Summary", Prompt: "instructions", UserVisible: true, ReviewerInput: true}}})
+			r.Config.Render = "acp"
+			r.Config.WaitForMessage = wait
+			reporter := &pipelineFocusReporter{}
+			r.Agent.reporter = reporter
+			sub := &mockLLM{responses: []*llm.Response{textResponse("summary")}}
+			r.llmFactory = func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+				return sub, ctx.Err()
+			}
+			_, err := r.Run(ctx, nil, "request")
+			require.NoError(t, err)
+			require.Len(t, main.calls, 1)
+			require.Len(t, sub.calls, 1)
+			if wait {
+				require.Equal(t, 1, reporter.waits, "only the explicit initial wait is allowed")
+				require.Contains(t, sub.calls[0][len(sub.calls[0])-1].Text, "explicit focus")
+				require.Contains(t, main.calls[0][len(main.calls[0])-1].Text, "explicit focus")
+			} else {
+				require.Zero(t, reporter.waits, "pipeline completion must not implicitly wait for ACP focus")
+			}
+		})
+	}
+}
+
+func TestReviewer_PipelineFocusReporterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	reporter := &pipelineFocusReporter{}
+	_, err := reporter.WaitForFirstMessage(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	err = reporter.ServePostReview(ctx, func(ctx context.Context, query string) error {
+		require.Equal(t, "discussion", query)
+		return ctx.Err()
+	})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestReviewer_Run_CancelledBeforeWaitForMessage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cancel()
+	r, main, _ := newPipelineReviewer(t, &config.ReviewPipeline{MaxConcurrency: 1, Subagents: []config.Subagent{
+		{Title: "never", Prompt: "instructions"},
+	}})
+	r.Config.Render = "acp"
+	r.Config.WaitForMessage = true
+	reporter := &pipelineSafetyReporter{cancelUpdates: make(chan context.CancelFunc, 2)}
+	r.Agent.reporter = reporter
+	sub := &mockLLM{responses: []*llm.Response{textResponse("must not run")}}
+	factoryCalls := 0
+	r.llmFactory = func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+		factoryCalls++
+		return sub, ctx.Err()
+	}
+
+	output, err := r.Run(ctx, nil, "request")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, output)
+	require.Zero(t, reporter.waits, "already-cancelled Run must not enter the initial message wait")
+	require.Zero(t, factoryCalls)
+	require.Empty(t, sub.calls)
+	require.Empty(t, main.calls)
+	require.NotNil(t, receivePipeline(t, reporter.cancelUpdates))
+	require.Nil(t, receivePipeline(t, reporter.cancelUpdates), "even an early return must clear its cancel callback")
 }
 
 func TestReviewer_ExecutePostReviewTurn_RollbackHistoryOnError(t *testing.T) {

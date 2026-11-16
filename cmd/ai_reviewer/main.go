@@ -51,8 +51,7 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 	fs.StringVar(&cfg.MainGuidelines, "main-guidelines", "", "Path to a file or a named prompt from the library (defaults to 'general')")
 	fs.StringArrayVar(&cfg.SupplementalGuidelines, "supplemental-guidelines", nil, "Optional additive paths or named library prompts for supplemental guidelines (can be used multiple times)")
 	fs.StringVar(&cfg.ApprovalEvaluationPromptFile, "approval-evaluation-prompt-file", "", "Optional path to a file containing custom approval evaluation guidelines")
-	fs.StringVar(&cfg.PreReviewPromptFile, "pre-review-prompt", "", "Optional path to a file containing a prompt to an LLM Agent for pre-review summary")
-	fs.StringVar(&cfg.PreReviewModel, "pre-review-model", "", "Optional model override for the pre-review summary phase (defaults to main model)")
+	fs.StringVar(&cfg.ReviewPipelineFile, "review-pipeline-file", "", "Path to a TOML file defining concurrent pre-review subagents")
 	fs.IntVar(&cfg.MaxTokens, "max-tokens", llm.DefaultMaxTokens, "Max tokens for the LLM response (defaults to provider specific default)")
 	fs.IntVar(&cfg.MaxDiffBytes, "max-diff-bytes", config.DefaultMaxDiffBytes, "Maximum diff size in bytes before omitting full diff from prompt (defaults to 10240; 0 to disable)")
 	fs.StringVar(&cfg.Base, "base", "main", "Base commit/branch for diff (defaults to 'main')")
@@ -151,6 +150,10 @@ func run(ctx context.Context, args []string, stderr *log.Logger) error {
 		if !errors.As(err, &notFound) {
 			return fmt.Errorf("failed to read config file: %w", err)
 		}
+	}
+
+	if err := config.RejectLegacyPreReview(v); err != nil {
+		return err
 	}
 
 	if v.IsSet("acp") {

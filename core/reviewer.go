@@ -35,7 +35,8 @@ type Reviewer struct {
 	ApprovalEvaluationPrompt string
 	mcpManager               *mcp.Manager
 	llmFactory               func(ctx context.Context, provider, modelName, apiKey, baseURL string, options map[string]any) (llm.Model, error)
-	PreReviewMetrics         *SessionMetrics
+	Pipeline                 *config.ReviewPipeline
+	SubagentMetrics          []PhaseMetrics
 	CodeReviewMetrics        *SessionMetrics
 	DiscussionMetrics        *SessionMetrics
 	diffMap                  map[string]string
@@ -75,6 +76,14 @@ func isACPSession(cfg *config.Config) bool {
 func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, reporter Reporter) (r *Reviewer, err error) {
 	if reporter == nil {
 		reporter = NewRawReporter(os.Stdout, os.Stderr)
+	}
+
+	var pipeline *config.ReviewPipeline
+	if cfg.ReviewPipelineFile != "" {
+		pipeline, err = config.LoadReviewPipeline(cfg.ReviewPipelineFile)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	client, err := factory.New(ctx, cfg.Provider, cfg.Model, cfg.ProviderAPIKey, cfg.ProviderURL, cfg.ProviderOptions)
@@ -167,7 +176,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 			reporter.ReportWarning,
 			func(def llm.ToolDef, handler func(context.Context, llm.ToolCall) (string, error)) {
 				mu.Lock()
-				registry.RegisterTool(def, handler)
+				registry.RegisterTool(def, handler, tools.ToolPolicy{AllowSubagents: true, IsMCP: true})
 				mu.Unlock()
 			},
 		); err != nil {
@@ -223,6 +232,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		ApprovalEvaluationPrompt: approvalEvaluationPrompt,
 		mcpManager:               mcpManager,
 		llmFactory:               factory.New,
+		Pipeline:                 pipeline,
 	}
 	registry.SetVerdictChangeListener(func(ctx context.Context, verdict string, rationale string) error {
 		rReviewer.SetVerdict(ReviewVerdict(verdict))
@@ -280,6 +290,23 @@ func (r *Reviewer) waitAndAppendInitialUserContext(ctx context.Context, requestT
 
 // Run executes a review for the given changes.
 func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText string) (string, error) {
+	reviewCtx, cancelReview := context.WithCancel(ctx)
+	defer cancelReview()
+	ctx = reviewCtx
+	if controller, ok := r.Agent.reporter.(interface {
+		SetReviewCancel(context.CancelFunc)
+	}); ok {
+		controller.SetReviewCancel(cancelReview)
+		defer controller.SetReviewCancel(nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := r.loadPipeline(); err != nil {
+		return "", err
+	}
+	r.SubagentMetrics = nil
+	r.CodeReviewMetrics = nil
 	if r.Config != nil && r.Config.WaitForMessage {
 		var err error
 		requestText, err = r.waitAndAppendInitialUserContext(ctx, requestText)
@@ -303,61 +330,14 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
 
-	if r.Config.PreReviewPromptFile != "" {
-		preReviewPromptBytes, err := os.ReadFile(r.Config.PreReviewPromptFile)
+	if r.Pipeline != nil {
+		requestText, err = r.runPipeline(ctx, dynamic, requestText, CalculateMaxIterations(len(changedFiles)))
 		if err != nil {
-			return "", fmt.Errorf("failed to read pre-review prompt file %q: %w", r.Config.PreReviewPromptFile, err)
-		}
-		preReviewPrompt := string(preReviewPromptBytes)
-
-		originalLLM := r.Agent.llm
-		if r.Config.PreReviewModel != "" && r.Config.PreReviewModel != r.Config.Model {
-			newFactory := r.llmFactory
-			if newFactory == nil {
-				newFactory = factory.New
-			}
-			preLLM, err := newFactory(ctx, r.Config.Provider, r.Config.PreReviewModel, r.Config.ProviderAPIKey, r.Config.ProviderURL, r.Config.ProviderOptions)
-			if err != nil {
-				return "", fmt.Errorf("failed to initialize pre-review LLM: %w", err)
-			}
-			r.Agent.llm = preLLM
-		}
-		defer func() {
-			r.Agent.llm = originalLLM
-		}()
-
-		r.Agent.Stage = "Pre-Review Summary"
-		r.Agent.ResetMetrics()
-		maxIterations := CalculateMaxIterations(len(changedFiles))
-		summary, err := r.Agent.RunReview(ctx, preReviewPrompt, dynamic, requestText, maxIterations, r.Config.MaxTokens)
-		preMetrics := r.Agent.GetMetrics()
-		r.PreReviewMetrics = &preMetrics
-		if err != nil {
-			return "", fmt.Errorf("pre-review summary phase failed: %w", err)
-		}
-
-		if err := r.Agent.reporter.ReportStageReview("Pre-Review Summary", summary); err != nil {
-			r.Agent.reporter.ReportWarning("Failed to display pre-review summary", err)
-		}
-
-		r.Agent.llm = originalLLM
-
-		var sb strings.Builder
-		sb.WriteString("### Pre-Review Summary\n")
-		sb.WriteString(summary)
-		sb.WriteString("\n\n")
-		sb.WriteString(requestText)
-		requestText = sb.String()
-
-		if r.Config != nil && r.Config.Render == "acp" && !r.Config.WaitForMessage {
-			requestText, err = r.waitAndAppendInitialUserContext(ctx, requestText)
-			if err != nil {
-				return "", err
-			}
+			return "", err
 		}
 	}
 
-	if r.Config.PreReviewPromptFile != "" {
+	if r.Pipeline != nil && len(r.Pipeline.Subagents) > 0 {
 		r.Agent.Stage = "AI Code Review"
 	} else {
 		r.Agent.Stage = ""
@@ -622,15 +602,10 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 	}
 }
 
-// GetMetrics returns the captured metrics for both phases.
+// GetMetrics returns subagent metrics in declaration order, followed by review and discussion metrics.
 func (r *Reviewer) GetMetrics() ReviewMetrics {
 	var phases []PhaseMetrics
-	if r.PreReviewMetrics != nil {
-		phases = append(phases, PhaseMetrics{
-			Phase:   "pre_review",
-			Metrics: *r.PreReviewMetrics,
-		})
-	}
+	phases = append(phases, r.SubagentMetrics...)
 	if r.CodeReviewMetrics != nil {
 		phases = append(phases, PhaseMetrics{
 			Phase:   "review",

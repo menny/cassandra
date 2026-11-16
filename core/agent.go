@@ -291,7 +291,7 @@ func (a *Agent) RunReview(ctx context.Context, stableSystem, dynamicSystem, requ
 				Text: resp.Text,
 			})
 			a.history = messages
-			if a.Stage != "Pre-Review Summary" && a.sessionStore != nil && a.sessionID != "" {
+			if a.sessionStore != nil && a.sessionID != "" {
 				if storeErr := a.sessionStore.AppendMessages(ctx, a.sessionID, messages...); storeErr != nil {
 					a.reporter.ReportWarning("Failed to persist review messages", storeErr)
 				}
@@ -412,7 +412,7 @@ func (a *Agent) ExtractStructuredReview(ctx context.Context, extractionSystemPro
 }
 
 func (a *Agent) executeToolCalls(ctx context.Context, toolCalls []llm.ToolCall) llm.Message {
-	// Ensure each tool call has a non-empty, unique ID for correlation
+	// Generated responses have validated IDs; direct dispatch callers may omit IDs.
 	for i := range toolCalls {
 		if toolCalls[i].ID == "" {
 			toolCalls[i].ID = fmt.Sprintf("call_%d_%s", i+1, toolCalls[i].Name)
@@ -538,7 +538,7 @@ func (a *Agent) handleCapReached(ctx context.Context, messages []llm.Message, ma
 		Text: resp.Text,
 	})
 	a.history = messages
-	if a.Stage != "Pre-Review Summary" && a.sessionStore != nil && a.sessionID != "" {
+	if a.sessionStore != nil && a.sessionID != "" {
 		if storeErr := a.sessionStore.AppendMessages(ctx, a.sessionID, messages...); storeErr != nil {
 			a.reporter.ReportWarning("Failed to persist review messages", storeErr)
 		}
@@ -701,7 +701,13 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 			return nil, refusalError(resp)
 		}
 		// A response with tool calls is always actionable, even if Text is empty.
-		if len(resp.ToolCalls) > 0 || resp.Text != "" {
+		if len(resp.ToolCalls) > 0 {
+			if err := prepareToolCallIDs(resp.ToolCalls); err != nil {
+				return nil, err
+			}
+			return resp, nil
+		}
+		if resp.Text != "" {
 			return resp, nil
 		}
 		lastResp = resp
@@ -716,6 +722,33 @@ func (a *Agent) generateContentWithEmptyRetry(ctx context.Context, messages []ll
 		}
 	}
 	return lastResp, nil
+}
+
+// prepareToolCallIDs rejects ambiguous provider correlation before any tool runs.
+// Missing IDs get unique fallbacks that do not collide with provider-supplied IDs.
+func prepareToolCallIDs(calls []llm.ToolCall) error {
+	seen := make(map[string]bool, len(calls))
+	for _, call := range calls {
+		if call.ID == "" {
+			continue
+		}
+		if seen[call.ID] {
+			return fmt.Errorf("llm returned duplicate tool-call ID %q", call.ID)
+		}
+		seen[call.ID] = true
+	}
+	for i := range calls {
+		if calls[i].ID != "" {
+			continue
+		}
+		id := fmt.Sprintf("call_%d_%s", i+1, calls[i].Name)
+		for seen[id] {
+			id += "_"
+		}
+		calls[i].ID = id
+		seen[id] = true
+	}
+	return nil
 }
 
 // refusalError formats a descriptive error when a provider refuses a request.

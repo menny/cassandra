@@ -17,6 +17,7 @@ import (
 
 	"github.com/menny/cassandra/core/config"
 	"github.com/menny/cassandra/llm"
+	"github.com/menny/cassandra/tools"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,8 @@ func newMockDispatcher() *mockDispatcher {
 }
 
 func (d *mockDispatcher) ToTools() []llm.ToolDef { return d.tools }
+
+func (d *mockDispatcher) ForSubagent(_ bool) tools.Dispatcher { return d }
 
 func (d *mockDispatcher) HandleCall(ctx context.Context, tc llm.ToolCall) (string, error) {
 	if fn, ok := d.handlers[tc.Name]; ok {
@@ -1641,45 +1644,49 @@ func TestAgent_SessionStore(t *testing.T) {
 		require.Equal(t, "hello", agent.History()[0].Text)
 	})
 
-	t.Run("RunReview persists when Stage is not Pre-Review Summary", func(t *testing.T) {
+	for _, stage := range []string{"", "AI Code Review", "Pre-Review Summary"} {
+		t.Run("RunReview persists with session regardless of stage/"+stage, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store := NewSessionStore(tmpDir)
+
+			lm := &mockLLM{responses: []*llm.Response{
+				textResponse("Final review text"),
+			}}
+			agent := newTestAgent(lm, newMockDispatcher())
+			agent.Stage = stage
+			agent.SetSession(store, "sess_review_1")
+
+			_, err := agent.RunReview(ctx, "stable sys", "", "user req", 5, 1024)
+			require.NoError(t, err)
+
+			saved, err := store.LoadSession(ctx, "sess_review_1")
+			require.NoError(t, err)
+			require.Len(t, saved, 3)
+			require.Equal(t, llm.RoleSystem, saved[0].Role)
+			require.Equal(t, "stable sys", saved[0].Text)
+			require.Equal(t, llm.RoleUser, saved[1].Role)
+			require.Equal(t, "user req", saved[1].Text)
+			require.Equal(t, llm.RoleAssistant, saved[2].Role)
+			require.Equal(t, "Final review text", saved[2].Text)
+		})
+	}
+
+	t.Run("RunReview does not persist without SetSession", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		store := NewSessionStore(tmpDir)
-
-		lm := &mockLLM{responses: []*llm.Response{
-			textResponse("Final review text"),
-		}}
-		agent := newTestAgent(lm, newMockDispatcher())
-		agent.SetSession(store, "sess_review_1")
-
-		_, err := agent.RunReview(ctx, "stable sys", "", "user req", 5, 1024)
-		require.NoError(t, err)
-
-		saved, err := store.LoadSession(ctx, "sess_review_1")
-		require.NoError(t, err)
-		require.NotEmpty(t, saved)
-		require.Equal(t, llm.RoleSystem, saved[0].Role)
-		require.Equal(t, "stable sys", saved[0].Text)
-		require.Equal(t, llm.RoleUser, saved[1].Role)
-		require.Equal(t, "user req", saved[1].Text)
-		require.Equal(t, llm.RoleAssistant, saved[2].Role)
-		require.Equal(t, "Final review text", saved[2].Text)
-	})
-
-	t.Run("RunReview does NOT persist when Stage is Pre-Review Summary", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		store := NewSessionStore(tmpDir)
 
 		lm := &mockLLM{responses: []*llm.Response{
 			textResponse("Pre-review summary"),
 		}}
 		agent := newTestAgent(lm, newMockDispatcher())
 		agent.Stage = "Pre-Review Summary"
-		agent.SetSession(store, "sess_prereview_1")
 
 		_, err := agent.RunReview(ctx, "pre sys", "", "pre req", 5, 1024)
 		require.NoError(t, err)
 
-		require.False(t, store.SessionExists("sess_prereview_1"))
+		require.NotEmpty(t, agent.History())
+		entries, err := os.ReadDir(tmpDir)
+		require.NoError(t, err)
+		require.Empty(t, entries, "an agent without a session must not write conversation files")
 	})
 
 	t.Run("RunChatFlight persists on success and rolls back on failure", func(t *testing.T) {

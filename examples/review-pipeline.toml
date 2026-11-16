@@ -1,0 +1,22 @@
+# Flat subagents run concurrently before the main review.
+max_concurrency = 4
+
+[[subagents]]
+title = "PR summary"
+description = "Summarize the pull request changes"
+# Relative to this pipeline file, not cassandra.toml or the reviewed repository.
+prompt_file = "../.cassandra/pre-review-summary.md"
+required = true
+user_visible = true
+reviewer_input = true
+# MCP tools default to disabled for each subagent; uncomment to opt in.
+# allow_mcps = true
+
+# Optional: preserve the example's summary model override; other fields inherit.
+[subagents.llm]
+model = "gemini-3.5-flash-lite"
+# provider = "google"
+# provider_api_key = "YOUR_API_KEY"
+# provider_url = "https://your-provider.example.com"
+# max_tokens = 4096
+# provider_options = { temperature = 0.2 }

@@ -3,6 +3,8 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/menny/cassandra/core/config"
@@ -107,17 +109,56 @@ func TestConsoleReporter_Raw(t *testing.T) {
 		require.Equal(t, "Auth uses JWT tokens.\n", stderr.String())
 	})
 
-	t.Run("ReportConfig prints pre-review prompt and model", func(t *testing.T) {
+	t.Run("ReportConfig prints review pipeline file", func(t *testing.T) {
 		stderr.Reset()
 		cfg := config.NewDefaultConfig()
-		cfg.PreReviewPromptFile = ".cassandra/pre-review-summary.md"
-		cfg.PreReviewModel = "gemini-2.0-flash"
+		cfg.ReviewPipelineFile = ".cassandra/pipeline.toml"
 		r.ReportConfig(cfg, "/workspace")
-		require.Contains(t, stderr.String(), "Pre-Review Prompt File")
-		require.Contains(t, stderr.String(), ".cassandra/pre-review-summary.md")
-		require.Contains(t, stderr.String(), "Pre-Review Model")
-		require.Contains(t, stderr.String(), "gemini-2.0-flash")
+		require.Contains(t, stderr.String(), "Review Pipeline File")
+		require.Contains(t, stderr.String(), ".cassandra/pipeline.toml")
+		require.NotContains(t, stderr.String(), "Pre-Review")
 	})
+}
+
+func TestConsoleReporter_StageReportsPreserveOrderAndStdout(t *testing.T) {
+	for _, render := range []string{"raw", "markdown"} {
+		t.Run(render, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			var reporter Reporter = NewRawReporter(&stdout, &stderr)
+			if render == "markdown" {
+				reporter = NewMarkdownReporter(&stdout, &stderr)
+			}
+			require.NoError(t, reporter.ReportStageReview("Security findings", "First report"))
+			require.NoError(t, reporter.ReportStageReview("PR summary", "Second report"))
+			require.Empty(t, stdout.String(), "subagent reports are diagnostics, not the final review")
+			output := stripANSI(stderr.String())
+			require.Contains(t, output, "Security findings")
+			require.Contains(t, output, "PR summary")
+			require.Less(t, strings.Index(output, "First report"), strings.Index(output, "Second report"))
+			require.NoError(t, reporter.ReportReview("Final review"))
+			require.Contains(t, stripANSI(stdout.String()), "Final review")
+		})
+	}
+}
+
+func TestRawWriter_ConcurrentWrites(t *testing.T) {
+	var output bytes.Buffer
+	writer := &rawWriter{stdout: &output, stderr: &output}
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			writer.WriteStdout("stdout\n")
+		}()
+		go func() {
+			defer wg.Done()
+			writer.WriteStderr("stderr\n")
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, 50, strings.Count(output.String(), "stdout\n"))
+	require.Equal(t, 50, strings.Count(output.String(), "stderr\n"))
 }
 
 func TestConsoleReporter_Markdown(t *testing.T) {

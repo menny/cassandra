@@ -33,8 +33,7 @@ type Config struct {
 	ExtractionModel              string         `mapstructure:"extraction-model"`
 	MetadataJSONFile             string         `mapstructure:"metadata-json"`
 	ApprovalEvaluationPromptFile string         `mapstructure:"approval-evaluation-prompt-file"`
-	PreReviewPromptFile          string         `mapstructure:"pre-review-prompt"`
-	PreReviewModel               string         `mapstructure:"pre-review-model"`
+	ReviewPipelineFile           string         `mapstructure:"review-pipeline-file"`
 	DiffFile                     string         `mapstructure:"diff-file"`
 	FilesListFile                string         `mapstructure:"files-list-file"`
 	CommitsFile                  string         `mapstructure:"commits-file"`
@@ -134,6 +133,10 @@ func Load(configFile string) (*Config, error) {
 		}
 	}
 
+	if err := RejectLegacyPreReview(v); err != nil {
+		return nil, err
+	}
+
 	if v.IsSet("cassandraConfigFolder") {
 		v.Set("cassandra-config-folder", v.Get("cassandraConfigFolder"))
 	}
@@ -154,6 +157,18 @@ func Load(configFile string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// RejectLegacyPreReview rejects removed pre-review settings, including explicitly
+// empty values, so callers do not silently lose a configured review phase.
+// CLI callers should invoke this after loading config and binding flags.
+func RejectLegacyPreReview(v *viper.Viper) error {
+	for _, key := range []string{"pre-review-prompt", "pre-review-model"} {
+		if v.IsSet(key) {
+			return fmt.Errorf("%q is no longer supported; use review-pipeline-file instead", key)
+		}
+	}
+	return nil
 }
 
 // LoadProviderOptions loads provider options from the configured ProviderOptionsFile.
