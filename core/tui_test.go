@@ -131,6 +131,34 @@ func TestTUIModel_UsageSummaries(t *testing.T) {
 	require.Equal(t, 3, strings.Count(content, "(total)"))
 }
 
+func TestTUIModel_ClearsSubagentSpinnerOnCompletion(t *testing.T) {
+	t.Run("via zero-usage summary", func(t *testing.T) {
+		m := &tuiModel{}
+		m.Update(iterationMsg{iter: 1, stage: "Subagent: Security"})
+		m.Update(llmStatusMsg{stage: "Subagent: Security", status: "Formulating final subagent: security...", llmWaiting: true})
+		require.True(t, m.iterations[0].llmWaiting)
+
+		m.Update(usageSummaryMsg{stage: "Subagent: Security", total: llm.Usage{}})
+		require.False(t, m.iterations[0].llmWaiting)
+		require.Equal(t, "Stage completed.", m.iterations[0].llmStatus)
+	})
+
+	t.Run("via stage review without overwriting normal completion", func(t *testing.T) {
+		m := &tuiModel{}
+		m.Update(iterationMsg{iter: 1, stage: "Subagent: Normal"})
+		m.Update(toolCallsMsg{stage: "Subagent: Normal", iter: 1, tcs: nil})
+		m.Update(usageSummaryMsg{stage: "Subagent: Normal", total: llm.Usage{PromptTokens: 5, OutputTokens: 2}})
+		require.False(t, m.iterations[0].llmWaiting)
+		require.Equal(t, "LLM turn completed.", m.iterations[0].llmStatus)
+
+		m.Update(iterationMsg{iter: 1, stage: "Subagent: Capped"})
+		m.Update(llmStatusMsg{stage: "Subagent: Capped", status: "Formulating final subagent: capped...", llmWaiting: true})
+		m.Update(stageReviewMsg{title: "Capped", result: "Done."})
+		require.False(t, m.iterations[1].llmWaiting)
+		require.Equal(t, "Stage completed.", m.iterations[1].llmStatus)
+	})
+}
+
 func TestTUIModel_UsageSummaryCounters(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -214,6 +242,26 @@ func TestTUIReporter_StageDiagnosticsAndUsage(t *testing.T) {
 		require.Contains(t, output, want)
 	}
 	require.Equal(t, 2, strings.Count(output, "(total)"))
+}
+
+func TestTUIReporter_NotifyUserWhileRunning(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr tuiOutputCapture
+	r := NewTuiReporter(&stdout, &stderr, nil).(*tuiReporter)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+
+	r.ReportStageIteration("Subagent: Security", 1)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r.NotifyUser()
+		}()
+	}
+	wg.Wait()
+	require.NoError(t, r.Close())
+	require.Contains(t, stderr.String(), "\a")
 }
 
 func TestIndentText(t *testing.T) {

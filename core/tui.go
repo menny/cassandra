@@ -268,6 +268,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		autoScroll = true
 
 	case usageSummaryMsg:
+		m.finishStage(msg.stage)
 		if msg.total.PromptTokens <= 0 && msg.total.OutputTokens <= 0 && msg.total.CachedTokens <= 0 && msg.total.ThinkingTokens <= 0 {
 			break
 		}
@@ -285,6 +286,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		autoScroll = true
 
 	case stageReviewMsg:
+		if msg.title != "" {
+			m.finishStage("Subagent: " + msg.title)
+		}
 		m.stageReviews = append(m.stageReviews, stageReviewState{
 			stageReviewMsg:  msg,
 			afterIterations: len(m.iterations),
@@ -303,6 +307,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, cmd
+}
+
+func (m *tuiModel) finishStage(stage string) {
+	if stage == "" {
+		return
+	}
+	if current := m.findIteration(stage, 0); current != nil && current.llmWaiting {
+		current.llmWaiting = false
+		if strings.HasPrefix(current.llmStatus, "Formulating final ") {
+			current.llmStatus = "Stage completed."
+		}
+	}
 }
 
 // findIteration resolves stage-scoped callbacks without moving other stages' state.
@@ -824,6 +840,19 @@ func (r *tuiReporter) ReportError(err error) {
 }
 
 func (r *tuiReporter) NotifyUser() {
+	r.promptMu.Lock()
+	defer r.promptMu.Unlock()
+
+	r.mu.Lock()
+	prog := r.program
+	r.mu.Unlock()
+
+	if prog != nil {
+		_ = prog.ReleaseTerminal()
+		defer func() {
+			_ = prog.RestoreTerminal()
+		}()
+	}
 	fmt.Fprint(r.stderr, "\a")
 }
 

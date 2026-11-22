@@ -44,6 +44,9 @@ func (r *Reviewer) loadPipeline() error {
 // runPipeline schedules at most MaxConcurrency independent ReAct flights. Only
 // this coordinator publishes final reports and mutates aggregate review state.
 func (r *Reviewer) runPipeline(ctx context.Context, dynamic, request string, maxIterations int) (string, error) {
+	if len(r.Pipeline.Subagents) > 0 && r.Pipeline.MaxConcurrency <= 0 {
+		return "", errors.New("review pipeline max_concurrency must be positive")
+	}
 	pipelineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -60,7 +63,12 @@ func (r *Reviewer) runPipeline(ctx context.Context, dynamic, request string, max
 			next++
 			running++
 			subagent := r.Pipeline.Subagents[index]
-			reporter := &subagentReporter{Reporter: r.Agent.reporter, mu: &reportMu, prefix: fmt.Sprintf("subagent_%d_", index)}
+			reporter := &subagentReporter{
+				Reporter: r.Agent.reporter,
+				mu:       &reportMu,
+				prefix:   fmt.Sprintf("subagent_%d_", index),
+				stage:    "Subagent: " + subagent.Title,
+			}
 			go func() {
 				results <- r.runSubagent(pipelineCtx, index, subagent, reporter, dynamic, request, maxIterations)
 			}()

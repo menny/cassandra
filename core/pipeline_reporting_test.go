@@ -112,6 +112,18 @@ func TestPipelineRejectsUnscopedDispatcher(t *testing.T) {
 	require.Empty(t, main.calls)
 }
 
+func TestPipelineRejectsNonPositiveConcurrency(t *testing.T) {
+	r, main, _ := newPipelineReviewer(t, &config.ReviewPipeline{
+		MaxConcurrency: 0,
+		Subagents:      []config.Subagent{{Title: "Security", Prompt: "review"}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := r.Run(ctx, nil, "request")
+	require.ErrorContains(t, err, "max_concurrency must be positive")
+	require.Empty(t, main.calls)
+}
+
 func TestSubagentReporterFallbackRetryIsAttributed(t *testing.T) {
 	parent := &pipelineReporter{}
 	reporter := &subagentReporter{Reporter: parent, mu: &sync.Mutex{}}

@@ -161,6 +161,36 @@ func TestRawWriter_ConcurrentWrites(t *testing.T) {
 	require.Equal(t, 50, strings.Count(output.String(), "stderr\n"))
 }
 
+func TestConsoleReporter_StageAttribution(t *testing.T) {
+	for _, render := range []string{"raw", "markdown"} {
+		t.Run(render, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			var r Reporter = NewRawReporter(&stdout, &stderr)
+			if render == "markdown" {
+				r = NewMarkdownReporter(&stdout, &stderr)
+			}
+			staged := r.(*consoleReporter)
+			staged.ReportStageToolCalls("Subagent: Security", 1, []llm.ToolCall{
+				{Name: "read_file", Arguments: `{"file_path":"a.go"}`},
+				{Name: "grep_search", Arguments: `{"pattern":"foo"}`},
+			})
+			staged.ReportStageUsage("Subagent: Security", llm.Usage{PromptTokens: 10, OutputTokens: 5, CachedTokens: 2, ThinkingTokens: 3})
+			staged.ReportStageUsageSummary("Subagent: Security", llm.Usage{PromptTokens: 10, OutputTokens: 5, CachedTokens: 2, ThinkingTokens: 3})
+			staged.ReportStageCapReached("Subagent: Security", 4)
+			staged.ReportStageTruncated("Subagent: Security", 2048)
+
+			output := stripANSI(stderr.String())
+			require.Contains(t, output, "[Subagent: Security] * 🛠️  [Tool] read_file")
+			require.Contains(t, output, "[Subagent: Security] * 🛠️  [Tool] grep_search")
+			require.Contains(t, output, "📊 [Subagent: Security] 12 in, 8 out (2 cached, 3 thinking)")
+			require.Contains(t, output, "📈 [Subagent: Security] 12 in, 8 out (total)")
+			require.Contains(t, output, "⚠️  [Subagent: Security] Reached maximum ReAct iterations (4)")
+			require.Contains(t, output, "⚠️  [Subagent: Security] LLM response truncated (hit max-tokens limit of 2048)")
+			require.Empty(t, stdout.String())
+		})
+	}
+}
+
 func TestConsoleReporter_Markdown(t *testing.T) {
 	t.Setenv("CLICOLOR_FORCE", "1")
 	var stdout bytes.Buffer

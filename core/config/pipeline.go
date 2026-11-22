@@ -122,6 +122,9 @@ func (s *Subagent) loadPrompt(directory string) error {
 // ResolveLLM inherits omitted fields from main and clones provider option maps and
 // slices recursively, preserving concrete types without a lossy JSON round trip.
 func (s Subagent) ResolveLLM(main *Config) ResolvedLLM {
+	if main == nil {
+		main = &Config{}
+	}
 	resolved := ResolvedLLM{
 		Provider:        main.Provider,
 		Model:           main.Model,

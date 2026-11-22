@@ -273,6 +273,14 @@ func TestResolveLLMInheritanceAndIsolation(t *testing.T) {
 	if again := s.ResolveLLM(main); !reflect.DeepEqual(again, want) {
 		t.Fatalf("resolution mutated main: %+v", again)
 	}
+	t.Run("nil main config", func(t *testing.T) {
+		provider, model := "google", "gemini-test"
+		sub := Subagent{LLM: LLMOverrides{Provider: &provider, Model: &model}}
+		got := sub.ResolveLLM(nil)
+		if got.Provider != "google" || got.Model != "gemini-test" || got.MaxTokens != 0 {
+			t.Fatalf("unexpected resolved config for nil main: %+v", got)
+		}
+	})
 	t.Run("nil options", func(t *testing.T) {
 		if got := s.ResolveLLM(&Config{}); got.ProviderOptions != nil {
 			t.Errorf("nil options changed: %#v", got.ProviderOptions)

@@ -203,15 +203,31 @@ func (r *consoleReporter) ReportStageIteration(stage string, iter int) {
 }
 
 func (r *consoleReporter) ReportToolCalls(tcs []llm.ToolCall) {
+	r.ReportStageToolCalls("", 0, tcs)
+}
+
+// ReportStageToolCalls prefixes formatted tool activity with its stage label
+// when concurrent subagents share console stderr.
+func (r *consoleReporter) ReportStageToolCalls(stage string, _ int, tcs []llm.ToolCall) {
 	formatted := r.formatter.FormatToolCalls(tcs)
-	if len(formatted) > 0 {
-		r.writer.WriteStderr(formatted)
+	if len(formatted) == 0 {
+		return
 	}
+	if stage != "" {
+		formatted = prefixStageLines(stage, formatted)
+	}
+	r.writer.WriteStderr(formatted)
 }
 
 func (r *consoleReporter) ReportUsage(usage llm.Usage) {
+	r.ReportStageUsage("", usage)
+}
+
+// ReportStageUsage prints per-turn token usage with an optional stage prefix.
+func (r *consoleReporter) ReportStageUsage(stage string, usage llm.Usage) {
 	if usage.PromptTokens >= 0 && usage.OutputTokens >= 0 {
-		msg := fmt.Sprintf("📊 %d in, %d out", usage.TotalInput(), usage.TotalOutput())
+		prefix := stagePrefix(stage)
+		msg := fmt.Sprintf("📊 %s%d in, %d out", prefix, usage.TotalInput(), usage.TotalOutput())
 		var breakdown []string
 		if usage.CachedTokens > 0 {
 			breakdown = append(breakdown, fmt.Sprintf("%d cached", usage.CachedTokens))
@@ -227,8 +243,13 @@ func (r *consoleReporter) ReportUsage(usage llm.Usage) {
 }
 
 func (r *consoleReporter) ReportUsageSummary(total llm.Usage) {
+	r.ReportStageUsageSummary("", total)
+}
+
+// ReportStageUsageSummary prints cumulative token usage with an optional stage prefix.
+func (r *consoleReporter) ReportStageUsageSummary(stage string, total llm.Usage) {
 	if total.PromptTokens > 0 || total.OutputTokens > 0 {
-		r.writer.WriteStderr(fmt.Sprintf("📈 %d in, %d out (total)\n", total.TotalInput(), total.TotalOutput()))
+		r.writer.WriteStderr(fmt.Sprintf("📈 %s%d in, %d out (total)\n", stagePrefix(stage), total.TotalInput(), total.TotalOutput()))
 	}
 }
 
@@ -271,13 +292,41 @@ func (r *consoleReporter) ReportEmptyResponseRetry(attempt int) {
 }
 
 func (r *consoleReporter) ReportCapReached(maxIterations int) {
-	msg := fmt.Sprintf("⚠️  Reached maximum ReAct iterations (%d). Forcing final review.", maxIterations)
+	r.ReportStageCapReached("", maxIterations)
+}
+
+// ReportStageCapReached attributes the iteration-limit warning to its stage.
+func (r *consoleReporter) ReportStageCapReached(stage string, maxIterations int) {
+	msg := fmt.Sprintf("⚠️  %sReached maximum ReAct iterations (%d). Forcing final review.", stagePrefix(stage), maxIterations)
 	r.writeStyledStderr(msg, msg, "208", true)
 }
 
 func (r *consoleReporter) ReportTruncated(maxTokens int) {
-	msg := fmt.Sprintf("⚠️  LLM response truncated (hit max-tokens limit of %d). The review may be incomplete.", maxTokens)
+	r.ReportStageTruncated("", maxTokens)
+}
+
+// ReportStageTruncated attributes the token-limit warning to its stage.
+func (r *consoleReporter) ReportStageTruncated(stage string, maxTokens int) {
+	msg := fmt.Sprintf("⚠️  %sLLM response truncated (hit max-tokens limit of %d). The review may be incomplete.", stagePrefix(stage), maxTokens)
 	r.writeStyledStderr(msg, msg, "208", true)
+}
+
+func stagePrefix(stage string) string {
+	if stage == "" {
+		return ""
+	}
+	return "[" + stage + "] "
+}
+
+func prefixStageLines(stage, text string) string {
+	prefix := stagePrefix(stage)
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (r *consoleReporter) ReportMCPStatus(name string, status string, err error) {
