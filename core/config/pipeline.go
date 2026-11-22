@@ -12,6 +12,11 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// DefaultPipelineMaxConcurrency caps concurrent static pipeline subagents unless
+// the pipeline file overrides it, and concurrent dynamic subagents when no
+// pipeline is configured.
+const DefaultPipelineMaxConcurrency = 4
+
 // ReviewPipeline describes the subagents to run before the main reviewer.
 type ReviewPipeline struct {
 	MaxConcurrency int        `toml:"max_concurrency"`
@@ -67,7 +72,7 @@ func LoadReviewPipeline(path string) (*ReviewPipeline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read review pipeline %q: %w", path, err)
 	}
-	pipeline := &ReviewPipeline{MaxConcurrency: 4}
+	pipeline := &ReviewPipeline{MaxConcurrency: DefaultPipelineMaxConcurrency}
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(pipeline); err != nil {
 		return nil, fmt.Errorf("decode review pipeline %q: %w", path, err)
 	}

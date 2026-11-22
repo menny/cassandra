@@ -352,6 +352,22 @@ func (r *consoleReporter) ReportReviewHeader(files int, guidelines string, model
 	r.writer.WriteStderr(r.formatter.FormatReviewHeader(files, guidelines, model))
 }
 
+// describeDynamicSubagents summarizes the run_subagent settings for the config table.
+func describeDynamicSubagents(cfg *config.Config) string {
+	if !cfg.AllowSubagents {
+		return "disabled"
+	}
+	mcps := "off"
+	if cfg.AllowSubagentMCPs {
+		mcps = "on"
+	}
+	model := "inherited"
+	if cfg.SubagentModel != "" {
+		model = cfg.SubagentModel
+	}
+	return fmt.Sprintf("enabled (model: %s, MCPs: %s)", model, mcps)
+}
+
 func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 	t := table.New().Headers("Configuration", "Value")
 	t.Row("Working Directory", targetDir)
@@ -395,6 +411,7 @@ func buildConfigTable(cfg *config.Config, targetDir string) *table.Table {
 	if cfg.ReviewPipelineFile != "" {
 		t.Row("Review Pipeline File", cfg.ReviewPipelineFile)
 	}
+	t.Row("Dynamic Subagents", describeDynamicSubagents(cfg))
 	t.Row("API Key", "[PROVIDED]")
 	return t
 }
@@ -557,6 +574,8 @@ func (rawFormatter) FormatToolCalls(tcs []llm.ToolCall) string {
 				sb.WriteString("  " + line + "\n")
 			}
 			sb.WriteString("\n")
+		} else if title, task, ok := parseRunSubagent(tc); ok {
+			fmt.Fprintf(&sb, "* %s  [Subagent] %s — %s\n", subagentIcon, title, compactSubagentTask(task, 120))
 		} else {
 			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", tc.Name, compactToolCallArgs(tc))
 		}
@@ -661,8 +680,9 @@ func (markdownFormatter) FormatToolCalls(tcs []llm.ToolCall) string {
 	toolNameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("216")) // Warm Amber / Peach
 	toolArgsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("243")) // Muted Stone Grey
 
-	stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167")) // Terracotta / Warm Clay
-	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223")) // Soft Sand / Cream
+	stateStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("167"))    // Terracotta / Warm Clay
+	focusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("223"))    // Soft Sand / Cream
+	subagentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("110")) // Steel Blue
 
 	for _, tc := range tcs {
 		if focusArea, message, ok := parseReviewerState(tc); ok {
@@ -680,6 +700,8 @@ func (markdownFormatter) FormatToolCalls(tcs []llm.ToolCall) string {
 			msg := renderMarkdown(message, os.Stderr)
 			messageStyle := lipgloss.NewStyle().MarginLeft(2).MarginBottom(1)
 			sb.WriteString(messageStyle.Render(msg))
+		} else if title, task, ok := parseRunSubagent(tc); ok {
+			fmt.Fprintf(&sb, "* %s  %s %s %s\n", subagentIcon, subagentStyle.Render("[Subagent]"), toolNameStyle.Render(title), toolArgsStyle.Render("— "+compactSubagentTask(task, 120)))
 		} else {
 			argsStr := compactToolCallArgs(tc)
 			fmt.Fprintf(&sb, "* 🛠️  [Tool] %s(%s)\n", toolNameStyle.Render(tc.Name), toolArgsStyle.Render(argsStr))

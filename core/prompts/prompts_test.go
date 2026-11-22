@@ -53,7 +53,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	changedFiles := []string{"foo.go"}
 
-	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", nil, "", false, false, false, false, false, "")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "Is this code maintainable, easy to work with, and safe?", nil, "", false, false, false, false, false, false, false, "")
 	require.NoError(t, err)
 
 	// Combine for checks that don't care about the split point.
@@ -122,7 +122,7 @@ func TestBuildSystemPrompt_DeterministicZone3Ordering(t *testing.T) {
 	const runs = 20
 	var firstDynamic string
 	for i := range runs {
-		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", nil, "", false, false, false, false, false, "")
+		_, dynamic, _, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		if i == 0 {
 			firstDynamic = dynamic
@@ -154,7 +154,7 @@ func TestBuildSystemPrompt_Override(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()
 
-	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", nil, "CUSTOM APPROVAL HERE", false, false, false, false, false, "")
+	stable, dynamic, _, err := BuildSystemPrompt(tmpDir, nil, "CUSTOM GUIDELINES HERE", nil, "CUSTOM APPROVAL HERE", false, false, false, false, false, false, false, "")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "You are a code review bot - named Cassandra - for the provided codebase."))
@@ -192,7 +192,7 @@ func TestBuildSystemPrompt_Summary(t *testing.T) {
 	))
 
 	changedFiles := []string{"main.go", "pkg/sub/helper.go"}
-	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", nil, "", false, false, false, false, false, "")
+	stable, dynamic, summary, err := BuildSystemPrompt(tmpDir, changedFiles, "guidelines content", nil, "", false, false, false, false, false, false, false, "")
 	require.NoError(t, err)
 
 	// Lengths must match the actual strings.
@@ -227,7 +227,7 @@ func TestBuildSystemPrompt_SupplementalGuidelines(t *testing.T) {
 	main := "MAIN GUIDELINES"
 	supplemental := []string{"SUPP 1", "SUPP 2"}
 
-	stable, _, _, err := BuildSystemPrompt(tmpDir, nil, main, supplemental, "", false, false, false, false, false, "")
+	stable, _, _, err := BuildSystemPrompt(tmpDir, nil, main, supplemental, "", false, false, false, false, false, false, false, "")
 	require.NoError(t, err)
 
 	require.True(t, strings.Contains(stable, "<code_review_guidelines>\nMAIN GUIDELINES\n</code_review_guidelines>"))
@@ -245,14 +245,14 @@ func TestBuildSystemPrompt_AllowAskDeveloper(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowAskDeveloper is true", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.Contains(t, stable, "<ask_developer_guidelines>")
 		require.Contains(t, stable, "You have access to the `ask_developer` tool to ask the developer clarifying questions")
 	})
 
 	t.Run("when allowAskDeveloper is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.NotContains(t, stable, "<ask_developer_guidelines>")
 	})
@@ -263,7 +263,7 @@ func TestBuildSystemPrompt_AllowT3ThreadLaunch(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowT3ThreadLaunch is true with current model", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, false, "gemini-3.8-flash-high", true)
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, false, false, false, "gemini-3.8-flash-high", true)
 		require.NoError(t, err)
 		require.Contains(t, stable, "<t3_thread_launch_guidelines>")
 		require.Contains(t, stable, "t3_thread_launch")
@@ -276,14 +276,14 @@ func TestBuildSystemPrompt_AllowT3ThreadLaunch(t *testing.T) {
 	})
 
 	t.Run("when promptForHarness is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, false, "gemini-3.8-flash-high", false)
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, true, false, false, false, false, false, "gemini-3.8-flash-high", false)
 		require.NoError(t, err)
 		require.Contains(t, stable, "Deterministic Selection")
 		require.NotContains(t, stable, "Interactive Clarification with `ask_developer`")
 	})
 
 	t.Run("when allowT3ThreadLaunch is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.NotContains(t, stable, "<t3_thread_launch_guidelines>")
 	})
@@ -294,7 +294,7 @@ func TestBuildSystemPrompt_AllowOmnigentLaunch(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowOmnigentLaunch is true with current model", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, true, false, false, "gemini-3.8-flash-high", true)
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, true, false, false, false, false, "gemini-3.8-flash-high", true)
 		require.NoError(t, err)
 		require.Contains(t, stable, "<omnigent_session_launch_guidelines>")
 		require.Contains(t, stable, "omnigent_session_launch")
@@ -308,14 +308,14 @@ func TestBuildSystemPrompt_AllowOmnigentLaunch(t *testing.T) {
 	})
 
 	t.Run("when promptForHarness is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, true, false, false, "gemini-3.8-flash-high", false)
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", true, false, true, false, false, false, false, "gemini-3.8-flash-high", false)
 		require.NoError(t, err)
 		require.Contains(t, stable, "Deterministic Selection")
 		require.NotContains(t, stable, "Interactive Clarification with `ask_developer`")
 	})
 
 	t.Run("when allowOmnigentLaunch is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.NotContains(t, stable, "<omnigent_session_launch_guidelines>")
 	})
@@ -326,7 +326,7 @@ func TestBuildSystemPrompt_PRCommentGuidelines(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowPRComment is true", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, true, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, true, false, false, false, "")
 		require.NoError(t, err)
 		require.Contains(t, stable, "<pr_comment_guidelines>")
 		require.Contains(t, stable, "post_pr_comment")
@@ -337,7 +337,7 @@ func TestBuildSystemPrompt_PRCommentGuidelines(t *testing.T) {
 	})
 
 	t.Run("when allowPRComment is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.NotContains(t, stable, "<pr_comment_guidelines>")
 	})
@@ -348,15 +348,64 @@ func TestBuildSystemPrompt_URLFetchGuidelines(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("when allowURLFetch is true", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, true, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, true, false, false, "")
 		require.NoError(t, err)
 		require.Contains(t, stable, "<url_fetch_guidelines>")
 		require.Contains(t, stable, "mcp-server-fetch_fetch")
 	})
 
 	t.Run("when allowURLFetch is false", func(t *testing.T) {
-		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, "")
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, false, "")
 		require.NoError(t, err)
 		require.NotContains(t, stable, "<url_fetch_guidelines>")
 	})
+}
+
+func TestBuildSystemPrompt_SubagentGuidelines(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "AGENTS.md"), []byte("ROOT AGENTS"), 0o644))
+
+	t.Run("enabled with MCPs lives in zone 2 before zone 3", func(t *testing.T) {
+		stable, dynamic, _, err := BuildSystemPrompt(tmpDir, []string{"a.go"}, "guidelines", nil, "", false, false, false, false, true, true, true, "")
+		require.NoError(t, err)
+		require.Contains(t, stable, "<subagent_guidelines>")
+		require.Contains(t, stable, "`run_subagent`")
+		require.Contains(t, stable, "ONLY the subagent's final message is returned to you")
+		require.Contains(t, stable, "multiple `run_subagent` calls in a single turn")
+		require.Contains(t, stable, "cannot call `ask_developer`")
+		require.Contains(t, stable, "Configured MCP tools are available to subagents")
+		require.NotContains(t, stable, "ROOT AGENTS")
+		require.NotContains(t, dynamic, "<subagent_guidelines>")
+		require.Contains(t, dynamic, "ROOT AGENTS")
+	})
+
+	t.Run("MCPs disabled", func(t *testing.T) {
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, true, false, "")
+		require.NoError(t, err)
+		require.Contains(t, stable, "MCP tools are NOT available to subagents")
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		stable, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, false, true, "")
+		require.NoError(t, err)
+		require.NotContains(t, stable, "<subagent_guidelines>")
+	})
+
+	t.Run("stable prefix is independent of per-PR files", func(t *testing.T) {
+		a, _, _, err := BuildSystemPrompt(tmpDir, []string{"a.go"}, "guidelines", nil, "", false, false, false, false, false, true, true, "")
+		require.NoError(t, err)
+		b, _, _, err := BuildSystemPrompt(tmpDir, nil, "guidelines", nil, "", false, false, false, false, false, true, true, "")
+		require.NoError(t, err)
+		require.Equal(t, a, b)
+	})
+}
+
+func TestBuildDynamicSubagentPrompt(t *testing.T) {
+	t.Parallel()
+	prompt := BuildDynamicSubagentPrompt()
+	require.Contains(t, prompt, "Only your final message is returned")
+	require.Contains(t, prompt, "cannot spawn other subagents")
+	require.Contains(t, prompt, "cannot ask the developer")
+	require.Contains(t, prompt, "file paths, symbol names, and line numbers")
 }

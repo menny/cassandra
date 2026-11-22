@@ -111,7 +111,7 @@ func (r *Reviewer) runPipeline(ctx context.Context, dynamic, request string, max
 			continue
 		}
 		subagent := r.Pipeline.Subagents[i]
-		r.SubagentMetrics = append(r.SubagentMetrics, PhaseMetrics{
+		r.appendSubagentMetrics(PhaseMetrics{
 			Phase: "subagent", Title: subagent.Title, Metrics: result.metrics,
 		})
 		if !subagent.ReviewerInput && result.err == nil {

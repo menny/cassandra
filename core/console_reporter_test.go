@@ -77,6 +77,15 @@ func TestConsoleReporter_Raw(t *testing.T) {
 		require.Contains(t, stderr.String(), "Analyzing files")
 	})
 
+	t.Run("ReportToolCalls run_subagent", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportToolCalls([]llm.ToolCall{
+			{ID: "1", Name: "run_subagent", Arguments: `{"title":"Trace auth","task":"find\ncallers of  Authenticate"}`},
+		})
+		require.Equal(t, "* 🛰️  [Subagent] Trace auth — find callers of Authenticate\n", stderr.String())
+		require.NotContains(t, stderr.String(), "🛠️")
+	})
+
 	t.Run("ReportStageIteration prints stage name", func(t *testing.T) {
 		stderr.Reset()
 		r.ReportStageIteration("Pre-Review Summary", 2)
@@ -107,6 +116,24 @@ func TestConsoleReporter_Raw(t *testing.T) {
 		stderr.Reset()
 		r.ReportPostReviewReply("Auth uses JWT tokens.")
 		require.Equal(t, "Auth uses JWT tokens.\n", stderr.String())
+	})
+
+	t.Run("ReportConfig prints dynamic subagent settings", func(t *testing.T) {
+		cfg := config.NewDefaultConfig()
+		for _, tc := range []struct {
+			mutate func(*config.Config)
+			want   string
+		}{
+			{func(*config.Config) {}, "enabled (model: inherited, MCPs: on)"},
+			{func(c *config.Config) { c.AllowSubagentMCPs = false; c.SubagentModel = "cheap" }, "enabled (model: cheap, MCPs: off)"},
+			{func(c *config.Config) { c.AllowSubagents = false }, "disabled"},
+		} {
+			stderr.Reset()
+			c := *cfg
+			tc.mutate(&c)
+			r.ReportConfig(&c, "/workspace")
+			require.Contains(t, stderr.String(), tc.want)
+		}
 	})
 
 	t.Run("ReportConfig prints review pipeline file", func(t *testing.T) {
@@ -272,6 +299,18 @@ func TestConsoleReporter_Markdown(t *testing.T) {
 		})
 		require.Contains(t, stderr.String(), "Reviewer state")
 		require.Contains(t, stderr.String(), "security")
+	})
+
+	t.Run("ReportToolCalls run_subagent", func(t *testing.T) {
+		stderr.Reset()
+		r.ReportToolCalls([]llm.ToolCall{
+			{Name: "run_subagent", Arguments: `{"title":"Trace auth","task":"find callers"}`},
+		})
+		out := stripANSI(stderr.String())
+		require.Contains(t, out, "🛰️")
+		require.Contains(t, out, "[Subagent] Trace auth — find callers")
+		require.NotContains(t, out, "🛠️")
+		require.NotContains(t, out, `"title"`)
 	})
 
 	t.Run("ReportStageIteration prints styled stage text", func(t *testing.T) {

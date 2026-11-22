@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/huh"
@@ -43,6 +44,18 @@ type Reviewer struct {
 
 	verdictMu      sync.RWMutex
 	currentVerdict ReviewVerdict
+
+	// Dynamic subagent (run_subagent) state. dynamicMu guards the per-review
+	// prompt context; metricsMu guards SubagentMetrics; reportMu serializes
+	// reporter callbacks across concurrent subagents.
+	dynamicMu            sync.Mutex
+	dynamicPrompt        string
+	dynamicMaxIterations int
+	metricsMu            sync.Mutex
+	reportMu             sync.Mutex
+	dynamicSubagentSeq   atomic.Int64
+	subagentSemOnce      sync.Once
+	subagentSem          chan struct{}
 }
 
 // SetVerdict sets the current review verdict in a thread-safe manner.
@@ -65,6 +78,14 @@ func allowAskDeveloper(cfg *config.Config) bool {
 
 func allowURLFetch(cfg *config.Config) bool {
 	return cfg != nil && cfg.AllowURLFetch
+}
+
+func allowSubagents(cfg *config.Config) bool {
+	return cfg != nil && cfg.AllowSubagents
+}
+
+func allowSubagentMCPs(cfg *config.Config) bool {
+	return cfg != nil && cfg.AllowSubagentMCPs
 }
 
 func isACPSession(cfg *config.Config) bool {
@@ -217,7 +238,7 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 			promptForHarness = cfg.T3.PromptForHarness
 		}
 	}
-	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), tools.IsOmnigentSession(), includePRComment, includeURLFetch, currentModel, promptForHarness)
+	stable, _, _, err := prompts.BuildSystemPrompt(targetDir, nil, mainGuidelines, supplementalGuidelines, approvalEvaluationPrompt, includeAskDeveloper, tools.IsT3Session(), tools.IsOmnigentSession(), includePRComment, includeURLFetch, allowSubagents(cfg), allowSubagentMCPs(cfg), currentModel, promptForHarness)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build stable system prompt: %w", err)
 	}
@@ -238,6 +259,9 @@ func NewReviewer(ctx context.Context, cfg *config.Config, targetDir string, repo
 		rReviewer.SetVerdict(ReviewVerdict(verdict))
 		return nil
 	})
+	if allowSubagents(cfg) {
+		rReviewer.registerRunSubagent(registry)
+	}
 	return rReviewer, nil
 }
 
@@ -305,7 +329,7 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 	if err := r.loadPipeline(); err != nil {
 		return "", err
 	}
-	r.SubagentMetrics = nil
+	r.resetSubagentMetrics()
 	r.CodeReviewMetrics = nil
 	if r.Config != nil && r.Config.WaitForMessage {
 		var err error
@@ -325,10 +349,12 @@ func (r *Reviewer) Run(ctx context.Context, changedFiles []string, requestText s
 			promptForHarness = r.Config.T3.PromptForHarness
 		}
 	}
-	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), tools.IsOmnigentSession(), isACPSession(r.Config), allowURLFetch(r.Config), currentModel, promptForHarness)
+	_, dynamic, _, err := prompts.BuildSystemPrompt(r.RootDir, changedFiles, r.Guidelines, r.SupplementalGuidelines, r.ApprovalEvaluationPrompt, allowAskDeveloper(r.Config), tools.IsT3Session(), tools.IsOmnigentSession(), isACPSession(r.Config), allowURLFetch(r.Config), allowSubagents(r.Config), allowSubagentMCPs(r.Config), currentModel, promptForHarness)
 	if err != nil {
 		return "", fmt.Errorf("failed to build dynamic system prompt: %w", err)
 	}
+
+	r.setDynamicSubagentContext(dynamic, len(changedFiles))
 
 	if r.Pipeline != nil {
 		requestText, err = r.runPipeline(ctx, dynamic, requestText, CalculateMaxIterations(len(changedFiles)))
@@ -605,7 +631,7 @@ func (r *Reviewer) RunInteractivePostReview(ctx context.Context) error {
 // GetMetrics returns subagent metrics in declaration order, followed by review and discussion metrics.
 func (r *Reviewer) GetMetrics() ReviewMetrics {
 	var phases []PhaseMetrics
-	phases = append(phases, r.SubagentMetrics...)
+	phases = append(phases, r.subagentMetricsSnapshot()...)
 	if r.CodeReviewMetrics != nil {
 		phases = append(phases, PhaseMetrics{
 			Phase:   "review",

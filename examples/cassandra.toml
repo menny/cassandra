@@ -13,6 +13,12 @@ supplemental-guidelines = [
 ]
 allow-url-fetch = true
 
+# Dynamic subagents (run_subagent tool). All default to the values shown.
+allow-subagents = true
+allow-subagent-mcps = true
+# Optional cheaper model for dynamic subagents; empty inherits the main model.
+# subagent-model = "gemini-3.6-flash"
+
 provider-options-file = ".cassandra.google.provider.settings.json"
 
 # T3 Code orchestration settings (applied when running inside T3 Code)

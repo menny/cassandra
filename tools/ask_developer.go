@@ -98,7 +98,7 @@ func registerAskDeveloper(r *Registry, prompter DeveloperPrompter, notifier User
 			return "", fmt.Errorf("marshaling ask_developer response: %w", err)
 		}
 		return string(jsonBytes), nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 }
 
 // DefaultTerminalPrompter prompts the developer via Charm huh forms in the terminal.

@@ -5,6 +5,7 @@ go_library(
     srcs = ["prompts.go"],
     embedsrcs = [
         "approval_evaluation_prompt.md",
+        "dynamic_subagent_prompt.md",
         "extraction_prompt.md",
         "library/README.md",
         "library/asana-do-try-consider.md",

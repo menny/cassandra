@@ -391,7 +391,9 @@ func (m *tuiModel) renderContent() string {
 		m.renderStageReviews(&sb, i)
 
 		label := fmt.Sprintf("🔍 [Iteration %d]", it.iter)
-		if it.stage != "" {
+		if strings.HasPrefix(it.stage, "Subagent: ") {
+			label = fmt.Sprintf("%s [%s - Iteration %d]", subagentIcon, it.stage, it.iter)
+		} else if it.stage != "" {
 			label = fmt.Sprintf("🔍 [%s - Iteration %d]", it.stage, it.iter)
 		}
 		sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("178")).Render(label) + "\n")
@@ -441,17 +443,21 @@ func (m *tuiModel) renderContent() string {
 			for _, tc := range it.toolCalls {
 				var statusStr string
 				argsStr := compactToolCallArgsString(tc.arguments)
+				name := tc.name
+				if title, _, ok := parseRunSubagent(llm.ToolCall{Name: tc.name, Arguments: tc.arguments}); ok {
+					name, argsStr = subagentIcon+" Subagent", title
+				}
 
 				switch tc.status {
 				case "queued":
-					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusQueued)
+					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(name), toolArgsStyle.Render(argsStr), statusQueued)
 				case "started":
-					statusStr = fmt.Sprintf("    %s %s(%s): %s", m.spinner.View(), toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusRunning)
+					statusStr = fmt.Sprintf("    %s %s(%s): %s", m.spinner.View(), toolNameStyle.Render(name), toolArgsStyle.Render(argsStr), statusRunning)
 				case "completed":
-					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusDone)
+					statusStr = fmt.Sprintf("    %s(%s): %s", toolNameStyle.Render(name), toolArgsStyle.Render(argsStr), statusDone)
 				case "failed":
 					statusFailed := lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Render(fmt.Sprintf("failed: %v", tc.err)) // Deep Crimson
-					statusStr = fmt.Sprintf("    %s(%s): %s ⚠️", toolNameStyle.Render(tc.name), toolArgsStyle.Render(argsStr), statusFailed)
+					statusStr = fmt.Sprintf("    %s(%s): %s ⚠️", toolNameStyle.Render(name), toolArgsStyle.Render(argsStr), statusFailed)
 				}
 				sb.WriteString(statusStr + "\n")
 			}
