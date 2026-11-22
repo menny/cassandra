@@ -146,9 +146,7 @@ func (r *Reviewer) runSubagent(ctx context.Context, index int, subagent config.S
 		result.err = err
 		return result
 	}
-	registry, ok := r.Agent.registry.(interface {
-		ForSubagent(bool) tools.Dispatcher
-	})
+	registry, ok := r.Agent.registry.(subagentDispatcherProvider)
 	if !ok {
 		result.err = errors.New("tool dispatcher does not support subagent access policies")
 		return result
