@@ -241,3 +241,49 @@ model = "gemini-3.1-pro-preview"
 		}
 	})
 }
+
+func TestSubagentDefaultsAndOverrides(t *testing.T) {
+	defaults := NewDefaultConfig()
+	if !defaults.AllowSubagents || !defaults.AllowSubagentMCPs || defaults.SubagentModel != "" {
+		t.Errorf("unexpected NewDefaultConfig subagent defaults: %+v", defaults)
+	}
+
+	write := func(t *testing.T, content string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "cassandra.toml")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+		return path
+	}
+
+	cfg, err := Load(write(t, `provider = "google"`))
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if !cfg.AllowSubagents || !cfg.AllowSubagentMCPs || cfg.SubagentModel != "" {
+		t.Errorf("unexpected Load subagent defaults: %+v", cfg)
+	}
+
+	cfg, err = Load(write(t, "allow-subagents = false\nallow-subagent-mcps = false\nsubagent-model = \"cheap-model\"\n"))
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	if cfg.AllowSubagents || cfg.AllowSubagentMCPs || cfg.SubagentModel != "cheap-model" {
+		t.Errorf("TOML overrides not applied: %+v", cfg)
+	}
+}
+
+func TestDefaultPipelineMaxConcurrency(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pipeline.toml")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pipeline, err := LoadReviewPipeline(path)
+	if err != nil {
+		t.Fatalf("failed to load pipeline: %v", err)
+	}
+	if pipeline.MaxConcurrency != DefaultPipelineMaxConcurrency || DefaultPipelineMaxConcurrency != 4 {
+		t.Errorf("unexpected default concurrency %d", pipeline.MaxConcurrency)
+	}
+}

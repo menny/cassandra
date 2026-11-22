@@ -20,12 +20,21 @@ var extractionPrompt string
 //go:embed approval_evaluation_prompt.md
 var approvalEvaluationPrompt string
 
+//go:embed dynamic_subagent_prompt.md
+var dynamicSubagentPrompt string
+
 //go:embed library/*.md
 var libraryFS embed.FS
 
 // BuildExtractionPrompt constructs the system prompt for the structured extraction pass.
 func BuildExtractionPrompt() string {
 	return extractionPrompt
+}
+
+// BuildDynamicSubagentPrompt returns the system prompt for subagents the main
+// reviewer spawns on demand via the run_subagent tool.
+func BuildDynamicSubagentPrompt() string {
+	return dynamicSubagentPrompt
 }
 
 // GetLibraryPrompt returns the content of a named prompt from the library.
@@ -81,11 +90,12 @@ type PromptSummary struct {
 //  8. <omnigent_session_launch_guidelines> — semi-static, optional (Omnigent sessions only)
 //  9. <pr_comment_guidelines>          — semi-static, optional (ACP sessions only)
 //  10. <url_fetch_guidelines>           — semi-static, optional
+//  11. <subagent_guidelines>            — semi-static, optional (dynamic subagents enabled)
 //
 // Dynamic (Zone 3):
-//  11. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
-//  12. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
-func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowOmnigentLaunch bool, allowPRComment bool, allowURLFetch bool, currentModel string, promptForHarness ...bool) (stable, dynamic string, summary PromptSummary, err error) {
+//  12. <agents_guidelines>       — dynamic, varies per PR (AGENTS.md files)
+//  13. <reviewer_context>        — dynamic, varies per PR (REVIEWERS.md files)
+func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelinesContent string, supplementalGuidelinesContent []string, approvalEvaluationContent string, allowAskDeveloper bool, allowT3ThreadLaunch bool, allowOmnigentLaunch bool, allowPRComment bool, allowURLFetch bool, allowSubagents bool, allowSubagentMCPs bool, currentModel string, promptForHarness ...bool) (stable, dynamic string, summary PromptSummary, err error) {
 	if mainGuidelinesContent == "" {
 		return "", "", summary, fmt.Errorf("main guidelines content is required")
 	}
@@ -235,6 +245,30 @@ func BuildSystemPrompt(workspaceRoot string, changedFiles []string, mainGuidelin
 			"2. **When NOT to use**:\n" +
 			"   - Do NOT fetch arbitrary or unrelated URLs (e.g., generic license headers, homepage links, or standard library references that do not require external verification).\n" +
 			"</url_fetch_guidelines>\n"
+	}
+
+	if allowSubagents {
+		mcpNote := "MCP tools are NOT available to subagents."
+		if allowSubagentMCPs {
+			mcpNote = "Configured MCP tools are available to subagents in addition to the read-only repository tools."
+		}
+		stable += "\n<subagent_guidelines>\n" +
+			"You have access to the `run_subagent` tool, which runs a focused research subagent synchronously and returns its answer.\n\n" +
+			"1. **When to use**:\n" +
+			"   - Delegate deep or tangential exploration (e.g. tracing a call chain across many files, auditing every usage of a changed API, checking how a convention is applied repo-wide) so the details do not consume your own context window.\n" +
+			"   - To research independent questions in parallel, emit multiple `run_subagent` calls in a single turn; they run concurrently.\n" +
+			"   - Do NOT delegate trivial lookups that a single `read_file` or `grep_files` call can answer.\n\n" +
+			"2. **Writing the task**:\n" +
+			"   - Each subagent starts with a fresh session. It sees ONLY the `task` you pass (plus the repository guidelines), not this conversation, the diff, or your findings so far.\n" +
+			"   - Make the `task` fully self-contained: include exact file paths, symbol names, the specific question to answer, and the format you want the answer in.\n" +
+			"   - Give each subagent a short `title` describing its job.\n\n" +
+			"3. **What you get back**:\n" +
+			"   - ONLY the subagent's final message is returned to you. Its intermediate tool calls and reasoning are not visible, so ask it to cite file paths, symbols, and line numbers in that final message.\n" +
+			"   - Treat its answer as research input, not as a verdict: verify anything that is critical to a finding before relying on it.\n\n" +
+			"4. **Limits**:\n" +
+			"   - Subagents cannot spawn further subagents, cannot call `ask_developer`, and cannot modify PR state, review verdicts, or post comments. " + mcpNote + "\n" +
+			"   - A failed subagent returns an error result; continue the review with your own tools if that happens.\n" +
+			"</subagent_guidelines>\n"
 	}
 
 	// Zone 3 (dynamic) — placed last so the stable prefix above is never broken.

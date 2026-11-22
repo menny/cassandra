@@ -111,7 +111,7 @@ func (r *Reviewer) runPipeline(ctx context.Context, dynamic, request string, max
 			continue
 		}
 		subagent := r.Pipeline.Subagents[i]
-		r.SubagentMetrics = append(r.SubagentMetrics, PhaseMetrics{
+		r.appendSubagentMetrics(PhaseMetrics{
 			Phase: "subagent", Title: subagent.Title, Metrics: result.metrics,
 		})
 		if !subagent.ReviewerInput && result.err == nil {
@@ -146,9 +146,7 @@ func (r *Reviewer) runSubagent(ctx context.Context, index int, subagent config.S
 		result.err = err
 		return result
 	}
-	registry, ok := r.Agent.registry.(interface {
-		ForSubagent(bool) tools.Dispatcher
-	})
+	registry, ok := r.Agent.registry.(subagentDispatcherProvider)
 	if !ok {
 		result.err = errors.New("tool dispatcher does not support subagent access policies")
 		return result

@@ -40,6 +40,9 @@ type Config struct {
 	MCPConfigFile                string         `mapstructure:"mcp-config"`
 	AllowURLFetch                bool           `mapstructure:"allow-url-fetch"`
 	AllowAskDeveloper            bool           `mapstructure:"allow-ask-developer"`
+	AllowSubagents               bool           `mapstructure:"allow-subagents"`
+	AllowSubagentMCPs            bool           `mapstructure:"allow-subagent-mcps"`
+	SubagentModel                string         `mapstructure:"subagent-model"`
 	IgnoredLockFiles             []string       `mapstructure:"ignored-lock-files"`
 	ConfigFile                   string         `mapstructure:"config"`
 	WishlistDir                  string         `mapstructure:"wishlist-dir"`
@@ -81,6 +84,8 @@ func NewDefaultConfig() *Config {
 		IgnoredLockFiles:      util.DefaultLockFiles,
 		Render:                "raw",
 		AllowAskDeveloper:     false,
+		AllowSubagents:        true,
+		AllowSubagentMCPs:     true,
 		InteractivePostReview: false,
 		CassandraConfigFolder: "~/.cassandra",
 		T3: T3Config{
@@ -107,6 +112,8 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("ignored-lock-files", util.DefaultLockFiles)
 	v.SetDefault("allow-url-fetch", false)
 	v.SetDefault("allow-ask-developer", false)
+	v.SetDefault("allow-subagents", true)
+	v.SetDefault("allow-subagent-mcps", true)
 	v.SetDefault("interactive-post-review", false)
 	v.SetDefault("render", "raw")
 	v.SetDefault("cassandra-config-folder", "~/.cassandra")

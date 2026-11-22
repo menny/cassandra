@@ -59,6 +59,7 @@ var acpToolKinds = map[string]acp.ToolKind{
 	"get_file_at_ref":             acp.ToolKindRead,
 	"get_pr_stack":                acp.ToolKindRead,
 	"ask_developer":               acp.ToolKindOther,
+	runSubagentToolName:           acp.ToolKindThink,
 }
 
 func availableACPModes(desc string) []acp.SessionMode {
@@ -501,6 +502,11 @@ func (r *acpReporter) advancePlan(updates map[string]acp.PlanEntryStatus) {
 	r.mu.Lock()
 	changed := false
 	for step, status := range updates {
+		// Dynamic subagents report stage iterations from inside the main review
+		// and post-review chat; a finished step must never go back in progress.
+		if r.inPostReview || (r.planStatuses[step] == acp.PlanEntryStatusCompleted && status != acp.PlanEntryStatusCompleted) {
+			continue
+		}
 		if r.planStatuses[step] != status {
 			r.planStatuses[step] = status
 			changed = true
@@ -888,10 +894,7 @@ func (r *acpReporter) replayHistory(messages []llm.Message) {
 					if !known {
 						kind = acp.ToolKindOther
 					}
-					title := tc.Name
-					if compact := compactToolCallArgs(tc); compact != "" {
-						title = fmt.Sprintf("%s(%s)", tc.Name, compact)
-					}
+					title := acpToolCallTitle(tc)
 
 					callID := r.nextToolCallID()
 
@@ -1077,6 +1080,18 @@ func (r *acpReporter) ReportStageToolCalls(stage string, _ int, calls []llm.Tool
 	r.reportToolCalls(stage, calls)
 }
 
+// acpToolCallTitle is the ACP card title for a tool call; run_subagent calls
+// show the subagent's title rather than raw JSON arguments.
+func acpToolCallTitle(tc llm.ToolCall) string {
+	if title, _, ok := parseRunSubagent(tc); ok {
+		return subagentToolTitle(title)
+	}
+	if compact := compactToolCallArgs(tc); compact != "" {
+		return fmt.Sprintf("%s(%s)", tc.Name, compact)
+	}
+	return tc.Name
+}
+
 func acpStageText(stage, text string) string {
 	if stage == "" {
 		return text
@@ -1113,10 +1128,7 @@ func (r *acpReporter) reportToolCalls(stage string, tcs []llm.ToolCall) {
 			kind = acp.ToolKindOther
 		}
 
-		title := tc.Name
-		if compact := compactToolCallArgs(tc); compact != "" {
-			title = fmt.Sprintf("%s(%s)", tc.Name, compact)
-		}
+		title := acpToolCallTitle(tc)
 
 		opts := []acp.ToolCallStartOpt{
 			acp.WithStartKind(kind),

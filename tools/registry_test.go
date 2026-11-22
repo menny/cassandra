@@ -79,6 +79,7 @@ func TestSubagentRegistryPrivilegedLocalTools(t *testing.T) {
 		"omnigent_session_launch",
 		"update_review_verdict",
 		"post_pr_comment",
+		"ask_developer",
 	}
 	var parentNames []string
 	for _, def := range r.ToTools() {

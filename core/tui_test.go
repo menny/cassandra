@@ -270,3 +270,34 @@ func TestIndentText(t *testing.T) {
 	expected := "  line 1\n  line 2\n\n  line 3"
 	require.Equal(t, expected, got)
 }
+
+func TestTUIModel_SubagentPresentation(t *testing.T) {
+	m := &tuiModel{}
+	m.Update(iterationMsg{iter: 1, stage: "AI Code Review"})
+	m.Update(toolCallsMsg{stage: "AI Code Review", iter: 1, tcs: []llm.ToolCall{
+		{ID: "main_1", Name: "run_subagent", Arguments: `{"title":"Trace auth","task":"secret task body"}`},
+	}})
+	m.Update(iterationMsg{iter: 1, stage: "Subagent: Trace auth #1"})
+	m.Update(iterationMsg{iter: 2, stage: "Subagent: Trace auth #1"})
+	m.Update(iterationMsg{iter: 1, stage: "Subagent: Trace auth #2"})
+
+	content := stripANSI(m.renderContent())
+	require.Contains(t, content, "🛰️ Subagent(Trace auth)")
+	require.NotContains(t, content, "secret task body")
+	require.NotContains(t, content, "run_subagent")
+	require.Contains(t, content, "🛰️ [Subagent: Trace auth #1 - Iteration 2]")
+	require.Contains(t, content, "🛰️ [Subagent: Trace auth #2 - Iteration 1]")
+	require.Contains(t, content, "🔍 [AI Code Review - Iteration 1]")
+	require.NotNil(t, m.findIteration("Subagent: Trace auth #2", 1))
+	require.Equal(t, 1, m.findIteration("Subagent: Trace auth #2", 0).iter)
+}
+
+func TestTUIModel_UnstagedLookupSkipsNestedSubagents(t *testing.T) {
+	m := &tuiModel{}
+	m.Update(iterationMsg{iter: 1})
+	m.Update(iterationMsg{iter: 1, stage: "Subagent: Trace #1"})
+	main := m.findIteration("", 0)
+	require.NotNil(t, main)
+	require.Empty(t, main.stage, "unstaged events must resolve to the main agent iteration")
+	require.Equal(t, "Subagent: Trace #1", m.findIteration("Subagent: Trace #1", 0).stage)
+}

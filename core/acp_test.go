@@ -2038,3 +2038,114 @@ func TestACPConfigOptionsAdvertisesDefaultSlugWithConfiguredModelName(t *testing
 	require.Equal(t, acp.SessionConfigValueId(acpDefaultModelID), (*sel.Options.Ungrouped)[0].Value)
 	require.Equal(t, "claude-sonnet-5-5", (*sel.Options.Ungrouped)[0].Name)
 }
+
+func TestACPReporter_RunSubagentCardAndIsolatedStages(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, conn, client, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
+	require.NoError(t, err)
+	r := reporter.(*acpReporter)
+
+	require.Equal(t, acp.ToolKindThink, acpToolKinds[runSubagentToolName])
+
+	mainCall := llm.ToolCall{ID: "call_1", Name: runSubagentToolName, Arguments: `{"title":"Trace auth","task":"find callers"}`}
+	r.ReportToolCalls([]llm.ToolCall{mainCall})
+
+	// Two sibling subagents with identical titles and identical provider IDs.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	for seq := 1; seq <= 2; seq++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sr := &subagentReporter{
+				Reporter: r,
+				mu:       &mu,
+				prefix:   fmt.Sprintf("dynamic_subagent_%d_", seq),
+				stage:    fmt.Sprintf("Subagent: Trace auth #%d", seq),
+			}
+			sr.ReportStageIteration(fmt.Sprintf("Trace auth #%d", seq), 1)
+			call := llm.ToolCall{ID: "call_1", Name: "read_file", Arguments: `{"file_path":"auth.go"}`}
+			sr.ReportToolCalls([]llm.ToolCall{call})
+			sr.ReportToolStatus(call, "completed", nil)
+			sr.ReportUsage(llm.Usage{PromptTokens: 3, OutputTokens: 1})
+		}()
+	}
+	wg.Wait()
+	r.ReportToolStatus(mainCall, "failed", errors.New("subagent failed"))
+
+	var calls []*acp.SessionUpdateToolCall
+	var updates []*acp.SessionToolCallUpdate
+	var usages []*acp.SessionUsageUpdate
+	require.Eventually(t, func() bool {
+		calls, updates, usages = nil, nil, nil
+		for _, n := range client.snapshotUpdates() {
+			if n.Update.ToolCall != nil {
+				calls = append(calls, n.Update.ToolCall)
+			}
+			if n.Update.ToolCallUpdate != nil {
+				updates = append(updates, n.Update.ToolCallUpdate)
+			}
+			if n.Update.UsageUpdate != nil {
+				usages = append(usages, n.Update.UsageUpdate)
+			}
+		}
+		return len(calls) == 3 && len(updates) == 3 && len(usages) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	var mainCard *acp.SessionUpdateToolCall
+	ids := map[acp.ToolCallId]bool{}
+	for _, c := range calls {
+		ids[c.ToolCallId] = true
+		if c.Kind == acp.ToolKindThink {
+			mainCard = c
+		}
+	}
+	require.Len(t, ids, 3, "ACP call IDs must not collide")
+	require.NotNil(t, mainCard)
+	require.Equal(t, "Subagent: Trace auth", mainCard.Title)
+	require.Equal(t, map[string]any{"title": "Trace auth", "task": "find callers"}, mainCard.RawInput)
+	for _, u := range updates {
+		if u.ToolCallId == mainCard.ToolCallId {
+			require.Equal(t, acp.ToolCallStatusFailed, *u.Status)
+			require.Equal(t, "subagent failed", u.RawOutput)
+		} else {
+			require.Equal(t, acp.ToolCallStatusCompleted, *u.Status)
+		}
+	}
+	subagents := []any{usages[0].Meta["subagent"], usages[1].Meta["subagent"]}
+	require.ElementsMatch(t, []any{"Trace auth #1", "Trace auth #2"}, subagents)
+}
+
+func TestACPReporter_SubagentStageDoesNotRegressPlan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, conn, _, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acp.McpServer{}})
+	require.NoError(t, err)
+	cfg := config.NewDefaultConfig()
+	cfg.ReviewPipelineFile = "pipeline.toml"
+	reporter.ReportConfig(cfg, t.TempDir())
+	rep := reporter.(*acpReporter)
+
+	reporter.ReportStageIteration("AI Code Review", 1)
+	reporter.ReportStageIteration("Subagent: Trace #1", 1)
+	rep.mu.Lock()
+	pipeline := rep.planStatuses[planStepPipeline]
+	review := rep.planStatuses[planStepReview]
+	rep.mu.Unlock()
+	require.Equal(t, acp.PlanEntryStatusCompleted, pipeline)
+	require.Equal(t, acp.PlanEntryStatusInProgress, review)
+
+	rep.mu.Lock()
+	rep.inPostReview = true
+	rep.mu.Unlock()
+	reporter.ReportStageIteration("Subagent: Trace #2", 1)
+	rep.mu.Lock()
+	pipeline = rep.planStatuses[planStepPipeline]
+	rep.mu.Unlock()
+	require.Equal(t, acp.PlanEntryStatusCompleted, pipeline)
+}

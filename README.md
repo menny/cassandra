@@ -73,6 +73,9 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--review-pipeline-file` | Path to a TOML review pipeline defining subagents to run before the main review | |
 | `--render` | Output render format: `raw`, `markdown`, or `tui` | `raw` |
 | `--allow-ask-developer` | Allow the AI reviewer to ask the developer questions (requires `--render` `markdown`, `tui`, or `--acp`) | `false` |
+| `--allow-subagents` | Let the reviewer spawn focused research subagents on demand via the `run_subagent` tool (see [Dynamic Subagents](#dynamic-subagents)) | `true` |
+| `--allow-subagent-mcps` | Allow dynamic subagents to use configured MCP tools | `true` |
+| `--subagent-model` | Model override for dynamic subagents (other provider settings are inherited); empty uses the main model | |
 | `--interactive-post-review` | Start an interactive post-review chat session after the review pass (requires `--render` `markdown`, `tui`, or `--acp`) | `false` |
 | `--acp` | Enable Agent Client Protocol (ACP) mode over stdio (CLI-only; implies `--render=acp` and `--interactive-post-review`) | `false` |
 | `--wait-for-message` | Wait for an initial ACP user message before starting the review (CLI-only; requires `--acp`) | `false` |
@@ -156,7 +159,7 @@ After the review completes, the action exposes the following outputs that downst
 
 ### Session Metrics JSON
 
-When using `--metrics-json` or consuming the `metrics_file` action output, the JSON reports per-phase usage statistics (`"subagent"` entries in pipeline declaration order, `"review"` for the main review, and `"review_discussion"` for interactive post-review turns):
+When using `--metrics-json` or consuming the `metrics_file` action output, the JSON reports per-phase usage statistics (`"subagent"` entries in pipeline declaration order, `"dynamic_subagent"` entries for each `run_subagent` call in completion order, `"review"` for the main review, and `"review_discussion"` for interactive post-review turns):
 
 ```json
 {
@@ -207,6 +210,15 @@ When using `--metrics-json` or consuming the `metrics_file` action output, the J
   ]
 }
 ```
+
+## Dynamic Subagents
+
+Independently of the static [Review Pipeline](#review-pipeline), the main reviewer can spawn focused research subagents on demand with the synchronous `run_subagent` tool (`title`, `task`). It is available in the initial review and in interactive post-review/ACP chat, and is enabled by default. When the reviewer emits several `run_subagent` calls in one turn they run concurrently, up to the pipeline's `max_concurrency` (default `4`).
+
+- **Isolation**: each subagent has a fresh LLM client, conversation, and metrics, and sees only its `task` plus the repository guidelines. Only its **final message** is returned to the reviewer.
+- **Safety**: subagents cannot spawn subagents, cannot call `ask_developer`, and cannot use the privileged tools that static pipeline subagents are denied (`update_review_verdict`, `post_pr_comment`, T3/Omnigent tools).
+- **Controls**: `--allow-subagents=false` removes the tool and its prompt guidance; `--allow-subagent-mcps=false` hides MCP tools from dynamic subagents; `--subagent-model` runs them on a different (e.g. cheaper) model while inheriting the main provider, key, URL, token limit, and provider options. TOML keys: `allow-subagents`, `allow-subagent-mcps`, `subagent-model`.
+- **Reporting**: tool calls and progress are shown with a 🛰️ icon; ACP clients receive a `think`-kind `Subagent: <title>` card. `--metrics-json` records one `dynamic_subagent` phase per call.
 
 ## Configuration File (`cassandra.toml`)
 

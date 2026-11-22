@@ -786,3 +786,46 @@ func TestRun_MetadataBaseBranch(t *testing.T) {
 	err := run(context.Background(), args, stderr)
 	require.NoError(t, err)
 }
+
+func TestRun_DynamicSubagentFlagsAndConfig(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.Chdir(cwd)) })
+
+	// run stops at the missing diff file, after printing the resolved config.
+	base := []string{
+		"--provider", "google", "--model", "gemini-1.5-flash", "--provider-api-key", "fake-key",
+		"--diff-file", "non-existent-diff", "--files-list-file", "non-existent-files",
+	}
+	configLine := func(t *testing.T, extra ...string) string {
+		t.Helper()
+		var buf bytes.Buffer
+		err := run(context.Background(), append(append([]string{}, base...), extra...), log.New(&buf, "", 0))
+		require.ErrorContains(t, err, "failed to read diff file")
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if strings.Contains(line, "Dynamic Subagents") {
+				return line
+			}
+		}
+		t.Fatalf("no Dynamic Subagents row in output:\n%s", buf.String())
+		return ""
+	}
+
+	t.Run("defaults", func(t *testing.T) {
+		require.Contains(t, configLine(t), "enabled (model: inherited, MCPs: on)")
+	})
+	t.Run("flags", func(t *testing.T) {
+		line := configLine(t, "--allow-subagent-mcps=false", "--subagent-model", "cheap-model")
+		require.Contains(t, line, "enabled (model: cheap-model, MCPs: off)")
+		require.Contains(t, configLine(t, "--allow-subagents=false"), "disabled")
+	})
+	t.Run("toml", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "cassandra.toml")
+		require.NoError(t, os.WriteFile(path, []byte("allow-subagent-mcps = false\nsubagent-model = \"toml-model\"\n"), 0o600))
+		require.Contains(t, configLine(t, "--config", path), "enabled (model: toml-model, MCPs: off)")
+		require.Contains(t, configLine(t, "--config", path, "--subagent-model", "flag-model"), "model: flag-model")
+		require.NoError(t, os.WriteFile(path, []byte("allow-subagents = false\n"), 0o600))
+		require.Contains(t, configLine(t, "--config", path), "disabled")
+	})
+}
