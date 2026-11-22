@@ -246,9 +246,15 @@ func (r *consoleReporter) ReportUsageSummary(total llm.Usage) {
 	r.ReportStageUsageSummary("", total)
 }
 
+// hasReportableUsage reports whether u contains any non-sentinel positive token count.
+func hasReportableUsage(u llm.Usage) bool {
+	return u.PromptTokens >= 0 && u.OutputTokens >= 0 &&
+		(u.PromptTokens > 0 || u.OutputTokens > 0 || u.CachedTokens > 0 || u.ThinkingTokens > 0)
+}
+
 // ReportStageUsageSummary prints cumulative token usage with an optional stage prefix.
 func (r *consoleReporter) ReportStageUsageSummary(stage string, total llm.Usage) {
-	if total.PromptTokens > 0 || total.OutputTokens > 0 {
+	if hasReportableUsage(total) {
 		r.writer.WriteStderr(fmt.Sprintf("📈 %s%d in, %d out (total)\n", stagePrefix(stage), total.TotalInput(), total.TotalOutput()))
 	}
 }

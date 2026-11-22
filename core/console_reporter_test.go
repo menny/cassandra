@@ -191,6 +191,32 @@ func TestConsoleReporter_StageAttribution(t *testing.T) {
 	}
 }
 
+func TestConsoleReporter_UsageSummaryCounters(t *testing.T) {
+	tests := []struct {
+		name  string
+		usage llm.Usage
+		want  string
+	}{
+		{name: "zero"},
+		{name: "unknown", usage: llm.UnknownUsage()},
+		{name: "cache only", usage: llm.Usage{CachedTokens: 12}, want: "📈 [Subagent: Cache] 12 in, 0 out (total)\n"},
+		{name: "thinking only", usage: llm.Usage{ThinkingTokens: 7}, want: "📈 [Subagent: Think] 0 in, 7 out (total)\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			r := NewRawReporter(&stdout, &stderr).(*consoleReporter)
+			stage := "Subagent: Cache"
+			if tt.name == "thinking only" {
+				stage = "Subagent: Think"
+			}
+			r.ReportStageUsageSummary(stage, tt.usage)
+			require.Equal(t, tt.want, stderr.String())
+			require.Empty(t, stdout.String())
+		})
+	}
+}
+
 func TestConsoleReporter_Markdown(t *testing.T) {
 	t.Setenv("CLICOLOR_FORCE", "1")
 	var stdout bytes.Buffer

@@ -269,7 +269,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case usageSummaryMsg:
 		m.finishStage(msg.stage)
-		if msg.total.PromptTokens <= 0 && msg.total.OutputTokens <= 0 && msg.total.CachedTokens <= 0 && msg.total.ThinkingTokens <= 0 {
+		if !hasReportableUsage(msg.total) {
 			break
 		}
 		found := false
