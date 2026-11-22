@@ -27,9 +27,9 @@ import (
 const (
 	acpModeReview = acp.SessionModeId("review")
 
-	planStepContext   = "Gather git diff and commit context"
-	planStepPreReview = "Generate pre-review summary"
-	planStepReview    = "Inspect code and formulate review"
+	planStepContext  = "Gather git diff and commit context"
+	planStepPipeline = "Run review pipeline subagents"
+	planStepReview   = "Inspect code and formulate review"
 )
 
 var acpToolKinds = map[string]acp.ToolKind{
@@ -181,11 +181,10 @@ type acpReporter struct {
 	firstMessageOnce    sync.Once
 	firstMessageText    string
 	waitForMessageArmed bool
-
-	stagedReviews []string
-
-	promptHandler func(ctx context.Context, query string) error
-	activeCancel  context.CancelFunc
+	promptHandler       func(ctx context.Context, query string) error
+	activeCancel        context.CancelFunc
+	reviewCancel        context.CancelFunc
+	questionGate        chan struct{}
 
 	pendingCallsByID map[string]acp.ToolCallId
 	pendingByName    map[string][]acp.ToolCallId
@@ -200,7 +199,7 @@ type acpReporter struct {
 
 	cfg                *config.Config
 	targetDir          string
-	hasPreReview       bool
+	hasPipeline        bool
 	planStatuses       map[string]acp.PlanEntryStatus
 	cumulativeUsage    llm.Usage
 	sessionTitle       string
@@ -267,9 +266,9 @@ func NewACPReporter(ctx context.Context, stdout io.Writer, stdin io.Reader, stde
 		pendingCallsByID:  make(map[string]acp.ToolCallId),
 		pendingByName:     make(map[string][]acp.ToolCallId),
 		planStatuses: map[string]acp.PlanEntryStatus{
-			planStepContext:   acp.PlanEntryStatusPending,
-			planStepPreReview: acp.PlanEntryStatusPending,
-			planStepReview:    acp.PlanEntryStatusPending,
+			planStepContext:  acp.PlanEntryStatusPending,
+			planStepPipeline: acp.PlanEntryStatusPending,
+			planStepReview:   acp.PlanEntryStatusPending,
 		},
 	}
 
@@ -361,10 +360,22 @@ func (r *acpReporter) WaitForFirstMessage(ctx context.Context) (string, error) {
 func (r *acpReporter) cancelActiveTurn() {
 	r.mu.Lock()
 	cancel := r.activeCancel
+	reviewCancel := r.reviewCancel
 	r.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+	if reviewCancel != nil {
+		reviewCancel()
+	}
+}
+
+// SetReviewCancel registers cancellation for the initial review, independently
+// of any active ACP prompt. Call with nil when the initial review finishes.
+func (r *acpReporter) SetReviewCancel(cancel context.CancelFunc) {
+	r.mu.Lock()
+	r.reviewCancel = cancel
+	r.mu.Unlock()
 }
 
 // ServePostReview registers the chat turn handler, transitions the session mode
@@ -379,9 +390,9 @@ func (r *acpReporter) ServePostReview(ctx context.Context, handler func(ctx cont
 	r.mu.Unlock()
 
 	r.advancePlan(map[string]acp.PlanEntryStatus{
-		planStepContext:   acp.PlanEntryStatusCompleted,
-		planStepPreReview: acp.PlanEntryStatusCompleted,
-		planStepReview:    acp.PlanEntryStatusCompleted,
+		planStepContext:  acp.PlanEntryStatusCompleted,
+		planStepPipeline: acp.PlanEntryStatusCompleted,
+		planStepReview:   acp.PlanEntryStatusCompleted,
 	})
 
 	r.signalReviewReady()
@@ -404,9 +415,9 @@ func (r *acpReporter) SignalReviewFailed(err error) error {
 	r.mu.Unlock()
 
 	r.advancePlan(map[string]acp.PlanEntryStatus{
-		planStepContext:   acp.PlanEntryStatusCompleted,
-		planStepPreReview: acp.PlanEntryStatusCompleted,
-		planStepReview:    acp.PlanEntryStatusCompleted,
+		planStepContext:  acp.PlanEntryStatusCompleted,
+		planStepPipeline: acp.PlanEntryStatusCompleted,
+		planStepReview:   acp.PlanEntryStatusCompleted,
 	})
 
 	r.sendAgentMessage(fmt.Sprintf("❌ **Code review failed**: %v", err))
@@ -507,11 +518,11 @@ func (r *acpReporter) advancePlan(updates map[string]acp.PlanEntryStatus) {
 			Status:   r.planStatuses[planStepContext],
 		},
 	}
-	if r.hasPreReview {
+	if r.hasPipeline {
 		entries = append(entries, acp.PlanEntry{
-			Content:  planStepPreReview,
+			Content:  planStepPipeline,
 			Priority: acp.PlanEntryPriorityMedium,
-			Status:   r.planStatuses[planStepPreReview],
+			Status:   r.planStatuses[planStepPipeline],
 		})
 	}
 	entries = append(
@@ -662,10 +673,8 @@ func (r *acpReporter) Prompt(ctx context.Context, params acp.PromptRequest) (acp
 	waitForMessage := r.waitForMessageArmed
 	r.mu.Unlock()
 
-	// When the initial review waited for a message (via --wait-for-message or
-	// pre-review focus), the first user message triggered the review (and was
-	// injected into the review prompt as extra user context), so the turn
-	// completes as soon as the review is emitted.
+	// With --wait-for-message, the first message triggered the review and was
+	// injected as extra user context, so its turn ends when the review is emitted.
 	if isFirstMessage && waitForMessage {
 		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
@@ -786,9 +795,9 @@ func (r *acpReporter) LoadSession(ctx context.Context, req acp.LoadSessionReques
 				defer r.shutdownWg.Done()
 				defer close(replayDone)
 				r.advancePlan(map[string]acp.PlanEntryStatus{
-					planStepContext:   acp.PlanEntryStatusCompleted,
-					planStepPreReview: acp.PlanEntryStatusCompleted,
-					planStepReview:    acp.PlanEntryStatusCompleted,
+					planStepContext:  acp.PlanEntryStatusCompleted,
+					planStepPipeline: acp.PlanEntryStatusCompleted,
+					planStepReview:   acp.PlanEntryStatusCompleted,
 				})
 				r.replayHistory(messages)
 			}()
@@ -884,13 +893,7 @@ func (r *acpReporter) replayHistory(messages []llm.Message) {
 						title = fmt.Sprintf("%s(%s)", tc.Name, compact)
 					}
 
-					callID := acp.ToolCallId(tc.ID)
-					if callID == "" {
-						r.mu.Lock()
-						r.toolSeq++
-						callID = acp.ToolCallId(fmt.Sprintf("call_%d", r.toolSeq))
-						r.mu.Unlock()
-					}
+					callID := r.nextToolCallID()
 
 					opts := []acp.ToolCallStartOpt{
 						acp.WithStartKind(kind),
@@ -1032,30 +1035,56 @@ func (r *acpReporter) ReportIteration(iter int) {
 	}
 
 	r.advancePlan(map[string]acp.PlanEntryStatus{
-		planStepContext:   acp.PlanEntryStatusCompleted,
-		planStepPreReview: acp.PlanEntryStatusCompleted,
-		planStepReview:    acp.PlanEntryStatusInProgress,
+		planStepContext:  acp.PlanEntryStatusCompleted,
+		planStepPipeline: acp.PlanEntryStatusCompleted,
+		planStepReview:   acp.PlanEntryStatusInProgress,
 	})
 	r.sendUpdate(acp.UpdateAgentThoughtText(fmt.Sprintf("Review iteration %d...\n", iter)))
 }
 
 func (r *acpReporter) ReportStageIteration(stage string, iter int) {
-	if strings.EqualFold(stage, "Pre-Review Summary") {
+	if strings.EqualFold(stage, "AI Code Review") {
 		r.advancePlan(map[string]acp.PlanEntryStatus{
-			planStepContext:   acp.PlanEntryStatusCompleted,
-			planStepPreReview: acp.PlanEntryStatusInProgress,
+			planStepContext:  acp.PlanEntryStatusCompleted,
+			planStepPipeline: acp.PlanEntryStatusCompleted,
+			planStepReview:   acp.PlanEntryStatusInProgress,
 		})
 	} else {
 		r.advancePlan(map[string]acp.PlanEntryStatus{
-			planStepContext:   acp.PlanEntryStatusCompleted,
-			planStepPreReview: acp.PlanEntryStatusCompleted,
-			planStepReview:    acp.PlanEntryStatusInProgress,
+			planStepContext:  acp.PlanEntryStatusCompleted,
+			planStepPipeline: acp.PlanEntryStatusInProgress,
 		})
 	}
 	r.sendUpdate(acp.UpdateAgentThoughtText(fmt.Sprintf("[%s] Iteration %d...\n", stage, iter)))
 }
 
+// nextToolCallID allocates transport identities independently of provider IDs,
+// which providers may reuse across rounds or after a session is loaded.
+func (r *acpReporter) nextToolCallID() acp.ToolCallId {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.toolSeq++
+	return acp.ToolCallId(fmt.Sprintf("acp_call_%d", r.toolSeq))
+}
+
 func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
+	r.reportToolCalls("", tcs)
+}
+
+// ReportStageToolCalls attributes tool cards and reviewer-state thoughts to a stage.
+// Call IDs must already be scoped by the caller for concurrent subagents.
+func (r *acpReporter) ReportStageToolCalls(stage string, _ int, calls []llm.ToolCall) {
+	r.reportToolCalls(stage, calls)
+}
+
+func acpStageText(stage, text string) string {
+	if stage == "" {
+		return text
+	}
+	return fmt.Sprintf("[%s] %s", stage, text)
+}
+
+func (r *acpReporter) reportToolCalls(stage string, tcs []llm.ToolCall) {
 	for _, tc := range tcs {
 		if focusArea, message, ok := parseReviewerState(tc); ok {
 			if message != "" {
@@ -1063,21 +1092,20 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 				if focusArea != "" {
 					thought = fmt.Sprintf("[%s] %s", focusArea, message)
 				}
-				r.sendUpdate(acp.UpdateAgentThoughtText(thought + "\n"))
+				r.sendUpdate(acp.UpdateAgentThoughtText(acpStageText(stage, thought) + "\n"))
 			}
 			continue
 		}
 
+		callID := r.nextToolCallID()
 		r.mu.Lock()
-		r.toolSeq++
-		callID := acp.ToolCallId(tc.ID)
-		if callID == "" {
-			callID = acp.ToolCallId(fmt.Sprintf("call_%d", r.toolSeq))
-		}
 		if tc.ID != "" {
 			r.pendingCallsByID[tc.ID] = callID
 		}
-		r.pendingByName[tc.Name] = append(r.pendingByName[tc.Name], callID)
+		// Name fallback is reserved for calls without a provider identity.
+		if tc.ID == "" {
+			r.pendingByName[tc.Name] = append(r.pendingByName[tc.Name], callID)
+		}
 		r.mu.Unlock()
 
 		kind, known := acpToolKinds[tc.Name]
@@ -1109,12 +1137,13 @@ func (r *acpReporter) ReportToolCalls(tcs []llm.ToolCall) {
 			}
 		}
 
-		r.sendUpdate(acp.StartToolCall(callID, title, opts...))
+		r.sendUpdate(acp.StartToolCall(callID, acpStageText(stage, title), opts...))
 	}
 }
 
 func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error) {
-	if status == "started" {
+	// Unknown statuses must not consume a pending call or complete a card.
+	if status != "completed" && status != "failed" {
 		return
 	}
 
@@ -1124,21 +1153,12 @@ func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error
 		if id, ok := r.pendingCallsByID[tc.ID]; ok {
 			callID = id
 			delete(r.pendingCallsByID, tc.ID)
-			if idx := slices.Index(r.pendingByName[tc.Name], callID); idx >= 0 {
-				r.pendingByName[tc.Name] = slices.Delete(r.pendingByName[tc.Name], idx, idx+1)
-			}
 		}
 	}
-	if callID == "" {
+	if tc.ID == "" {
 		if queue := r.pendingByName[tc.Name]; len(queue) > 0 {
 			callID = queue[0]
 			r.pendingByName[tc.Name] = queue[1:]
-			for idKey, cid := range r.pendingCallsByID {
-				if cid == callID {
-					delete(r.pendingCallsByID, idKey)
-					break
-				}
-			}
 		}
 	}
 	if len(r.pendingByName[tc.Name]) == 0 {
@@ -1167,6 +1187,11 @@ func (r *acpReporter) ReportToolStatus(tc llm.ToolCall, status string, err error
 }
 
 func (r *acpReporter) ReportUsage(usage llm.Usage) {
+	r.ReportStageUsage("", usage)
+}
+
+// ReportStageUsage preserves session totals while attributing per-turn usage.
+func (r *acpReporter) ReportStageUsage(stage string, usage llm.Usage) {
 	if usage.PromptTokens < 0 || usage.OutputTokens < 0 {
 		return
 	}
@@ -1187,18 +1212,25 @@ func (r *acpReporter) ReportUsage(usage llm.Usage) {
 	used := usage.TotalInput() + usage.TotalOutput()
 	size := max(maxTokens, used)
 
+	meta := map[string]any{
+		"turnInputTokens":        usage.PromptTokens,
+		"turnOutputTokens":       usage.OutputTokens,
+		"turnThinkingTokens":     usage.ThinkingTokens,
+		"turnCachedTokens":       usage.CachedTokens,
+		"cumulativeInputTokens":  cumIn,
+		"cumulativeOutputTokens": cumOut,
+	}
+	if stage != "" {
+		meta["stage"] = stage
+		if title, ok := strings.CutPrefix(stage, "Subagent: "); ok {
+			meta["subagent"] = title
+		}
+	}
 	r.sendUpdate(acp.SessionUpdate{
 		UsageUpdate: &acp.SessionUsageUpdate{
 			Used: used,
 			Size: size,
-			Meta: map[string]any{
-				"turnInputTokens":        usage.PromptTokens,
-				"turnOutputTokens":       usage.OutputTokens,
-				"turnThinkingTokens":     usage.ThinkingTokens,
-				"turnCachedTokens":       usage.CachedTokens,
-				"cumulativeInputTokens":  cumIn,
-				"cumulativeOutputTokens": cumOut,
-			},
+			Meta: meta,
 		},
 	})
 }
@@ -1223,6 +1255,35 @@ func (r *acpReporter) ReportExtractionRetry(attempt int) {
 
 func (r *acpReporter) ReportEmptyResponseRetry(attempt int) {
 	r.writeStderr("[Retry] LLM returned empty response (attempt %d); retrying...\n", attempt)
+}
+
+// ReportStageEmptyResponseRetry makes retries visible in the originating stage.
+func (r *acpReporter) ReportStageEmptyResponseRetry(stage string, iter, attempt int) {
+	r.reportStageDiagnostic(stage, fmt.Sprintf("Iteration %d: LLM returned empty response (attempt %d); retrying...", iter, attempt))
+}
+
+func (r *acpReporter) reportStageDiagnostic(stage, message string) {
+	text := acpStageText(stage, message)
+	r.writeStderr("%s\n", text)
+	r.sendUpdate(acp.UpdateAgentThoughtText(text + "\n"))
+}
+
+// ReportStageWarning attributes warnings without hiding their underlying error.
+func (r *acpReporter) ReportStageWarning(stage, msg string, err error) {
+	if err != nil {
+		msg = fmt.Sprintf("%s: %v", msg, err)
+	}
+	r.reportStageDiagnostic(stage, "Warning: "+msg)
+}
+
+// ReportStageCapReached identifies the stage forcing a final response.
+func (r *acpReporter) ReportStageCapReached(stage string, cap int) {
+	r.reportStageDiagnostic(stage, fmt.Sprintf("Reached maximum ReAct iterations (%d). Forcing final review.", cap))
+}
+
+// ReportStageTruncated identifies the stage whose response hit its token limit.
+func (r *acpReporter) ReportStageTruncated(stage string, tokens int) {
+	r.reportStageDiagnostic(stage, fmt.Sprintf("LLM response truncated (hit max-tokens limit of %d).", tokens))
 }
 
 func (r *acpReporter) ReportCapReached(maxIterations int) {
@@ -1358,7 +1419,7 @@ func (r *acpReporter) ReportConfig(cfg *config.Config, targetDir string) {
 	r.mu.Lock()
 	r.cfg = cfg
 	r.targetDir = targetDir
-	r.hasPreReview = cfg.PreReviewPromptFile != ""
+	r.hasPipeline = cfg.ReviewPipelineFile != ""
 	r.sessionTitle = title
 	r.sessionDescription = desc
 	r.mu.Unlock()
@@ -1402,26 +1463,12 @@ func (r *acpReporter) ReportNoChanges() {
 
 func (r *acpReporter) ReportReview(result string) error {
 	r.advancePlan(map[string]acp.PlanEntryStatus{
-		planStepContext:   acp.PlanEntryStatusCompleted,
-		planStepPreReview: acp.PlanEntryStatusCompleted,
-		planStepReview:    acp.PlanEntryStatusCompleted,
+		planStepContext:  acp.PlanEntryStatusCompleted,
+		planStepPipeline: acp.PlanEntryStatusCompleted,
+		planStepReview:   acp.PlanEntryStatusCompleted,
 	})
 
-	r.mu.Lock()
-	staged := r.stagedReviews
-	r.stagedReviews = nil
-	r.mu.Unlock()
-
 	formattedReview := r.formatMessageText(result)
-	if len(staged) > 0 {
-		var parts []string
-		parts = append(parts, staged...)
-		if formattedReview != "" {
-			parts = append(parts, fmt.Sprintf("# Code Review\n\n%s", formattedReview))
-		}
-		r.sendAgentMessage(strings.Join(parts, "\n\n---\n\n"))
-		return nil
-	}
 
 	if formattedReview != "" {
 		r.sendAgentMessage(formattedReview)
@@ -1430,28 +1477,11 @@ func (r *acpReporter) ReportReview(result string) error {
 }
 
 func (r *acpReporter) ReportStageReview(stage, result string) error {
-	if strings.EqualFold(stage, "Pre-Review Summary") {
-		r.advancePlan(map[string]acp.PlanEntryStatus{
-			planStepContext:   acp.PlanEntryStatusCompleted,
-			planStepPreReview: acp.PlanEntryStatusCompleted,
-		})
-	}
+	// Emit immediately, including with --wait-for-message, to preserve subagent
+	// completion order rather than buffering reports until the main review.
 	if result != "" {
 		formatted := strings.TrimSpace(r.formatMessageText(result))
-		r.mu.Lock()
-		waitForMessage := r.cfg != nil && r.cfg.WaitForMessage
-		if waitForMessage {
-			r.stagedReviews = append(r.stagedReviews, fmt.Sprintf("# %s\n\n%s", stage, formatted))
-		}
-		r.mu.Unlock()
-
-		if !waitForMessage {
-			msg := fmt.Sprintf("# %s\n\n%s", stage, formatted)
-			if strings.EqualFold(stage, "Pre-Review Summary") {
-				msg += "\n\nIs there anything you want me to focus on in this review?"
-			}
-			r.sendAgentMessage(msg)
-		}
+		r.sendAgentMessage(fmt.Sprintf("# %s\n\n%s", stage, formatted))
 	}
 	return nil
 }
@@ -1642,6 +1672,10 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 	r.mu.Lock()
 	supportsForm := r.clientSupportsElicitationForm
 	conn := r.conn
+	if r.questionGate == nil {
+		r.questionGate = make(chan struct{}, 1)
+	}
+	gate := r.questionGate
 	r.mu.Unlock()
 
 	if !supportsForm || conn == nil {
@@ -1651,7 +1685,42 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 		}, nil
 	}
 
-	title := "Clarification Request"
+	// Include queueing in the question timeout, and link session cancellation
+	// even when a caller supplies a context unrelated to the session.
+	timeout := tools.AskDeveloperTimeout(ctx)
+	questionCtx, questionCancel := context.WithCancel(ctx)
+	defer questionCancel()
+	stopSessionCancel := context.AfterFunc(r.ctx, questionCancel)
+	defer stopSessionCancel()
+	timeoutCtx, cancel := context.WithTimeout(questionCtx, timeout)
+	defer cancel()
+
+	questionError := func() (tools.AskDeveloperResponse, error) {
+		if ctx.Err() != nil {
+			return tools.AskDeveloperResponse{}, ctx.Err()
+		}
+		if r.ctx.Err() != nil {
+			return tools.AskDeveloperResponse{}, r.ctx.Err()
+		}
+		return tools.AskDeveloperResponse{
+			Status:  "timeout",
+			Message: fmt.Sprintf("The developer did not respond within %v. Proceed with your best assumption and note it in the review.", timeout),
+		}, nil
+	}
+	select {
+	case gate <- struct{}{}:
+		defer func() { <-gate }()
+	case <-timeoutCtx.Done():
+		return questionError()
+	case <-r.ctx.Done():
+		return questionError()
+	}
+	if timeoutCtx.Err() != nil || r.ctx.Err() != nil {
+		return questionError()
+	}
+
+	subagent := tools.SubagentFromContext(ctx)
+	title := acpStageText(subagent, "Clarification Request")
 	desc := req.Reasoning
 	schema := acp.UnstableElicitationSchema{
 		Title:       &title,
@@ -1692,11 +1761,7 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 		schema.Required = []string{"response"}
 	}
 
-	timeout := tools.AskDeveloperTimeout(ctx)
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	msg := req.Question
+	msg := acpStageText(subagent, req.Question)
 	if req.Reasoning != "" {
 		msg += "\n\nReasoning: " + req.Reasoning
 	}
@@ -1705,14 +1770,8 @@ func (r *acpReporter) AskDeveloper(ctx context.Context, req tools.AskDeveloperRe
 	elicitReq.Form.Message = msg
 
 	resp, err := conn.UnstableCreateElicitation(timeoutCtx, elicitReq)
-	if ctx.Err() != nil {
-		return tools.AskDeveloperResponse{}, ctx.Err()
-	}
-	if timeoutCtx.Err() != nil {
-		return tools.AskDeveloperResponse{
-			Status:  "timeout",
-			Message: fmt.Sprintf("The developer did not respond within %v. Proceed with your best assumption and note it in the review.", timeout),
-		}, nil
+	if timeoutCtx.Err() != nil || ctx.Err() != nil || r.ctx.Err() != nil {
+		return questionError()
 	}
 	if err != nil {
 		return tools.AskDeveloperResponse{}, fmt.Errorf("ACP elicitation failed: %w", err)

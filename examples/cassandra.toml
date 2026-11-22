@@ -4,8 +4,8 @@ provider = "google"
 model = "gemini-3.6-flash"
 main-guidelines = "general"
 
-pre-review-model = "gemini-3.5-flash-lite"
-pre-review-prompt = ".cassandra/pre-review-summary.md"
+# Resolve the pipeline file as a whole; its prompts are relative to its directory.
+review-pipeline-file = "examples/review-pipeline.toml"
 
 supplemental-guidelines = [
     ".cassandra/drive-by-fixes.md",

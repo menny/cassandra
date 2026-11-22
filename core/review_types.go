@@ -44,6 +44,7 @@ func (m *SessionMetrics) Add(other SessionMetrics) {
 // PhaseMetrics captures the metrics for a specific review phase.
 type PhaseMetrics struct {
 	Phase   string         `json:"phase"`
+	Title   string         `json:"title,omitempty"`
 	Metrics SessionMetrics `json:"metrics"`
 }
 

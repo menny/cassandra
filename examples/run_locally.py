@@ -39,7 +39,7 @@ KEYLESS_PROVIDERS = {"anthropic-bedrock"}
 # Config keys holding a single file path / dir that may be repo-relative.
 PATH_KEYS = (
     "provider-options-file",
-    "pre-review-prompt",
+    "review-pipeline-file",
     "approval-evaluation-prompt-file",
     "mcp-config",
     "wishlist-dir",
@@ -49,8 +49,11 @@ PATH_LIST_KEYS = ("supplemental-guidelines",)
 
 
 def absolutize_repo_path(value: str, target_dir: Path, cassandra_root: Path) -> str:
-    """Rewrites a config file path to absolute against cassandra_root if not found in target_dir."""
-    if os.path.isabs(value) or "://" in value:
+    """Expands home paths and resolves repo-relative paths against the checkout."""
+    if "://" in value:
+        return value
+    value = os.path.expanduser(value)
+    if os.path.isabs(value):
         return value
     if (target_dir / value).exists():
         return value

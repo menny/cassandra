@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -125,6 +126,16 @@ func setupACPPair(t *testing.T, ctx context.Context, cancelSession context.Cance
 	}
 
 	return reporter, clientConn, client, &stderrBuf, cleanup
+}
+
+func writeACPTestPipeline(t *testing.T, dir string) string {
+	t.Helper()
+	promptFile := filepath.Join(dir, "summary.md")
+	require.NoError(t, os.WriteFile(promptFile, []byte("Summarize changes."), 0o644))
+	pipelineFile := filepath.Join(dir, "pipeline.toml")
+	contents := fmt.Sprintf("[[subagents]]\ntitle = \"PR summary\"\ndescription = \"Summarize changes\"\nprompt_file = %q\nrequired = true\nuser_visible = true\nreviewer_input = true\n", promptFile)
+	require.NoError(t, os.WriteFile(pipelineFile, []byte(contents), 0o644))
+	return pipelineFile
 }
 
 func waitForActivePromptTurn(t *testing.T, reporter Reporter) {
@@ -330,7 +341,7 @@ func TestACPReporter_FullLifecycleAndPostReviewChat(t *testing.T) {
 	}
 
 	require.Contains(t, thoughts, "[security] Checking auth middleware\n")
-	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\nIs there anything you want me to focus on in this review?\n\n")
+	require.Contains(t, messages, "# Pre-Review Summary\n\nSummary text\n\n")
 	require.Contains(t, messages, "Initial automated review findings.\n\n")
 	require.Contains(t, messages, "First ACP chat reply\n\n")
 	require.Contains(t, messages, "Second ACP chat reply\n\n")
@@ -508,14 +519,23 @@ func TestACPReporter_ConcurrentOutOfOrderToolCalls(t *testing.T) {
 		return len(updates) == 2
 	}, 2*time.Second, 10*time.Millisecond)
 
-	// First update received by client must be for call_read_b and marked failed
-	require.Equal(t, acp.ToolCallId("call_read_b"), updates[0].ToolCallId)
+	var starts []*acp.SessionUpdateToolCall
+	for _, n := range client.snapshotUpdates() {
+		if n.Update.ToolCall != nil {
+			starts = append(starts, n.Update.ToolCall)
+		}
+	}
+	require.Len(t, starts, 2)
+	require.NotEqual(t, starts[0].ToolCallId, starts[1].ToolCallId)
+
+	// Completion IDs reference generated transport IDs, not provider IDs.
+	require.Equal(t, starts[1].ToolCallId, updates[0].ToolCallId)
 	require.NotNil(t, updates[0].Status)
 	require.Equal(t, acp.ToolCallStatusFailed, *updates[0].Status)
 	require.Equal(t, "file b.go not found", updates[0].RawOutput)
 
 	// Second update received by client must be for call_read_a and marked completed
-	require.Equal(t, acp.ToolCallId("call_read_a"), updates[1].ToolCallId)
+	require.Equal(t, starts[0].ToolCallId, updates[1].ToolCallId)
 	require.NotNil(t, updates[1].Status)
 	require.Equal(t, acp.ToolCallStatusCompleted, *updates[1].Status)
 }
@@ -700,6 +720,67 @@ func TestACPReporter_RejectConcurrentPromptTurns(t *testing.T) {
 	}
 }
 
+func TestACPReporter_StageReportsStreamInCompletionOrder(t *testing.T) {
+	for _, waitForMessage := range []bool{false, true} {
+		t.Run(fmt.Sprintf("wait-for-message=%t", waitForMessage), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reporter, conn, client, _, cleanup := setupACPPair(t, ctx, cancel)
+			defer cleanup()
+			_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acp.McpServer{}})
+			require.NoError(t, err)
+			cfg := config.NewDefaultConfig()
+			cfg.WaitForMessage = waitForMessage
+			cfg.ReviewPipelineFile = "pipeline.toml"
+			reporter.ReportConfig(cfg, t.TempDir())
+
+			messages := func() []string {
+				var texts []string
+				for _, update := range client.snapshotUpdates() {
+					if chunk := update.Update.AgentMessageChunk; chunk != nil && chunk.Content.Text != nil {
+						texts = append(texts, chunk.Content.Text.Text)
+					}
+				}
+				return texts
+			}
+			reporter.ReportStageIteration("Subagent: Security", 1)
+			reporter.ReportStageIteration("Subagent: AI Code Review", 1)
+			require.NoError(t, reporter.ReportStageReview("AI Code Review", "First completed subagent"))
+			require.Eventually(t, func() bool { return len(messages()) == 1 }, time.Second, time.Millisecond)
+			require.NoError(t, reporter.ReportStageReview("Security", "Second completed subagent"))
+			require.Eventually(t, func() bool { return len(messages()) == 2 }, time.Second, time.Millisecond)
+			rep := reporter.(*acpReporter)
+			rep.mu.Lock()
+			pipelineStatus := rep.planStatuses[planStepPipeline]
+			reviewStatus := rep.planStatuses[planStepReview]
+			rep.mu.Unlock()
+			require.Equal(t, acp.PlanEntryStatusInProgress, pipelineStatus, "one completed report does not finish the entire pipeline")
+			require.Equal(t, acp.PlanEntryStatusPending, reviewStatus)
+
+			reporter.ReportStageIteration("AI Code Review", 1)
+			require.NoError(t, reporter.ReportStageReview("Empty", ""))
+			require.NoError(t, reporter.ReportReview("Main review"))
+			require.Eventually(t, func() bool { return len(messages()) == 3 }, time.Second, time.Millisecond)
+			require.Equal(t, []string{
+				"# AI Code Review\n\nFirst completed subagent\n\n",
+				"# Security\n\nSecond completed subagent\n\n",
+				"Main review\n\n",
+			}, messages())
+			var pipelinePlans int
+			for _, update := range client.snapshotUpdates() {
+				if plan := update.Update.Plan; plan != nil {
+					for _, entry := range plan.Entries {
+						if entry.Content == planStepPipeline {
+							pipelinePlans++
+						}
+					}
+				}
+			}
+			require.Positive(t, pipelinePlans)
+		})
+	}
+}
+
 func TestACPReporter_WaitForMessage(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
@@ -720,8 +801,7 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
-	preReviewPromptFile := filepath.Join(tmpDir, "pre-review.md")
-	require.NoError(t, os.WriteFile(preReviewPromptFile, []byte("Summarize changes."), 0o644))
+	pipelineFile := writeACPTestPipeline(t, tmpDir)
 
 	cfg := config.NewDefaultConfig()
 	cfg.Provider = "google"
@@ -729,7 +809,7 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 	cfg.Render = "acp"
 	cfg.InteractivePostReview = true
 	cfg.WaitForMessage = true
-	cfg.PreReviewPromptFile = preReviewPromptFile
+	cfg.ReviewPipelineFile = pipelineFile
 
 	reporter.ReportConfig(cfg, tmpDir)
 	reporter.ReportFetchingDiff()
@@ -757,6 +837,10 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 		RootDir:      tmpDir,
 		StablePrompt: "stable system prompt",
 		Guidelines:   "general guidelines",
+	}
+
+	reviewer.llmFactory = func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+		return lm, ctx.Err()
 	}
 
 	// Start Reviewer.Run + RunInteractivePostReview in background
@@ -822,10 +906,11 @@ func TestACPReporter_WaitForMessage(t *testing.T) {
 			messageIDs[*n.Update.AgentMessageChunk.MessageId] = true
 		}
 	}
-	require.Len(t, messages, 2)
-	require.Len(t, messageIDs, 2, "review turn and follow-up chat turn must have distinct MessageIds")
-	require.Equal(t, "# Pre-Review Summary\n\nPre-review summary result\n\n---\n\n# Code Review\n\nInitial review result\n\n", messages[0])
-	require.Equal(t, "Reply to queued first user message\n\n", messages[1])
+	require.Len(t, messages, 3)
+	require.Len(t, messageIDs, 3, "stage report, review, and follow-up must have distinct MessageIds")
+	require.Equal(t, "# PR summary\n\nPre-review summary result\n\n", messages[0])
+	require.Equal(t, "Initial review result\n\n", messages[1])
+	require.Equal(t, "Reply to queued first user message\n\n", messages[2])
 
 	cancelSession()
 	require.NoError(t, <-pipelineDone)
@@ -902,7 +987,7 @@ func TestACPReporter_WaitForMessage_WhitespaceOnlyOmitsExtraBlock(t *testing.T) 
 	require.NoError(t, <-pipelineDone)
 }
 
-func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
+func TestACPReporter_PipelineDoesNotWaitForFocusMessage(t *testing.T) {
 	sessionCtx, cancelSession := context.WithCancel(context.Background())
 	defer cancelSession()
 
@@ -921,8 +1006,7 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	tmpDir := t.TempDir()
-	preReviewPromptFile := filepath.Join(tmpDir, "pre-review.md")
-	require.NoError(t, os.WriteFile(preReviewPromptFile, []byte("Summarize changes."), 0o644))
+	pipelineFile := writeACPTestPipeline(t, tmpDir)
 
 	cfg := config.NewDefaultConfig()
 	cfg.Provider = "google"
@@ -930,15 +1014,16 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 	cfg.Render = "acp"
 	cfg.InteractivePostReview = true
 	cfg.WaitForMessage = false
-	cfg.PreReviewPromptFile = preReviewPromptFile
+	cfg.ReviewPipelineFile = pipelineFile
 
 	reporter.ReportConfig(cfg, tmpDir)
 
 	lm := &mockLLM{
 		responses: []*llm.Response{
 			{Text: "Pre-review summary output"},
-			{Text: "Main review output with user focus"},
+			{Text: "Main review output"},
 			{Text: "Post-review chat answer"},
+			{Text: "Second post-review answer"},
 		},
 	}
 
@@ -948,6 +1033,9 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 		RootDir:      tmpDir,
 		StablePrompt: "stable system prompt",
 		Guidelines:   "general guidelines",
+		llmFactory: func(ctx context.Context, _, _, _, _ string, _ map[string]any) (llm.Model, error) {
+			return lm, ctx.Err()
+		},
 	}
 
 	pipelineDone := make(chan error, 1)
@@ -964,22 +1052,20 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 		pipelineDone <- reviewer.RunInteractivePostReview(sessionCtx)
 	}()
 
-	// 1. Pre-review summary runs automatically after session/new and emits the focus prompt
-	require.Eventually(t, func() bool {
-		for _, n := range client.snapshotUpdates() {
-			if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
-				if strings.Contains(n.Update.AgentMessageChunk.Content.Text.Text, "Is there anything you want me to focus on in this review?") {
-					return true
-				}
-			}
-		}
-		return false
-	}, 2*time.Second, 5*time.Millisecond)
+	// Pipeline and main review complete without any user prompt.
+	acpRep := reporter.(*acpReporter)
+	select {
+	case <-acpRep.postReviewReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pipeline and main review should not wait for a focus message")
+	}
+	require.Equal(t, 2, lm.callIdx)
+	mainReviewUserMsg := lm.calls[1][len(lm.calls[1])-1].Text
+	require.Contains(t, mainReviewUserMsg, "PR summary")
+	require.Contains(t, mainReviewUserMsg, "Pre-review summary output")
+	require.NotContains(t, mainReviewUserMsg, "extra_initial_user_context_or_guidelines")
 
-	// Main review must NOT have started yet (still at 1 LLM call)
-	require.Equal(t, 1, lm.callIdx)
-
-	// 2. User sends their first message with focus instructions
+	// The first message is a post-review question, not an implicit focus gate.
 	promptResp1, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
 		SessionId: newSessResp.SessionId,
 		Prompt: []acp.ContentBlock{
@@ -988,12 +1074,7 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, acp.StopReasonEndTurn, promptResp1.StopReason)
-	require.Equal(t, 2, lm.callIdx)
-
-	// Verify the main review LLM call received both the pre-review summary and extra_initial_user_context_or_guidelines
-	mainReviewUserMsg := lm.calls[1][len(lm.calls[1])-1].Text
-	require.Contains(t, mainReviewUserMsg, "### Pre-Review Summary\nPre-review summary output")
-	require.Contains(t, mainReviewUserMsg, "<extra_initial_user_context_or_guidelines>\nFocus on error handling in auth.go\n</extra_initial_user_context_or_guidelines>")
+	require.Equal(t, 3, lm.callIdx)
 
 	// 3. Subsequent prompt runs as a post-review chat turn
 	promptResp2, err := clientConn.Prompt(sessionCtx, acp.PromptRequest{
@@ -1004,7 +1085,12 @@ func TestACPReporter_PreReviewThenWaitForFocusMessage(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, acp.StopReasonEndTurn, promptResp2.StopReason)
-	require.Equal(t, 3, lm.callIdx)
+	require.Equal(t, 4, lm.callIdx)
+	for _, update := range client.snapshotUpdates() {
+		if chunk := update.Update.AgentMessageChunk; chunk != nil && chunk.Content.Text != nil {
+			require.NotContains(t, chunk.Content.Text.Text, "Is there anything you want me to focus on")
+		}
+	}
 
 	cancelSession()
 	require.NoError(t, <-pipelineDone)
@@ -1286,7 +1372,7 @@ func TestACPReporter_LoadSession_Success(t *testing.T) {
 				}
 			}
 			if n.Update.ToolCall != nil {
-				if n.Update.ToolCall.ToolCallId == "call_1" {
+				if n.Update.ToolCall.RawOutput == "package auth" && n.Update.ToolCall.ToolCallId != "" {
 					hasToolCall = true
 				}
 			}
@@ -1721,6 +1807,222 @@ func TestACP_AskDeveloper_Elicitation(t *testing.T) {
 		require.Equal(t, "timeout", resp.Status)
 		require.Contains(t, resp.Message, "did not respond within")
 	})
+}
+
+func TestACPReporter_StrictToolIdentitiesAndReusedProviderIDs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, conn, client, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
+	require.NoError(t, err)
+
+	identified := llm.ToolCall{ID: "provider_id", Name: "read_file", Arguments: `{}`}
+	anonymous := llm.ToolCall{Name: "read_file", Arguments: `{}`}
+	reporter.ReportToolCalls([]llm.ToolCall{identified, anonymous})
+	reporter.ReportToolStatus(llm.ToolCall{ID: "unknown", Name: "read_file"}, "failed", errors.New("must not consume another call"))
+	reporter.ReportToolStatus(identified, "unknown status", nil)
+	reporter.ReportToolStatus(identified, "started", nil)
+	reporter.ReportToolStatus(anonymous, "completed", nil)
+	reporter.ReportToolStatus(identified, "failed", errors.New("correct call"))
+	reporter.ReportToolStatus(identified, "completed", nil) // Duplicate terminal status.
+	reporter.ReportToolCalls([]llm.ToolCall{identified})
+	reporter.ReportToolStatus(identified, "completed", nil)
+
+	var starts []*acp.SessionUpdateToolCall
+	var ends []*acp.SessionToolCallUpdate
+	require.Eventually(t, func() bool {
+		starts, ends = nil, nil
+		for _, notification := range client.snapshotUpdates() {
+			if call := notification.Update.ToolCall; call != nil {
+				starts = append(starts, call)
+			}
+			if update := notification.Update.ToolCallUpdate; update != nil {
+				ends = append(ends, update)
+			}
+		}
+		return len(starts) == 3 && len(ends) == 3
+	}, 2*time.Second, 5*time.Millisecond)
+	for i, call := range starts {
+		require.NotEmpty(t, call.ToolCallId)
+		require.NotEqual(t, acp.ToolCallId(identified.ID), call.ToolCallId)
+		for j := 0; j < i; j++ {
+			require.NotEqual(t, starts[j].ToolCallId, call.ToolCallId)
+		}
+	}
+	require.Equal(t, starts[1].ToolCallId, ends[0].ToolCallId)
+	require.Equal(t, starts[0].ToolCallId, ends[1].ToolCallId)
+	require.Equal(t, "correct call", ends[1].RawOutput)
+	require.Equal(t, starts[2].ToolCallId, ends[2].ToolCallId)
+}
+
+func TestACPReporter_StageAttribution(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, conn, client, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: "/workspace", McpServers: []acp.McpServer{}})
+	require.NoError(t, err)
+	r := reporter.(*acpReporter)
+	stage := "Subagent: Security"
+	r.ReportStageIteration(stage, 2)
+	r.ReportStageToolCalls(stage, 2, []llm.ToolCall{
+		{ID: "subagent_0_iter_2_state", Name: "emit_reviewer_state", Arguments: `{"focus_area":"auth","message":"Checking permissions"}`},
+		{ID: "subagent_0_iter_2_call", Name: "read_file", Arguments: `{"file_path":"auth.go"}`},
+	})
+	r.ReportStageEmptyResponseRetry(stage, 2, 1)
+	r.ReportStageWarning(stage, "tool failed", errors.New("permission denied"))
+	r.ReportStageCapReached(stage, 5)
+	r.ReportStageTruncated(stage, 1024)
+	r.ReportStageUsage(stage, llm.Usage{PromptTokens: 10, OutputTokens: 5})
+	r.ReportStageUsage("AI Code Review", llm.Usage{PromptTokens: 20, OutputTokens: 10})
+
+	var thoughts []string
+	var calls []*acp.SessionUpdateToolCall
+	var usages []*acp.SessionUsageUpdate
+	require.Eventually(t, func() bool {
+		thoughts, calls, usages = nil, nil, nil
+		for _, notification := range client.snapshotUpdates() {
+			u := notification.Update
+			if u.AgentThoughtChunk != nil && u.AgentThoughtChunk.Content.Text != nil {
+				thoughts = append(thoughts, u.AgentThoughtChunk.Content.Text.Text)
+			}
+			if u.ToolCall != nil {
+				calls = append(calls, u.ToolCall)
+			}
+			if u.UsageUpdate != nil {
+				usages = append(usages, u.UsageUpdate)
+			}
+		}
+		return len(usages) == 2
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Contains(t, thoughts, "[Subagent: Security] Iteration 2...\n")
+	require.Contains(t, thoughts, "[Subagent: Security] [auth] Checking permissions\n")
+	require.Contains(t, thoughts, "[Subagent: Security] Iteration 2: LLM returned empty response (attempt 1); retrying...\n")
+	require.Contains(t, thoughts, "[Subagent: Security] Warning: tool failed: permission denied\n")
+	require.Contains(t, thoughts, "[Subagent: Security] Reached maximum ReAct iterations (5). Forcing final review.\n")
+	require.Contains(t, thoughts, "[Subagent: Security] LLM response truncated (hit max-tokens limit of 1024).\n")
+	require.Len(t, calls, 1)
+	require.Contains(t, calls[0].Title, "[Subagent: Security] read_file")
+	require.Equal(t, stage, usages[0].Meta["stage"])
+	require.Equal(t, "Security", usages[0].Meta["subagent"])
+	require.Equal(t, "AI Code Review", usages[1].Meta["stage"])
+	require.NotContains(t, usages[1].Meta, "subagent")
+	require.EqualValues(t, 30, usages[1].Meta["cumulativeInputTokens"])
+}
+
+func TestACPReporter_CancelReviewWithoutActivePrompt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, _, _, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	r := reporter.(*acpReporter)
+	reviewCtx, cancelReview := context.WithCancel(ctx)
+	defer cancelReview()
+	r.SetReviewCancel(cancelReview)
+	require.NoError(t, r.Cancel(ctx, acp.CancelNotification{}))
+	require.ErrorIs(t, reviewCtx.Err(), context.Canceled)
+	require.NoError(t, ctx.Err(), "canceling review must leave session available")
+
+	nextCtx, cancelNext := context.WithCancel(ctx)
+	defer cancelNext()
+	r.SetReviewCancel(cancelNext)
+	r.SetReviewCancel(nil)
+	require.NoError(t, r.Cancel(ctx, acp.CancelNotification{}))
+	require.NoError(t, nextCtx.Err(), "cleared review cancellation must not be invoked")
+}
+
+func TestACPReporter_AskDeveloperSerializesAndCancelsQueuedQuestions(t *testing.T) {
+	for _, cancellation := range []string{"caller", "session", "timeout"} {
+		t.Run(cancellation, func(t *testing.T) {
+			sessionCtx, cancelSession := context.WithCancel(context.Background())
+			defer cancelSession()
+			reporter, conn, client, _, cleanup := setupACPPair(t, sessionCtx, cancelSession)
+			defer cleanup()
+			entered := make(chan acp.UnstableCreateElicitationRequest, 3)
+			release := make(chan struct{})
+			defer close(release)
+			client.elicitHandler = func(ctx context.Context, params acp.UnstableCreateElicitationRequest) (acp.UnstableCreateElicitationResponse, error) {
+				select {
+				case entered <- params:
+				case <-ctx.Done():
+					return acp.UnstableCreateElicitationResponse{}, ctx.Err()
+				}
+				select {
+				case <-release:
+					return acp.UnstableCreateElicitationResponse{Decline: &acp.UnstableCreateElicitationDecline{Action: "decline"}}, nil
+				case <-ctx.Done():
+					return acp.UnstableCreateElicitationResponse{}, ctx.Err()
+				}
+			}
+			_, err := conn.Initialize(sessionCtx, acp.InitializeRequest{
+				ProtocolVersion:    acp.ProtocolVersionNumber,
+				ClientCapabilities: acp.ClientCapabilities{Elicitation: &acp.ElicitationCapabilities{Form: &acp.ElicitationFormCapabilities{}}},
+			})
+			require.NoError(t, err)
+			r := reporter.(*acpReporter)
+			firstCtx, cancelFirst := context.WithCancel(context.Background())
+			defer cancelFirst()
+			firstDone := make(chan error, 1)
+			go func() {
+				_, err := r.AskDeveloper(tools.WithSubagent(firstCtx, "Security"), tools.AskDeveloperRequest{Question: "First question?"})
+				firstDone <- err
+			}()
+			select {
+			case question := <-entered:
+				require.Contains(t, question.Form.Message, "[Security] First question?")
+				encoded, err := json.Marshal(question)
+				require.NoError(t, err)
+				require.Contains(t, string(encoded), "[Security] Clarification Request")
+			case <-time.After(2 * time.Second):
+				t.Fatal("first question did not reach client")
+			}
+
+			queuedCtx, cancelQueued := context.WithCancel(context.Background())
+			defer cancelQueued()
+			if cancellation == "timeout" {
+				queuedCtx = tools.WithAskDeveloperTimeout(queuedCtx, 30*time.Millisecond)
+			}
+			type result struct {
+				response tools.AskDeveloperResponse
+				err      error
+			}
+			queuedDone := make(chan result, 1)
+			go func() {
+				response, err := r.AskDeveloper(queuedCtx, tools.AskDeveloperRequest{Question: "Queued question?"})
+				queuedDone <- result{response: response, err: err}
+			}()
+			switch cancellation {
+			case "caller":
+				cancelQueued()
+			case "session":
+				cancelSession()
+			}
+			select {
+			case got := <-queuedDone:
+				if cancellation == "timeout" {
+					require.NoError(t, got.err)
+					require.Equal(t, "timeout", got.response.Status)
+				} else {
+					require.ErrorIs(t, got.err, context.Canceled)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("queued question did not observe cancellation")
+			}
+			select {
+			case <-entered:
+				t.Fatal("queued question reached client while first question was active")
+			default:
+			}
+			cancelFirst()
+			select {
+			case err := <-firstDone:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(time.Second):
+				t.Fatal("active question did not observe cancellation")
+			}
+		})
+	}
 }
 
 func TestACPConfigOptionsAdvertisesDefaultSlugWithConfiguredModelName(t *testing.T) {

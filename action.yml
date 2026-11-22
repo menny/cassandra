@@ -41,12 +41,8 @@ inputs:
     description: 'Optional path to a file containing custom approval evaluation guidelines'
     required: false
     default: ''
-  pre_review_prompt:
-    description: 'Optional path to a file containing a prompt to an LLM Agent for pre-review summary'
-    required: false
-    default: ''
-  pre_review_model:
-    description: 'Optional model override for the pre-review summary phase (defaults to main model)'
+  review_pipeline_file:
+    description: 'Optional path to a review pipeline TOML file; prompt_file paths are relative to that file'
     required: false
     default: ''
   metadata_tag:
@@ -293,8 +289,7 @@ runs:
         MAIN_GUIDELINES: ${{ inputs.main_guidelines }}
         SUPPLEMENTAL_GUIDELINES: ${{ inputs.supplemental_guidelines }}
         APPROVAL_EVALUATION_PROMPT_FILE: ${{ inputs.approval_evaluation_prompt_file }}
-        PRE_REVIEW_PROMPT: ${{ inputs.pre_review_prompt }}
-        PRE_REVIEW_MODEL: ${{ inputs.pre_review_model }}
+        REVIEW_PIPELINE_FILE: ${{ inputs.review_pipeline_file }}
         MCP_CONFIG: ${{ inputs.mcp_config }}
         ALLOW_URL_FETCH: ${{ inputs.allow_url_fetch }}
         IGNORED_LOCK_FILES: ${{ inputs.ignored_lock_files }}
@@ -419,18 +414,21 @@ runs:
           fi
         fi
 
-        if [[ -n "$PRE_REVIEW_PROMPT" ]]; then
-          PRE_PROMPT="${{ github.workspace }}/$WORKING_DIRECTORY/$PRE_REVIEW_PROMPT"
-          if [[ -f "$PRE_PROMPT" ]]; then
-            ARGS+=(--pre-review-prompt "$PRE_PROMPT")
+        if [[ -n "$REVIEW_PIPELINE_FILE" ]]; then
+          # Pass the original pipeline file, not a temporary copy of its contents:
+          # prompt_file paths must stay relative to the pipeline's directory.
+          REPO_PIPELINE="${{ github.workspace }}/$WORKING_DIRECTORY/$REVIEW_PIPELINE_FILE"
+          ACTION_PIPELINE="${{ github.action_path }}/$REVIEW_PIPELINE_FILE"
+          if [[ "$REVIEW_PIPELINE_FILE" = /* ]]; then
+            ARGS+=(--review-pipeline-file "$REVIEW_PIPELINE_FILE")
+          elif [[ -f "$REPO_PIPELINE" ]]; then
+            ARGS+=(--review-pipeline-file "$REPO_PIPELINE")
+          elif [[ -f "$ACTION_PIPELINE" ]]; then
+            ARGS+=(--review-pipeline-file "$ACTION_PIPELINE")
           else
-            # Try it as a relative path or literal if not found in the workspace
-            ARGS+=(--pre-review-prompt "$PRE_REVIEW_PROMPT")
+            # Let the CLI report a missing path using the supplied value.
+            ARGS+=(--review-pipeline-file "$REVIEW_PIPELINE_FILE")
           fi
-        fi
-
-        if [[ -n "$PRE_REVIEW_MODEL" ]]; then
-          ARGS+=(--pre-review-model "$PRE_REVIEW_MODEL")
         fi
 
         if [[ -n "$MAIN_GUIDELINES" ]]; then

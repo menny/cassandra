@@ -27,17 +27,19 @@ When ACP mode is enabled, Cassandra acts as an ACP Agent over `stdin`/`stdout` w
 4. **Execution Plan Checklist (`plan`)**:
    - Cassandra publishes and live-updates an ACP Execution Plan (`entries` with `content`, `priority`, and `status`: `pending` $\to$ `in_progress` $\to$ `completed`):
      - `Gather git diff and commit context`
-     - `Generate pre-review summary` (when `--pre-review-prompt` is configured)
+     - One aggregate review pipeline entry (when `--review-pipeline-file` is configured), not a separate plan entry for each subagent
      - `Inspect code and formulate review`
 5. **Context Window & Token Usage (`usage_update`)**:
-   - On each interaction (during review iterations and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`).
+   - On each interaction (during pipeline subagents, main review iterations, and post-review chat turns), Cassandra emits `usage_update` notifications reporting context token usage (`used`, `size`, and granular per-turn & cumulative tokens in `_meta`). Pipeline usage is attributed to its originating stage; retry diagnostics likewise identify the stage that is retrying. Concurrent subagent usage does not represent one shared conversation context.
 6. **Real-Time Initial Review Streaming**:
    - Immediately after `session/new` completes, Cassandra executes its context gathering and multi-stage ReAct review loop, streaming progress via `session/update`:
-     - **Thoughts & Reasoning** (`agent_thought_chunk`): Status updates, ReAct iteration markers, and `emit_reviewer_state` progress updates.
-     - **Tool Executions** (`tool_call` & `tool_call_update`): Live status (`in_progress` $\to$ `completed` / `failed`), tool kind (`read`, `search`, `other`), and file locations.
-     - **Review Output** (`agent_message_chunk`): Optional pre-review summary and final Markdown code review report.
+     - **Thoughts & Reasoning** (`agent_thought_chunk`): Status updates, ReAct iteration markers, and `emit_reviewer_state` progress updates, attributed to the originating subagent stage during the pipeline.
+     - **Tool Executions** (`tool_call` & `tool_call_update`): Live status (`in_progress` $\to$ `completed` / `failed`), tool kind (`read`, `search`, `other`), and file locations. Pipeline tool activity identifies its originating stage, and tool-call identities are scoped by stage so concurrent subagents cannot overwrite one another's status.
+     - **Review Output** (`agent_message_chunk`): Successful pipeline subagent reports selected by `user_visible` in completion order, optional-subagent failures including their errors regardless of output flags, and the final Markdown code review report. `user_visible` gates only the successful report, not progress, tool activity, usage, retries, or clarification questions.
 7. **Interactive Post-Review Chat (`session/prompt`)**:
-   - Cassandra transitions into its post-review conversational phase (`RunChatFlight`), retaining full review conversation history and tools. The ACP client can send any number of `session/prompt` turns to ask follow-up questions, challenge findings, or request deeper inspection, and can cancel in-flight turns via `session/cancel`.
+   - Cassandra transitions into its post-review conversational phase (`RunChatFlight`), retaining full review conversation history and tools. The ACP client can send any number of `session/prompt` turns to ask follow-up questions, challenge findings, or request deeper inspection.
+8. **Cancellation (`session/cancel`)**:
+   - Cancellation stops the active initial review and all pipeline subagents, including pending clarification questions, or the active post-review chat turn. It is not limited to post-review chat or reviews started by an initial prompt.
 
 ### Enabling ACP Mode
 
@@ -56,11 +58,12 @@ cassandra \
 - **CLI-Only Flags**: `--acp` and `--wait-for-message` can only be passed on the command line. Setting `acp = true`, `wait-for-message = true`, or `render = "acp"` inside `cassandra.toml` is rejected.
 - **Implied Settings**: Passing `--acp` automatically sets `--render=acp` and `--interactive-post-review=true`.
   - Combining `--acp` with a conflicting `--render` mode (e.g., `--render=tui` or `--render=markdown`) or `--interactive-post-review=false` returns a validation error.
-- **Deferred Review Start & Initial User Focus (`--wait-for-message` and Pre-Review Focus)**:
-  - **With `--wait-for-message`**: Cassandra completes the `initialize` and `session/new` handshake and gathers initial context, then waits for the first `session/prompt` user message before starting the pre-review summary and initial code review.
-  - **Without `--wait-for-message` (when `--pre-review-prompt` is configured)**: Cassandra automatically runs and streams the `# Pre-Review Summary` after `session/new` along with *"Is there anything you want me to focus on in this review?"*, and then waits for the user's first `session/prompt` message before starting the main code review.
+- **Review Pipeline Configuration**: Use `--review-pipeline-file` (or `review-pipeline-file` in `cassandra.toml`) to select a TOML pipeline. See [Review Pipeline](README.md#review-pipeline) for the schema, LLM overrides, and migration instructions. Old pre-review flags and configuration are rejected.
+- **Deferred Review Start (`--wait-for-message`)**:
+  - **With `--wait-for-message`**: Cassandra completes the `initialize` and `session/new` handshake and gathers initial context, then waits for the first `session/prompt` user message before starting the review pipeline and initial code review.
+  - **Without `--wait-for-message`**: Cassandra automatically runs the pipeline after `session/new`, streams reports selected by `user_visible` (and any optional failures), then starts the main code review without an implicit focus-message pause. Use `--wait-for-message` to supply initial instructions to both the subagents and main reviewer. A required subagent failure cancels the other subagents and aborts the review.
   - In both flows, if the user's first message contains non-whitespace text, it is appended to the review request inside `<extra_initial_user_context_or_guidelines>...</extra_initial_user_context_or_guidelines>`, and that first prompt turn completes once the review is emitted. Subsequent `session/prompt` turns are handled as interactive post-review chat turns.
-- **Developer Clarification via ACP Elicitation (`ask_developer`)**: When `--allow-ask-developer` is enabled, Cassandra supports the `ask_developer` tool in ACP mode using the ACP elicitation protocol (`create_elicitation`). If the connected ACP client advertises form elicitation capabilities (`clientCapabilities.elicitation.form`), clarification questions with structured candidate options and free-form input are sent directly as interactive elicitation forms. If the client does not support elicitation forms or declines, the reviewer gracefully falls back and continues with documented assumptions.
+- **Developer Clarification via ACP Elicitation (`ask_developer`)**: When `--allow-ask-developer` is enabled, Cassandra supports the `ask_developer` tool in ACP mode using the ACP elicitation protocol (`create_elicitation`). If the connected ACP client advertises form elicitation capabilities (`clientCapabilities.elicitation.form`), clarification questions with structured candidate options and free-form input are sent directly as interactive elicitation forms. Questions from concurrent subagents are serialized so only one is presented at a time and are attributed to the asking subagent. This does not depend on `user_visible`. If the client does not support elicitation forms or declines, the reviewer gracefully falls back and continues with documented assumptions.
 - **Strict `stdout` / `stderr` Separation**: In ACP mode, `stdout` is reserved strictly for newline-delimited JSON-RPC 2.0 ACP frames. All non-ACP diagnostics and warnings are routed to `stderr`. Still-configured side-effect flags (`--review-output-file`, `--output-json`, `--metrics-json`) continue to write directly to their target files on disk.
 
 ---
@@ -103,13 +106,16 @@ flowchart LR
    - Any `core.Reporter` calls invoked while Cassandra boots wait on `sessionReady` before emitting `session/update` notifications.
    - When the client sends `session/new`, `NewSession` advertises available session modes (`review`, `chat`) and arms `sessionGateWriter` so `sessionReady` is closed immediately *after* the `NewSessionResponse` JSON-RPC frame is flushed to `stdout`. This guarantees deterministic wire ordering where `session/update` notifications never precede the `session/new` response.
 2. **Initial Review Phase**:
-   - `Reviewer.Run` executes the pre-review and main review ReAct loops (`Agent.RunReview`).
+   - `Reviewer.Run` executes the configured review pipeline before the main review ReAct loop (`Agent.RunReview`). Pipeline subagents are flat and concurrent (default `max_concurrency = 4`), receive the same request and read/context tool environment, and keep isolated histories—not every tool available to the main reviewer is exposed.
+   - All normal built-in tools are allowed except privileged T3 tools (including `link_pull_request`, `list_thread_pull_requests`, `orchestrator_capabilities`, and `t3_thread_launch`), Omnigent tools, `update_review_verdict`, and `post_pr_comment`. MCP tools default to disabled per subagent; `allow_mcps = true` on an individual `[[subagents]]` entry opts that subagent into configured MCP tools without enabling excluded built-ins.
+   - Each subagent's `required`, `user_visible`, and `reviewer_input` booleans default to `false`. `user_visible` controls only its successful report, not progress, tool activity, usage, retries, or clarification questions. Visible reports stream in completion order; reviewer inputs are assembled in pipeline declaration order, including optional-failure reports. Optional failures, including their errors, reach both the user and reviewer regardless of those output flags. Required failures cancel the remaining subagents and abort the review. `session/cancel` cancels the initial review and all subagents, whether the review started automatically or through `--wait-for-message`.
+   - `prompt_file` paths are relative to the pipeline file. An optional `[subagents.llm]` table overrides `model`, `provider`, `provider_api_key`, `provider_url`, `max_tokens`, and `provider_options` independently, inheriting omitted fields from the main LLM.
    - Progress callbacks (`ReportConfig`, `ReportFetchingDiff`, `ReportIteration`, `ReportToolCalls`, `ReportToolStatus`, `ReportStageReview`, `ReportReview`, `ReportUsage`) translate directly into ACP `session/update` notifications:
      - `session_info_update`: sets title and metadata (`provider`, `model`, `base`, `head`, `changedFiles`)
-     - `plan`: updates review stages (`in_progress` $\to$ `completed`)
-     - `agent_thought_chunk` & `tool_call`: real-time tool execution & thoughts
-     - `usage_update`: context token consumption
-     - `agent_message_chunk`: final review report
+     - `plan`: updates review stages (`in_progress` $\to$ `completed`), using one aggregate pipeline entry rather than individual subagent entries
+     - `agent_thought_chunk`, `tool_call` & `tool_call_update`: real-time thoughts and tool execution, attributed to their subagent stage with stage-scoped tool-call identities
+     - `usage_update`: context token consumption, with stage attribution for pipeline usage; retry diagnostics retain the same attribution
+     - `agent_message_chunk`: selected successful subagent reports, optional-failure reports, and the final review report
 3. **Post-Review Chat Phase (`ServePostReview`)**:
    - `Reviewer.RunInteractivePostReview` appends the post-review system instruction to `Agent.history` and calls `acpReporter.ServePostReview`.
    - `ServePostReview` transitions the session mode to `chat` (`current_mode_update`), registers the turn callback (`Reviewer.executePostReviewTurn`), and closes `reviewReady`.

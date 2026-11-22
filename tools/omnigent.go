@@ -515,7 +515,7 @@ func registerOmnigentTools(r *Registry) {
 			return "", err
 		}
 		return MaskCassandraInOmnigentAgents(raw), nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 
 	launchDef := llm.ToolDef{
 		Name:        "omnigent_session_launch",
@@ -643,7 +643,7 @@ func registerOmnigentTools(r *Registry) {
 		}
 
 		return rawCreateResp, nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 }
 
 // GetCurrentSessionTitle returns the title of the current Omnigent session if running in Omnigent.

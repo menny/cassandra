@@ -279,5 +279,5 @@ func registerPRCommentTool(r *Registry, rootDir, metadataFile string) {
 		}
 		resJSON, _ := json.Marshal(result)
 		return string(resJSON), nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 }

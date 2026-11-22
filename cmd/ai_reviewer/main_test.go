@@ -234,6 +234,35 @@ func TestFormatMetadata(t *testing.T) {
 	require.Contains(t, formatted, "  > comment 2")
 }
 
+func TestRun_ReviewPipelineConfiguration(t *testing.T) {
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, os.Chdir(cwd)) })
+	for _, legacy := range []string{"pre-review-prompt", "pre-review-model"} {
+		t.Run("RejectFlag/"+legacy, func(t *testing.T) {
+			err := run(context.Background(), []string{"--" + legacy, "old-value"}, log.New(io.Discard, "", 0))
+			require.ErrorContains(t, err, "unknown flag")
+		})
+		t.Run("RejectConfig/"+legacy, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "cassandra.toml")
+			require.NoError(t, os.WriteFile(path, []byte(legacy+` = "old-value"`), 0o600))
+			err := run(context.Background(), []string{"--cwd", dir, "--config", path}, log.New(io.Discard, "", 0))
+			require.ErrorContains(t, err, "review-pipeline-file")
+		})
+	}
+	t.Run("AcceptFlagAndValidateBeforeModel", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "pipeline.toml")
+		require.NoError(t, os.WriteFile(path, []byte("max_concurrency = 0\n"), 0o600))
+		err := run(context.Background(), []string{
+			"--cwd", dir, "--review-pipeline-file", path,
+			"--provider", "not-a-provider", "--model", "main", "--provider-api-key", "test",
+		}, log.New(io.Discard, "", 0))
+		require.ErrorContains(t, err, "max_concurrency")
+	})
+}
+
 func TestRun_ConfigDiscovery(t *testing.T) {
 	ctx := context.Background()
 	stderr := log.New(os.Stderr, "", 0)

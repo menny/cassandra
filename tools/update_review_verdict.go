@@ -110,5 +110,5 @@ func registerUpdateReviewVerdict(r *Registry) {
 		}
 
 		return fmt.Sprintf("Successfully updated review verdict to %q (%s). Rationale: %s", normalized, emoji, args.Rationale), nil
-	})
+	}, ToolPolicy{AllowSubagents: false})
 }

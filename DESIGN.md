@@ -15,7 +15,8 @@ The system is designed as a CLI-driven, autonomous AI worker. It acts essentiall
 - **Approval Evaluation Guidelines**: Defines the criteria for `APPROVE`, `REQUEST_CHANGES`, and `COMMENT` verdicts.
   - Defaults to an internal "velocity-first" prompt.
   - Can be overridden via `--approval-evaluation-prompt-file`.
-- Coordinates the flow from git diff extraction to system prompt building, and finally running the review agent.
+- **Review Pipeline**: `--review-pipeline-file` (TOML key `review-pipeline-file`, Action input `review_pipeline_file`) selects a flat set of concurrent subagents to run before the main review. See [Review Pipeline](#review-pipeline).
+- Coordinates the flow from git diff extraction to system prompt building, the optional review pipeline, and finally running the review agent.
 
 ### 2. GitHub Utility (`cmd/github/main.go`)
 - A standalone utility used by the GitHub Action to manage the lifecycle of a review on a PR.
@@ -80,6 +81,37 @@ the companion implementation rules.
   helper; any new cross-cutting `llm.Model` wrapper (caching, telemetry,
   rate-limiting) should follow the same composition rather than
   re-implementing the loop.
+
+## Review Pipeline
+
+A separate TOML file defines the pipeline. It has a `max_concurrency` setting (default `4`) and an ordered array of `[[subagents]]` entries:
+
+```toml
+max_concurrency = 4
+
+[[subagents]]
+title = "PR summary"
+description = "Summarize the pull request changes"
+prompt_file = "pre-review-summary.md"
+required = true
+user_visible = true
+reviewer_input = true
+# MCP tools are disabled by default; opt in for this subagent only.
+# allow_mcps = true
+
+# Optional per-field overrides; other fields inherit the main LLM configuration.
+# [subagents.llm]
+# model = "YOUR_MODEL_ID"
+```
+
+- **Flat concurrency**: Subagents receive the same review request and read/context tool environment but use isolated conversation histories; they do not receive every tool available to the main reviewer. They run concurrently up to `max_concurrency`, without dependencies or result chaining; the main reviewer starts only after the pipeline succeeds.
+- **Tool boundary**: All normal built-in tools are allowed except privileged T3 tools (including `link_pull_request`, `list_thread_pull_requests`, `orchestrator_capabilities`, and `t3_thread_launch`), Omnigent tools, `update_review_verdict`, and `post_pr_comment`. MCP tools default to disabled independently for each subagent. Setting `allow_mcps = true` on that subagent enables configured MCP tools, not the excluded built-ins.
+- **Paths and LLM inheritance**: Resolve `prompt_file` relative to the pipeline file, not the review working directory. `[subagents.llm]` can override `model`, `provider`, `provider_api_key`, `provider_url`, `max_tokens`, and `provider_options`; omitted fields inherit the corresponding main LLM settings field-by-field. A model-only override preserves all other main settings.
+- **Explicit output policy**: `required`, `user_visible`, and `reviewer_input` all default to `false`. `user_visible` gates only a successful report, not progress, tool activity, usage, retries, or clarification questions. User-visible reports are emitted in completion order. Reviewer inputs are assembled in declaration order for deterministic review context, regardless of execution timing. These ordering rules include optional-failure reports, which bypass the output flags.
+- **ACP reporting**: The plan contains one aggregate pipeline entry, not a checklist entry per subagent. Progress and tool calls are attributed to the originating stage, with stage-scoped tool-call identities to avoid collisions between concurrent subagents. Usage and retry updates retain stage attribution. Clarification questions are serialized and attributed to their subagent. `session/cancel` cancels the active initial review and all pipeline subagents as well as in-flight post-review turns.
+- **Failure policy**: A required subagent failure cancels other subagents and aborts the review. An optional failure allows the review to continue, but must be reported to both the user and reviewer, including the error, even when `user_visible` and `reviewer_input` are false.
+- **Action path preservation**: The Action resolves the pipeline file as a whole (workspace/working-directory first, then action-directory fallback, with absolute paths passed through). It passes that original path rather than copying TOML contents into a temporary file, preserving the base directory for relative prompts.
+- **Migration boundary**: Old pre-review flags, TOML keys, and Action inputs are removed; old configuration is rejected rather than accepted as aliases. See [migration instructions](README.md#migrating-old-configuration) and the [example pipeline](examples/review-pipeline.toml).
 
 ## Technical Decisions
 
