@@ -322,12 +322,14 @@ func (m *tuiModel) finishStage(stage string) {
 }
 
 // findIteration resolves stage-scoped callbacks without moving other stages' state.
-// Empty stage retains the legacy stage-agnostic behavior; zero iter selects
-// the most recent iteration for a stage. A nonzero iter must always match.
+// Empty stage matches any non-subagent iteration (unstaged main-agent events
+// must not land on a nested dynamic subagent); zero iter selects the most
+// recent iteration for a stage. A nonzero iter must always match.
 func (m *tuiModel) findIteration(stage string, iter int) *iterationState {
 	for i := len(m.iterations) - 1; i >= 0; i-- {
 		current := m.iterations[i]
-		if (stage == "" || current.stage == stage) && (iter == 0 || current.iter == iter) {
+		stageMatch := current.stage == stage || (stage == "" && !strings.HasPrefix(current.stage, "Subagent: "))
+		if stageMatch && (iter == 0 || current.iter == iter) {
 			return current
 		}
 	}

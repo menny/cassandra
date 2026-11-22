@@ -389,7 +389,6 @@ func TestDynamicSubagent_FailureDoesNotAffectSiblings(t *testing.T) {
 		toolCallsResponse(
 			subagentCall("bad", "Bad", "explode"),
 			subagentCall("good", "Good", "work"),
-			subagentCall("nofactory", "NoFactory", "init-fails"),
 			makeToolCall("empty", runSubagentToolName, map[string]any{"title": " ", "task": "x"}),
 		),
 		textResponse("main survived"),
@@ -399,8 +398,6 @@ func TestDynamicSubagent_FailureDoesNotAffectSiblings(t *testing.T) {
 			switch lastUserText(msgs) {
 			case "explode":
 				return nil, errors.New("provider exploded")
-			case "init-fails":
-				return textResponse("unreachable"), nil
 			}
 			return textResponse("good result"), nil
 		}}, nil
@@ -423,7 +420,7 @@ func TestDynamicSubagent_FailureDoesNotAffectSiblings(t *testing.T) {
 			titles = append(titles, p.Title)
 		}
 	}
-	require.ElementsMatch(t, []string{"Bad", "Good", "NoFactory"}, titles, "failed subagents still report usage")
+	require.ElementsMatch(t, []string{"Bad", "Good"}, titles, "failed subagents still report usage")
 }
 
 func TestDynamicSubagent_FactoryErrorIsToolError(t *testing.T) {

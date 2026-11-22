@@ -291,3 +291,13 @@ func TestTUIModel_SubagentPresentation(t *testing.T) {
 	require.NotNil(t, m.findIteration("Subagent: Trace auth #2", 1))
 	require.Equal(t, 1, m.findIteration("Subagent: Trace auth #2", 0).iter)
 }
+
+func TestTUIModel_UnstagedLookupSkipsNestedSubagents(t *testing.T) {
+	m := &tuiModel{}
+	m.Update(iterationMsg{iter: 1})
+	m.Update(iterationMsg{iter: 1, stage: "Subagent: Trace #1"})
+	main := m.findIteration("", 0)
+	require.NotNil(t, main)
+	require.Empty(t, main.stage, "unstaged events must resolve to the main agent iteration")
+	require.Equal(t, "Subagent: Trace #1", m.findIteration("Subagent: Trace #1", 0).stage)
+}

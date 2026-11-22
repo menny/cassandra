@@ -502,6 +502,11 @@ func (r *acpReporter) advancePlan(updates map[string]acp.PlanEntryStatus) {
 	r.mu.Lock()
 	changed := false
 	for step, status := range updates {
+		// Dynamic subagents report stage iterations from inside the main review
+		// and post-review chat; a finished step must never go back in progress.
+		if r.inPostReview || (r.planStatuses[step] == acp.PlanEntryStatusCompleted && status != acp.PlanEntryStatusCompleted) {
+			continue
+		}
 		if r.planStatuses[step] != status {
 			r.planStatuses[step] = status
 			changed = true

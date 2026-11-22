@@ -2118,3 +2118,34 @@ func TestACPReporter_RunSubagentCardAndIsolatedStages(t *testing.T) {
 	subagents := []any{usages[0].Meta["subagent"], usages[1].Meta["subagent"]}
 	require.ElementsMatch(t, []any{"Trace auth #1", "Trace auth #2"}, subagents)
 }
+
+func TestACPReporter_SubagentStageDoesNotRegressPlan(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter, conn, _, _, cleanup := setupACPPair(t, ctx, cancel)
+	defer cleanup()
+	_, err := conn.NewSession(ctx, acp.NewSessionRequest{Cwd: t.TempDir(), McpServers: []acp.McpServer{}})
+	require.NoError(t, err)
+	cfg := config.NewDefaultConfig()
+	cfg.ReviewPipelineFile = "pipeline.toml"
+	reporter.ReportConfig(cfg, t.TempDir())
+	rep := reporter.(*acpReporter)
+
+	reporter.ReportStageIteration("AI Code Review", 1)
+	reporter.ReportStageIteration("Subagent: Trace #1", 1)
+	rep.mu.Lock()
+	pipeline := rep.planStatuses[planStepPipeline]
+	review := rep.planStatuses[planStepReview]
+	rep.mu.Unlock()
+	require.Equal(t, acp.PlanEntryStatusCompleted, pipeline)
+	require.Equal(t, acp.PlanEntryStatusInProgress, review)
+
+	rep.mu.Lock()
+	rep.inPostReview = true
+	rep.mu.Unlock()
+	reporter.ReportStageIteration("Subagent: Trace #2", 1)
+	rep.mu.Lock()
+	pipeline = rep.planStatuses[planStepPipeline]
+	rep.mu.Unlock()
+	require.Equal(t, acp.PlanEntryStatusCompleted, pipeline)
+}
