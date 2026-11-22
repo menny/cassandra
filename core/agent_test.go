@@ -43,21 +43,7 @@ func (m *mockLLM) GenerateContent(ctx context.Context, msgs []llm.Message, _ []l
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	snapshot := make([]llm.Message, len(msgs))
-	for i, msg := range msgs {
-		snapshot[i] = msg
-		if msg.ToolCalls != nil {
-			snapshot[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
-			copy(snapshot[i].ToolCalls, msg.ToolCalls)
-		}
-		if msg.ToolResults != nil {
-			snapshot[i].ToolResults = make([]llm.ToolResult, len(msg.ToolResults))
-			copy(snapshot[i].ToolResults, msg.ToolResults)
-		}
-		if msg.ProviderMetadata != nil {
-			snapshot[i].ProviderMetadata = maps.Clone(msg.ProviderMetadata)
-		}
-	}
+	snapshot := cloneMessages(msgs)
 	m.calls = append(m.calls, snapshot)
 
 	idx := m.callIdx
@@ -1726,4 +1712,25 @@ func TestAgent_SessionStore(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, savedAfterErr, 2)
 	})
+}
+
+// cloneMessages deep-copies messages and their nested slices/maps so test
+// doubles can record history without aliasing later mutations.
+func cloneMessages(msgs []llm.Message) []llm.Message {
+	snapshot := make([]llm.Message, len(msgs))
+	for i, msg := range msgs {
+		snapshot[i] = msg
+		if msg.ToolCalls != nil {
+			snapshot[i].ToolCalls = make([]llm.ToolCall, len(msg.ToolCalls))
+			copy(snapshot[i].ToolCalls, msg.ToolCalls)
+		}
+		if msg.ToolResults != nil {
+			snapshot[i].ToolResults = make([]llm.ToolResult, len(msg.ToolResults))
+			copy(snapshot[i].ToolResults, msg.ToolResults)
+		}
+		if msg.ProviderMetadata != nil {
+			snapshot[i].ProviderMetadata = maps.Clone(msg.ProviderMetadata)
+		}
+	}
+	return snapshot
 }

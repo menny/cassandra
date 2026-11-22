@@ -295,6 +295,14 @@ func (r *Reviewer) SetHistory(history []llm.Message) {
 	if r.Agent != nil {
 		r.Agent.SetHistory(history)
 	}
+	// A resumed session skips Run, so recover the Zone 3 prompt that
+	// RunReview stored as the second leading system message; dynamic
+	// subagents otherwise lose AGENTS.md/REVIEWERS.md context.
+	if len(history) >= 2 && history[1].Role == llm.RoleSystem && history[1].Text != postReviewSystemInstruction {
+		if dynamic, _ := r.dynamicSubagentContext(); dynamic == "" {
+			r.setDynamicSubagentContext(history[1].Text, 0)
+		}
+	}
 }
 
 func (r *Reviewer) waitAndAppendInitialUserContext(ctx context.Context, requestText string) (string, error) {

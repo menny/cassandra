@@ -35,7 +35,7 @@ func (m *funcModel) GenerateContent(ctx context.Context, msgs []llm.Message, def
 	}
 	m.mu.Lock()
 	call := len(m.calls)
-	m.calls = append(m.calls, slices.Clone(msgs))
+	m.calls = append(m.calls, cloneMessages(msgs))
 	m.defs = append(m.defs, slices.Clone(defs))
 	m.mu.Unlock()
 	return m.fn(ctx, call, msgs)
@@ -577,4 +577,33 @@ func TestParseRunSubagentAndFormatting(t *testing.T) {
 	require.Equal(t, "line…", compactSubagentTask(task, 4))
 	require.Equal(t, "Subagent: X", subagentToolTitle("X"))
 	require.Equal(t, "Subagent", subagentToolTitle(""))
+}
+
+func TestDynamicSubagent_ResumedSessionRecoversGuidelines(t *testing.T) {
+	r := &Reviewer{}
+	r.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Text: "stable"},
+		{Role: llm.RoleSystem, Text: "ZONE3 repo guidelines"},
+		{Role: llm.RoleUser, Text: "request"},
+	})
+	dynamic, _ := r.dynamicSubagentContext()
+	require.Equal(t, "ZONE3 repo guidelines", dynamic)
+
+	// History without a dynamic prompt must not adopt the user turn or the
+	// post-review instruction, and must not overwrite an existing prompt.
+	r.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Text: "stable"},
+		{Role: llm.RoleSystem, Text: postReviewSystemInstruction},
+	})
+	r.SetHistory([]llm.Message{{Role: llm.RoleSystem, Text: "stable"}, {Role: llm.RoleUser, Text: "q"}})
+	dynamic, _ = r.dynamicSubagentContext()
+	require.Equal(t, "ZONE3 repo guidelines", dynamic)
+
+	fresh := &Reviewer{}
+	fresh.SetHistory([]llm.Message{
+		{Role: llm.RoleSystem, Text: "stable"},
+		{Role: llm.RoleSystem, Text: postReviewSystemInstruction},
+	})
+	dynamic, _ = fresh.dynamicSubagentContext()
+	require.Empty(t, dynamic)
 }
