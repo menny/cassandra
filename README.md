@@ -9,7 +9,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 ## Features
 
 - **Local Git Diff Review**: Review your local uncommitted changes against a base branch before pushing.
-- **Provider Agnostic**: Natively supports Anthropic and Google models through a unified abstraction.
+- **Provider Agnostic**: Natively supports Google Gemini, Anthropic Claude (direct API and Amazon Bedrock), and OpenAI / OpenAI-compatible models through a unified abstraction.
 - **Agentic Context Gathering**: The LLM agent operates in a ReAct loop and has access to repository tools (like reading files, glob matching, and pattern searching with `grep`) to autonomously gather surrounding context about your codebase before finalizing feedback.
 - **Visual Status Indicators**: Automatically adds an "eyes" reaction to Pull Requests while the review is in progress, providing immediate feedback.
 - **Inline PR Reviews**: Supports formal GitHub PR Reviews with line-level feedback, including automatic dismissal of stale reviews and deduplication of comments.
@@ -20,7 +20,7 @@ An autonomous code review tool built in Go. This tool provides structured, actio
 
 - Go 1.24.4+
 - Bazel 8.6.0 (if building with `bzlmod`)
-- A valid API key for your chosen LLM provider (Google Gemini or Anthropic Claude).
+- Valid credentials for your chosen LLM provider (Google Gemini, Anthropic Claude, OpenAI, or AWS credentials for Amazon Bedrock).
 
 ## Installation
 
@@ -45,11 +45,16 @@ To review changes between a base and a head commit/branch:
   --provider-api-key "YOUR_API_KEY"
 ```
 
+### Interactive Modes (TUI & ACP)
+
+- **Terminal UI (`--render=tui`)**: Runs an interactive terminal progress view, and can be paired with `--interactive-post-review` and `--allow-ask-developer` for follow-up Q&A and developer clarification prompts.
+- **Agent Client Protocol (`--acp`)**: Runs Cassandra as an ACP agent over `stdio` for IDE and orchestrator integrations (with optional `--wait-for-message`). See [ACP_SUPPORT.md](ACP_SUPPORT.md) for protocol details and flag rules.
+
 ## CLI Options
 
 The following settings can be provided via CLI flags, environment variables, or a `cassandra.toml` file.
 
-> **Note**: `provider`, `model`, and `provider-api-key` are **mandatory** and must be provided via one of these methods.
+> **Note**: `provider` and `model` are **mandatory**, and `provider-api-key` is mandatory for all providers except `anthropic-bedrock` (which uses AWS credentials).
 
 | Flag | Description | Default |
 |---|---|---|
@@ -60,20 +65,32 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `--model` | LLM provider's specific model ID | |
 | `--provider-api-key` | API key for the selected provider (not used by `anthropic-bedrock`) | |
 | `--provider-url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | |
+| `--provider-options-file` | Path to a JSON file containing provider-specific options | |
 | `--config` | Path to a configuration file (toml) | `cassandra.toml` |
 | `--main-guidelines` | Path to a file or a named prompt from the library (`general`, `asana-do-try-consider`, `google`, `conventional-comments`, `palantir`, `minimalist`, `security-first`) | `general` |
 | `--supplemental-guidelines` | Additive paths or named library prompts for supplemental guidelines (can be used multiple times) | |
 | `--approval-evaluation-prompt-file` | Path to a file containing custom approval evaluation guidelines | |
 | `--review-pipeline-file` | Path to a TOML review pipeline defining subagents to run before the main review | |
+| `--render` | Output render format: `raw`, `markdown`, or `tui` | `raw` |
+| `--allow-ask-developer` | Allow the AI reviewer to ask the developer questions (requires `--render` `markdown`, `tui`, or `--acp`) | `false` |
+| `--interactive-post-review` | Start an interactive post-review chat session after the review pass (requires `--render` `markdown`, `tui`, or `--acp`) | `false` |
+| `--acp` | Enable Agent Client Protocol (ACP) mode over stdio (CLI-only; implies `--render=acp` and `--interactive-post-review`) | `false` |
+| `--wait-for-message` | Wait for an initial ACP user message before starting the review (CLI-only; requires `--acp`) | `false` |
 | `--review-output-file` | Path to a file where the final review will be written | |
 | `--output-json` | Path to a file where the structured JSON review will be written | |
 | `--metrics-json` | Path to a file where the session metrics (tokens, tool calls, iterations) will be written | |
+| `--metadata-json` | Path to a JSON file containing PR metadata | |
+| `--diff-file` | Path to a file containing the git diff (must be used with `--files-list-file`) | |
+| `--files-list-file` | Path to a file containing the list of changed files, one per line | |
+| `--commits-file` | Path to a file containing commit messages | |
 | `--mcp-config` | Path to an `mcp.json` file configuring custom tools for the reviewer | |
 | `--allow-url-fetch` | Enable the mcp-server-fetch tool (requires `uvx` to be installed) | `false` |
 | `--ignored-lock-files` | Comma-separated list of lock files to ignore in diffs (overrides default) | (many) |
 | `--extraction-model` | Optional model override for the structured JSON extraction pass | |
 | `--max-tokens` | Max tokens for the LLM response | `8192` |
 | `--max-diff-bytes` | Maximum diff size in bytes before omitting full diff from prompt (0 to disable) | `10240` |
+| `--wishlist-dir` | Path to a directory where AI-Reviewer feedback/wishlist is stored | |
+| `--cassandra-config-folder` | Path to Cassandra config folder for session persistence (`""` disables persistence; alias `--cassandraConfigFolder`) | `~/.cassandra` |
 
 ## GitHub Action Inputs
 
@@ -83,6 +100,7 @@ The following settings can be provided via CLI flags, environment variables, or 
 | `model_id` | LLM provider's specific model ID | | No |
 | `provider_api_key` | API key for the selected provider | | **Yes** |
 | `provider_url` | Optional API endpoint URL override (useful for OpenAI-compatible providers like Ollama) | | No |
+| `provider_options_file` | Path to a JSON file containing provider-specific options | | No |
 | `config_file` | Path to a configuration file (toml) | `cassandra.toml` | No |
 | `base` | Base commit/branch for diff | `main` | No |
 | `head` | Head commit/branch for diff | `HEAD` | No |
@@ -138,29 +156,55 @@ After the review completes, the action exposes the following outputs that downst
 
 ### Session Metrics JSON
 
-When using `--metrics-json` or consuming the `metrics_file` action output, the JSON contains detailed usage statistics:
+When using `--metrics-json` or consuming the `metrics_file` action output, the JSON reports per-phase usage statistics (`"subagent"` entries in pipeline declaration order, `"review"` for the main review, and `"review_discussion"` for interactive post-review turns):
 
 ```json
 {
-  "metrics": {
-    "tokens": {
-      "input": 1240,       // "Fresh" input tokens
-      "output": 850,      // Generated response tokens
-      "thinking": 128,    // Model reasoning tokens (e.g. Gemini Thinking, OpenAI o1)
-      "cached": 4096,     // Tokens served from cache (Input only)
-      "total_input": 5336,
-      "total_output": 978
+  "metrics": [
+    {
+      "phase": "subagent",
+      "title": "PR summary",
+      "metrics": {
+        "tokens": {
+          "input": 620,
+          "output": 210,
+          "thinking": 0,
+          "cached": 1024,
+          "total_input": 1644,
+          "total_output": 210
+        },
+        "iterations": 2,
+        "tool_calls": {
+          "total": 3,
+          "by_tool": {
+            "read_file": 3
+          }
+        }
+      }
     },
-    "iterations": 5,      // Number of agent loop turns
-    "tool_calls": {
-      "total": 12,
-      "by_tool": {
-        "read_file": 8,
-        "glob_files": 3,
-        "grep_search": 1
+    {
+      "phase": "review",
+      "metrics": {
+        "tokens": {
+          "input": 1240,
+          "output": 850,
+          "thinking": 128,
+          "cached": 4096,
+          "total_input": 5336,
+          "total_output": 978
+        },
+        "iterations": 5,
+        "tool_calls": {
+          "total": 12,
+          "by_tool": {
+            "read_file": 8,
+            "glob_files": 3,
+            "grep_search": 1
+          }
+        }
       }
     }
-  }
+  ]
 }
 ```
 
@@ -177,6 +221,8 @@ supplemental-guidelines = [
   ".cassandra/haiku-praise.md"
 ]
 ```
+
+See [`examples/cassandra.toml`](examples/cassandra.toml) for additional options such as `provider-options-file`, `review-pipeline-file`, and the `[t3]` / `[omnigent]` orchestration tables.
 
 ## Review Pipeline
 
@@ -462,5 +508,5 @@ The project features a lean, custom native Go ReAct loop. Provider-specific inte
 
 ## Token Efficiency
 
-Cassandra structures every system prompt with static content first and dynamic, per-PR content last. This "stable-prefix" ordering means the large, unchanging portion of the prompt — reviewer instructions, the chosen review guideline, and approval rules — is byte-for-byte identical across all reviews of the same repository. Both Anthropic (via `cache_control` breakpoints) and Google Gemini 2.5 (via implicit prefix caching) can reuse cached intermediate states for this prefix, reducing input token costs by up to 75–90% and cutting the time-to-first-token on repeated reviews of the same repository.
+Cassandra structures every system prompt with static content first and dynamic, per-PR content last. This "stable-prefix" ordering means the large, unchanging portion of the prompt — reviewer instructions, the chosen review guideline, and approval rules — is byte-for-byte identical across all reviews of the same repository. Both Anthropic (via `cache_control` breakpoints) and Google Gemini (via implicit prefix caching) can reuse cached intermediate states for this prefix, reducing input token costs by up to 75–90% and cutting the time-to-first-token on repeated reviews of the same repository.
 
