@@ -42,3 +42,7 @@ codecov.SHA256SUM.sig
 
 # secret Hermetiq credentials helper
 tools/hermetiq-credential-helper.*
+
+# Python
+__pycache__/
+*.py[cod]
